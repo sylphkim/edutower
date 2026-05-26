@@ -1,12 +1,15 @@
 # AI Learning Assistant Backend
 
-AI 学习助手后端项目第一阶段：提供 Node.js + TypeScript + Express 的基础后端结构，并完成通用大模型 API 接入底座。
+AI 学习助手后端第一阶段项目：提供 Node.js + TypeScript + Express 的基础后端结构，并完成通用 LLM Provider 接入层。
+
+当前大模型接入层支持 OpenAI-compatible API 服务。虽然项目使用 `openai` 这个 npm 包，但它只是 SDK 客户端；通过 `LLM_BASE_URL` 可以调用 OpenAI、DeepSeek、OpenRouter、硅基流动等兼容 Chat Completions API 的服务。
 
 ## 当前阶段范围
 
 - 基础 Express 服务
-- 统一环境变量配置
+- 通用 LLM Provider 环境变量配置
 - 通用 LLM 调用服务
+- Chat Completions API 调用封装
 - 健康检查接口
 - 简单 LLM 连通性测试接口
 - 通用文本生成接口
@@ -30,26 +33,45 @@ npm install
 cp .env.example .env
 ```
 
-然后填写：
+不要提交 `.env`，只提交 `.env.example`。
+
+### DeepSeek 示例
 
 ```env
 PORT=3000
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-4.1-mini
-OPENAI_BASE_URL=
+
+LLM_PROVIDER=deepseek
+LLM_API_KEY=你的 DeepSeek API Key
+LLM_MODEL=deepseek-v4-pro
+LLM_BASE_URL=https://api.deepseek.com
 LLM_TIMEOUT_MS=30000
 LLM_MAX_OUTPUT_TOKENS=1000
 ```
 
-说明：
+### OpenAI 官方服务示例
 
-- `OPENAI_API_KEY` 必须从环境变量读取，不能写死在代码里。
-- `OPENAI_MODEL` 不填写时默认使用 `gpt-4.1-mini`。
-- `OPENAI_BASE_URL` 可选，用于兼容 OpenAI-compatible 服务。
-- `LLM_TIMEOUT_MS` 默认 `30000`。
-- `LLM_MAX_OUTPUT_TOKENS` 默认 `1000`。
+```env
+PORT=3000
 
-未配置 `OPENAI_API_KEY` 时，服务可以启动，但调用 LLM 接口会返回明确错误。
+LLM_PROVIDER=openai
+LLM_API_KEY=你的 OpenAI API Key
+LLM_MODEL=你的模型名
+LLM_BASE_URL=
+LLM_TIMEOUT_MS=30000
+LLM_MAX_OUTPUT_TOKENS=1000
+```
+
+### 其他 OpenAI-compatible 服务
+
+将 `LLM_PROVIDER` 写成服务标识，将 `LLM_BASE_URL` 配置成对应服务的 OpenAI-compatible API 地址，并填写对应的 `LLM_API_KEY` 和 `LLM_MODEL`。
+
+旧配置仍可作为 fallback 使用：
+
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_BASE_URL`
+
+优先级为：`LLM_*` > `OPENAI_*` > 默认值。
 
 ## 启动开发服务器
 
@@ -102,7 +124,7 @@ curl -X POST http://localhost:3000/api/llm/chat \
 ```bash
 curl -X POST http://localhost:3000/api/llm/generate \
   -H "Content-Type: application/json" \
-  -d "{\"systemPrompt\":\"你是一个学习助手。\",\"userPrompt\":\"请用简单语言解释导数。\",\"temperature\":0.7,\"maxOutputTokens\":1000}"
+  -d "{\"systemPrompt\":\"你是一个学习助手。\",\"userPrompt\":\"请解释导数。\",\"temperature\":0.7,\"maxOutputTokens\":1000}"
 ```
 
 ## 统一响应格式
@@ -132,10 +154,16 @@ curl -X POST http://localhost:3000/api/llm/generate \
 
 - `MISSING_API_KEY`
 - `INVALID_REQUEST`
-- `LLM_REQUEST_FAILED`
+- `LLM_AUTH_FAILED`
+- `LLM_MODEL_ERROR`
+- `LLM_RATE_LIMITED`
 - `LLM_TIMEOUT`
+- `LLM_CONNECTION_ERROR`
+- `LLM_REQUEST_FAILED`
 - `INTERNAL_ERROR`
 
 ## 给后续协作者的说明
 
-当前仓库只提供 LLM 接入底座。业务同学可以在此基础上新增资料上传、RAG、知识点结构化生成、测验、错题本、学习计划、长期记忆等模块，但这些业务结构不要耦合进 `LLMService`。`LLMService` 应继续保持通用：接收 prompt 或 messages，返回模型文本和基础 usage。
+当前仓库只提供通用 LLM 调用底座。业务同学可以在此基础上新增资料上传、RAG、知识点结构化生成、测验、错题本、学习计划、长期记忆等模块，但这些业务结构不要耦合进 `LLMService`。
+
+`LLMService` 应继续保持通用：接收 prompt 或 messages，返回模型文本、provider、model 和基础 usage。不在这里实现知识点、小测验、学习计划、记忆等业务 JSON 解析或校验。

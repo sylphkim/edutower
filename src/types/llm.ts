@@ -27,6 +27,7 @@ export interface LLMUsage {
 export interface LLMResult {
   text: string;
   model: string;
+  provider: string;
   usage?: LLMUsage;
   raw?: unknown;
 }

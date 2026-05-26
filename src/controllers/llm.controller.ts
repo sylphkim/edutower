@@ -23,6 +23,7 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
     sendSuccess(res, {
       text: result.text,
       model: result.model,
+      provider: result.provider,
       usage: result.usage
     });
   } catch (error) {
@@ -53,6 +54,7 @@ export async function generate(req: Request, res: Response, next: NextFunction):
     sendSuccess(res, {
       text: result.text,
       model: result.model,
+      provider: result.provider,
       usage: result.usage
     });
   } catch (error) {

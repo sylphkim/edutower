@@ -3,8 +3,11 @@ type LogMeta = Record<string, unknown> | unknown;
 function redactSensitive(value: string): string {
   let redacted = value.replace(/sk-[A-Za-z0-9_-]{8,}/g, "sk-***REDACTED***");
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (apiKey) {
+  const apiKeys = [process.env.LLM_API_KEY, process.env.OPENAI_API_KEY].filter(
+    (key): key is string => Boolean(key)
+  );
+
+  for (const apiKey of apiKeys) {
     redacted = redacted.split(apiKey).join("***REDACTED_API_KEY***");
   }
 

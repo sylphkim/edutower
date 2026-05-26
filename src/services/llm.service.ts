@@ -1,15 +1,12 @@
 import OpenAI from "openai";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { env } from "../config/env";
 import { ChatParams, GenerateTextParams, LLMMessage, LLMResult, LLMUsage } from "../types/llm";
-import { AppError } from "../utils/errors";
+import { AppError, ErrorCode } from "../utils/errors";
 import { logger } from "../utils/logger";
 
 const DEFAULT_TEMPERATURE = 0.7;
-
-type OpenAIResponseInputMessage = {
-  role: Exclude<LLMMessage["role"], "system">;
-  content: string;
-};
+const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
 
 type RecordLike = Record<string, unknown>;
 
@@ -22,9 +19,19 @@ export class LLMService {
       throw new AppError("INVALID_REQUEST", "userPrompt is required.", 400);
     }
 
-    return this.createResponse({
-      input: userPrompt,
-      instructions: params.systemPrompt?.trim() || undefined,
+    const systemPrompt = params.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT;
+
+    return this.createChatCompletion({
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt
+        },
+        {
+          role: "user",
+          content: userPrompt
+        }
+      ],
       temperature: params.temperature,
       maxOutputTokens: params.maxOutputTokens
     });
@@ -44,42 +51,26 @@ export class LLMService {
       throw new AppError("INVALID_REQUEST", "message content cannot be empty.", 400);
     }
 
-    const systemPrompt = messages
-      .filter((message) => message.role === "system")
-      .map((message) => message.content)
-      .join("\n\n");
-    const inputMessages: OpenAIResponseInputMessage[] = messages
-      .filter((message): message is OpenAIResponseInputMessage => message.role !== "system")
-      .map((message) => ({
-        role: message.role,
-        content: message.content
-      }));
-
-    if (inputMessages.length === 0) {
-      throw new AppError("INVALID_REQUEST", "messages must include at least one user or assistant message.", 400);
-    }
-
-    return this.createResponse({
-      input: inputMessages,
-      instructions: systemPrompt || undefined,
+    return this.createChatCompletion({
+      messages,
       temperature: params.temperature,
       maxOutputTokens: params.maxOutputTokens
     });
   }
 
   private getClient(): OpenAI {
-    if (!env.openaiApiKey) {
+    if (!env.llmApiKey) {
       throw new AppError(
         "MISSING_API_KEY",
-        "OPENAI_API_KEY is not configured. Please set it before calling LLM APIs.",
+        "LLM_API_KEY is not configured. You can also set OPENAI_API_KEY for legacy compatibility.",
         503
       );
     }
 
     if (!this.client) {
       this.client = new OpenAI({
-        apiKey: env.openaiApiKey,
-        baseURL: env.openaiBaseUrl,
+        apiKey: env.llmApiKey,
+        baseURL: env.llmBaseUrl,
         timeout: env.llmTimeoutMs,
         maxRetries: 0
       });
@@ -88,20 +79,18 @@ export class LLMService {
     return this.client;
   }
 
-  private async createResponse(params: {
-    input: string | OpenAIResponseInputMessage[];
-    instructions?: string;
+  private async createChatCompletion(params: {
+    messages: LLMMessage[];
     temperature?: number;
     maxOutputTokens?: number;
   }): Promise<LLMResult> {
     try {
-      const response = await this.getClient().responses.create(
+      const response = await this.getClient().chat.completions.create(
         {
-          model: env.openaiModel,
-          input: params.input,
-          instructions: params.instructions,
+          model: env.llmModel,
+          messages: params.messages as ChatCompletionMessageParam[],
           temperature: this.normalizeTemperature(params.temperature),
-          max_output_tokens: this.normalizeMaxOutputTokens(params.maxOutputTokens)
+          max_tokens: this.normalizeMaxOutputTokens(params.maxOutputTokens)
         },
         {
           timeout: env.llmTimeoutMs
@@ -110,7 +99,8 @@ export class LLMService {
 
       return {
         text: this.extractText(response),
-        model: this.extractModel(response) ?? env.openaiModel,
+        model: this.extractModel(response) ?? env.llmModel,
+        provider: env.llmProvider,
         usage: this.extractUsage(response),
         raw: response
       };
@@ -119,60 +109,55 @@ export class LLMService {
         throw error;
       }
 
-      if (this.isTimeoutError(error)) {
-        logger.warn("LLM request timed out.", this.toSafeErrorMeta(error));
-        throw new AppError("LLM_TIMEOUT", "LLM request timed out.", 504, error);
-      }
-
+      const mappedError = this.mapProviderError(error);
       logger.error("LLM request failed.", this.toSafeErrorMeta(error));
-      throw new AppError(
-        "LLM_REQUEST_FAILED",
-        "LLM request failed. Please try again later.",
-        502,
-        error
-      );
+      throw mappedError;
     }
   }
 
   private extractText(response: unknown): string {
+    if (!isRecordLike(response) || !Array.isArray(response.choices)) {
+      return "";
+    }
+
+    return response.choices
+      .map((choice) => {
+        if (!isRecordLike(choice) || !isRecordLike(choice.message)) {
+          return "";
+        }
+
+        return typeof choice.message.content === "string" ? choice.message.content : "";
+      })
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+
+  private extractModel(response: unknown): string | undefined {
     if (!isRecordLike(response)) {
-      return "";
+      return undefined;
     }
 
-    const outputText = response.output_text;
-    if (typeof outputText === "string") {
-      return outputText;
+    return typeof response.model === "string" ? response.model : undefined;
+  }
+
+  private extractUsage(response: unknown): LLMUsage | undefined {
+    if (!isRecordLike(response) || !isRecordLike(response.usage)) {
+      return undefined;
     }
 
-    const output = response.output;
-    if (!Array.isArray(output)) {
-      return "";
-    }
+    const usage = response.usage;
+    const inputTokens = readNumber(usage.prompt_tokens) ?? readNumber(usage.input_tokens);
+    const outputTokens = readNumber(usage.completion_tokens) ?? readNumber(usage.output_tokens);
+    const totalTokens =
+      readNumber(usage.total_tokens) ??
+      (inputTokens !== undefined && outputTokens !== undefined ? inputTokens + outputTokens : undefined);
 
-    const textParts: string[] = [];
-
-    for (const item of output) {
-      if (!isRecordLike(item) || !Array.isArray(item.content)) {
-        continue;
-      }
-
-      for (const content of item.content) {
-        if (typeof content === "string") {
-          textParts.push(content);
-          continue;
-        }
-
-        if (!isRecordLike(content)) {
-          continue;
-        }
-
-        if (typeof content.text === "string") {
-          textParts.push(content.text);
-        }
-      }
-    }
-
-    return textParts.join("\n").trim();
+    return {
+      inputTokens,
+      outputTokens,
+      totalTokens
+    };
   }
 
   private normalizeTemperature(value: number | undefined): number {
@@ -199,58 +184,136 @@ export class LLMService {
     return value;
   }
 
-  private extractModel(response: unknown): string | undefined {
-    if (!isRecordLike(response)) {
-      return undefined;
+  private mapProviderError(error: unknown): AppError {
+    if (this.isTimeoutError(error)) {
+      return new AppError("LLM_TIMEOUT", "LLM request timed out.", 504, error);
     }
 
-    return typeof response.model === "string" ? response.model : undefined;
+    const status = this.readStatus(error);
+    const code = this.readCode(error);
+    const message = this.readMessage(error);
+
+    if (status === 401) {
+      return this.providerError("LLM_AUTH_FAILED", "LLM provider authentication failed.", 502, error);
+    }
+
+    if (status === 404 || this.isModelError(code, message)) {
+      return this.providerError("LLM_MODEL_ERROR", "LLM model is unavailable or not found.", 502, error);
+    }
+
+    if (status === 429) {
+      return this.providerError("LLM_RATE_LIMITED", "LLM provider rate limit was reached.", 429, error);
+    }
+
+    if (this.isConnectionError(error)) {
+      return this.providerError(
+        "LLM_CONNECTION_ERROR",
+        "Could not connect to the LLM provider.",
+        502,
+        error
+      );
+    }
+
+    return this.providerError(
+      "LLM_REQUEST_FAILED",
+      "LLM request failed. Please try again later.",
+      502,
+      error
+    );
   }
 
-  private extractUsage(response: unknown): LLMUsage | undefined {
-    if (!isRecordLike(response) || !isRecordLike(response.usage)) {
-      return undefined;
-    }
-
-    const usage = response.usage;
-    const inputTokens = readNumber(usage.input_tokens) ?? readNumber(usage.inputTokens);
-    const outputTokens = readNumber(usage.output_tokens) ?? readNumber(usage.outputTokens);
-    const totalTokens =
-      readNumber(usage.total_tokens) ??
-      readNumber(usage.totalTokens) ??
-      (inputTokens !== undefined && outputTokens !== undefined ? inputTokens + outputTokens : undefined);
-
-    return {
-      inputTokens,
-      outputTokens,
-      totalTokens
-    };
+  private providerError(
+    code: Exclude<ErrorCode, "MISSING_API_KEY" | "INVALID_REQUEST" | "INTERNAL_ERROR">,
+    message: string,
+    statusCode: number,
+    cause: unknown
+  ): AppError {
+    return new AppError(code, message, statusCode, cause);
   }
 
   private isTimeoutError(error: unknown): boolean {
-    if (!isRecordLike(error)) {
-      return false;
-    }
+    const text = this.errorText(error);
+    return /timeout|timed out|abort|ETIMEDOUT/i.test(text);
+  }
 
-    const name = typeof error.name === "string" ? error.name : "";
-    const code = typeof error.code === "string" ? error.code : "";
-    const message = typeof error.message === "string" ? error.message : "";
+  private isConnectionError(error: unknown): boolean {
+    const text = this.errorText(error);
+    return /ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNABORTED|network|fetch failed|connection/i.test(
+      text
+    );
+  }
 
-    return /timeout|timed out|abort|ETIMEDOUT/i.test(`${name} ${code} ${message}`);
+  private isModelError(code: string | undefined, message: string | undefined): boolean {
+    return /model|not found|does not exist|invalid model|unknown model/i.test(`${code ?? ""} ${message ?? ""}`);
   }
 
   private toSafeErrorMeta(error: unknown): Record<string, unknown> {
-    if (!isRecordLike(error)) {
-      return { errorType: typeof error };
+    return {
+      provider: env.llmProvider,
+      model: env.llmModel,
+      baseURL: env.llmBaseUrl,
+      status: this.readStatus(error),
+      code: this.readCode(error),
+      message: this.readMessage(error)
+    };
+  }
+
+  private errorText(error: unknown): string {
+    return [
+      this.readStringField(error, "name"),
+      this.readCode(error),
+      this.readMessage(error),
+      this.readNestedString(error, "cause", "code"),
+      this.readNestedString(error, "cause", "message")
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  private readStatus(error: unknown): number | undefined {
+    return (
+      this.readNumberField(error, "status") ??
+      this.readNestedNumber(error, "response", "status") ??
+      this.readNestedNumber(error, "error", "status")
+    );
+  }
+
+  private readCode(error: unknown): string | undefined {
+    return (
+      this.readStringField(error, "code") ??
+      this.readNestedString(error, "error", "code") ??
+      this.readStringField(error, "type") ??
+      this.readNestedString(error, "error", "type")
+    );
+  }
+
+  private readMessage(error: unknown): string | undefined {
+    return this.readStringField(error, "message") ?? this.readNestedString(error, "error", "message");
+  }
+
+  private readNumberField(value: unknown, key: string): number | undefined {
+    return isRecordLike(value) ? readNumber(value[key]) : undefined;
+  }
+
+  private readStringField(value: unknown, key: string): string | undefined {
+    return isRecordLike(value) && typeof value[key] === "string" ? value[key] : undefined;
+  }
+
+  private readNestedNumber(value: unknown, parentKey: string, childKey: string): number | undefined {
+    if (!isRecordLike(value) || !isRecordLike(value[parentKey])) {
+      return undefined;
     }
 
-    return {
-      name: error.name,
-      code: error.code,
-      status: error.status,
-      type: error.type,
-      message: error.message
-    };
+    return readNumber(value[parentKey][childKey]);
+  }
+
+  private readNestedString(value: unknown, parentKey: string, childKey: string): string | undefined {
+    if (!isRecordLike(value) || !isRecordLike(value[parentKey])) {
+      return undefined;
+    }
+
+    const childValue = value[parentKey][childKey];
+    return typeof childValue === "string" ? childValue : undefined;
   }
 }
 
