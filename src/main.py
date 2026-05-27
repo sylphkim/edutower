@@ -9,8 +9,8 @@ from fastapi.responses import FileResponse
 # 导入 Pydantic 模型基类，用于规范和校验前端传过来的 JSON 数据格式
 from pydantic import BaseModel                    
 
-# 从协作同学 B 写的 agent.py 中导入编排好的智能体类
-from agent import ChatAgent
+# 从 Module.module_agent 中导入编排好的智能体类
+from Module.module_agent import ChatAgent
 
 
 app = FastAPI() 
@@ -18,7 +18,7 @@ app = FastAPI()
 agent = ChatAgent() 
 
 # --- 2. 跨域补丁--- 
-# 给你的服务器添加“通行证”配置
+# 给你的服务器添加"通行证"配置
 app.add_middleware( 
     CORSMiddleware, 
     # 允许所有来源的请求访问（期末演示和本地开发最省心的设置）
@@ -29,7 +29,7 @@ app.add_middleware(
     allow_headers=["*"], 
 ) 
 
-# --- 3. 数据契约：定义前后端沟通的“暗号” --- 
+# --- 3. 数据契约：定义前后端沟通的"暗号" --- 
 # 定义一个聊天请求的结构，前端必须按这个格式发数据，否则 FastAPI 会自动报错拦截
 class ChatRequest(BaseModel): 
     # 要求必须包含 session_id（字符串类型），用于区分不同用户的对话
@@ -41,9 +41,8 @@ class ChatRequest(BaseModel):
 # 定义一个 POST 类型的接口，路径是 /chat
 @app.post("/chat") 
 def chat(request: ChatRequest): 
-    # 调用 agent 实例的 process 方法，把前端传来的 ID 和消息丢给它处理
-    # 这一步会触发 DeepSeek 的 API 请求并返回结果
-    reply = agent.process(request.session_id, request.message) 
+    # 调用 agent 的阻塞式 run 方法，中间步骤会自动打印到 stdout
+    reply = agent.run(request.session_id, request.message)
     # 将 AI 的回复封装成 JSON 格式返回给前端显示
     return {"reply": reply} 
  
