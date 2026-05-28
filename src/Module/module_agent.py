@@ -5,14 +5,6 @@ import re
 from collections import defaultdict
 
 
-_PREAMBLE_MARKERS = [
-    "好的", "我来", "让我", "帮你", "这就", "马上", "稍等",
-    "我这就", "让我来", "我来帮", "好的呀", "好嘞", "嗯嗯",
-    "明白了", "知道了", "收到", "没问题", "ok", "OK", "好呢",
-    "让我看看", "我来查", "我搜索", "我查查", "我看一下",
-]
-
-
 class ChatAgent:
     """阻塞式 ReAct Agent，对外暴露 run() 入口。"""
 
@@ -25,49 +17,43 @@ class ChatAgent:
 
     def run(self, session_id: str, message: str) -> str:
         """阻塞式 ReAct 循环，返回最终答案。"""
-        self._add_history(session_id, "user", message)
-        print(f"[{session_id}] User: {message}", flush=True)
+        hist = self._history[session_id]
+        self._add_to_history(hist, "user", message)
+        self._emit(session_id, "User", message)
 
         for step in range(self.max_steps):
             try:
-                # ---- 思考 ----
-                thought = self._think(self._history[session_id])
-                print(f"[{session_id}] Thought: {thought}", flush=True)
+                thought = self._think(hist)
+                self._emit(session_id, "Thought", thought)
+                # Thought / Action 仅调试输出，不入历史
 
-                # ---- 决策 ----
-                action = self._decide(self._history[session_id])
+                action = self._decide(hist)
 
                 if action is None:
-                    final = self._finalize(self._history[session_id])
-                    self._add_history(session_id, "assistant", final)
-                    print(f"[{session_id}] Final: {final}", flush=True)
+                    final = self._finalize(hist)
+                    self._add_to_history(hist, "assistant", final)
+                    self._emit(session_id, "Final", final)
                     return final
 
                 tool_name = action["tool"]
                 tool_input = action["input"]
-                print(f"[{session_id}] Action: {tool_name}({tool_input})", flush=True)
+                self._emit(session_id, "Action", f"{tool_name}({tool_input})")
 
-                # ---- 执行 ----
-                observation = self._call(tool_name, tool_input)
-                print(f"[{session_id}] Observation: {observation}", flush=True)
-                self._add_history(session_id, "system", observation)
+                observation = self._execute_tool(tool_name, tool_input)
+                self._emit(session_id, "Observation", observation)
+                self._add_to_history(hist, "system", observation)
 
             except Exception as e:
                 err_msg = f"[Error] Step {step}: {type(e).__name__}: {e}"
-                print(f"[{session_id}] {err_msg}", flush=True)
-                self._add_history(session_id, "system", err_msg)
+                self._emit(session_id, "[Error]", err_msg)
+                self._add_to_history(hist, "system", err_msg)
                 return f"Sorry, something went wrong: {e}"
 
         timeout = f"(Max steps {self.max_steps} reached.)"
-        print(f"[{session_id}] Final: {timeout}", flush=True)
+        self._emit(session_id, "Final", timeout)
         return timeout
 
-    # ---- 历史记录封装 ----
-
-    def _add_history(self, sid: str, role: str, content: str):
-        self._history[sid].append(f"{role.capitalize()}: {content}")
-
-    # ---- 桩逻辑（后续替换为 LLM） ----
+    # ---- 策略区（后续替换为 LLM） ----
 
     @staticmethod
     def _think(history: list) -> str:
@@ -93,23 +79,28 @@ class ChatAgent:
         m = re.search(r"System: (.+)$", "\n".join(history), re.MULTILINE)
         return f"Result: {m.group(1)}" if m else "No tools needed."
 
-    # ---- 工具执行 ----
+    # ---- 执行区 ----
 
-    def _call(self, name: str, inp: str) -> str:
+    def _execute_tool(self, name: str, inp: str) -> str:
         fn = self.tools.get(name)
         if not fn:
             return f"[Error] Unknown tool: {name}"
         try:
-            result = fn(inp)
-            return self._fmt(name, result)
+            return f"[{name}] {fn(inp)}"
         except Exception as e:
             return f"[Error] {type(e).__name__}: {e}"
 
-    @staticmethod
-    def _fmt(name: str, result) -> str:
-        return f"[{name}] {result}"
+    # ---- 持久化区 ----
 
-    # ---- 持久化 ----
+    @staticmethod
+    def _add_to_history(hist: list, role: str, content: str):
+        """追加记录到历史列表，不打印。"""
+        hist.append(f"{role.capitalize()}: {content}")
+
+    @staticmethod
+    def _emit(session_id: str, label: str, content: str):
+        """打印日志到 stdout，不修改历史状态。"""
+        print(f"[{session_id}] {label}: {content}", flush=True)
 
     def save_state(self, path: str):
         with open(path, "w", encoding="utf-8") as f:
