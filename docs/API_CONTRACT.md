@@ -1,6 +1,6 @@
 # API Contract
 
-EduTower currently exposes an Express backend API. Most product modules are scaffolded with mock data so frontend and later business logic can integrate against stable paths early.
+EduTower currently exposes an Express backend API. Express is the product-facing backend and delegates Agent/model execution to the FastAPI AI Engine. Most product modules are scaffolded with mock data so frontend and later business logic can integrate against stable paths early.
 
 ## Response Shape
 
@@ -46,9 +46,10 @@ Scaffolded module responses include:
 | Method | Path | Status | Purpose |
 | --- | --- | --- | --- |
 | GET | `/api/health` | ready | Service health check |
-| POST | `/api/llm/chat` | ready | Existing generic LLM chat endpoint |
-| POST | `/api/llm/generate` | ready | Existing generic text generation endpoint |
-| POST | `/api/ai/chat` | ready | Product-facing alias that reuses existing LLM chat |
+| POST | `/api/ai/chat` | ready | Product-facing chat endpoint that calls FastAPI AI Engine `/chat` |
+| POST | `/chat` | ready | Legacy static frontend compatibility endpoint that returns `{ reply }` |
+| POST | `/api/llm/chat` | ready | Low-level generic LLM chat endpoint for provider testing |
+| POST | `/api/llm/generate` | ready | Low-level generic text generation endpoint for provider testing |
 | POST | `/api/materials/upload` | mock | Material upload placeholder |
 | GET | `/api/materials/chunks` | mock | Material chunk placeholder |
 | POST | `/api/plan/generate` | mock | Study plan generation placeholder |
@@ -61,4 +62,4 @@ Scaffolded module responses include:
 
 ## Current Boundary
 
-The project does not yet implement real file parsing, RAG, vector storage, plan generation, quiz grading, wrongbook persistence, or long-term memory persistence.
+The project does not yet implement real file parsing, RAG, vector storage, plan generation, quiz grading, wrongbook persistence, or long-term memory persistence. Product flow should enter through Express; FastAPI remains the AI Engine boundary.

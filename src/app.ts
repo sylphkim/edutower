@@ -1,5 +1,7 @@
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
+import path from "node:path";
+import { legacyChat } from "./controllers/ai.controller";
 import { sendError } from "./utils/apiResponse";
 import { isAppError } from "./utils/errors";
 import { logger } from "./utils/logger";
@@ -17,6 +19,13 @@ const app = express();
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+app.use("/static", express.static(path.join(process.cwd(), "static")));
+
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(process.cwd(), "static", "index.html"));
+});
+
+app.post("/chat", legacyChat);
 
 app.use("/api/health", healthRoutes);
 app.use("/api/ai", aiRoutes);
