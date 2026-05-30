@@ -1,89 +1,188 @@
-# EduTower Backend
+# EduTower 开发说明
 
-EduTower 是一个 AI 学习助手后端项目。当前仓库以 Express 作为主后端，负责产品 API、流程编排、静态页面托管、业务模块框架和 mock 数据；FastAPI 作为 AI Engine，负责 Agent 和模型推理能力。
-
-当前阶段重点是“先把整体框架搭稳”，不是一次性完成全部业务功能。除了已有的通用 LLM 调用接口和 Express 到 FastAPI 的 AI Engine 桥接，其它 EduTower 业务模块目前都是可运行的 mock/stub。
-
-## 技术栈
-
-- Runtime: Node.js
-- Language: TypeScript
-- Web framework: Express
-- AI Engine: FastAPI
-- LLM SDK: `openai`
-- Config: `dotenv`
-- Dev runner: `tsx`
-- Build: `tsc`
-- API style: REST API
-
-Express 是产品主入口。`/api/ai/chat` 会调用 FastAPI AI Engine 的 `/chat`；`/api/llm/*` 保留为底层 OpenAI-compatible Provider 直连测试接口。
-
-LLM 接入层使用 OpenAI-compatible Chat Completions API。虽然依赖包叫 `openai`，但通过 `LLM_BASE_URL` 可以接 DeepSeek、OpenRouter、硅基流动或其它兼容服务。
-
-## 当前框架
-
-项目采用传统后端分层：
+EduTower 是一个 AI 学习助手项目。当前阶段的目标不是一次性做完整产品，而是先打通第一个可演示闭环：
 
 ```text
-src/
-  app.ts                  # Express app，统一挂载 API 路由和错误处理
-  server.ts               # 服务启动入口
-  config/
-    env.ts                # 环境变量读取和默认值
-  routes/                 # 路由层：只定义 URL 和 HTTP method
-  controllers/            # 控制器层：处理 req/res，做轻量参数检查
-  services/               # 服务层：业务逻辑、LLM 调用、mock/stub 返回
-  mock/                   # 当前阶段的演示数据
-  types/                  # 共享类型定义
-  utils/                  # 响应格式、错误、日志等通用工具
-docs/                     # API 契约、模块拆分、开发流程说明
+静态前端页面 -> Express 主后端 -> FastAPI AI Engine -> LLM Provider -> 返回 AI 回复
 ```
 
-核心原则：
+本 README 面向开发协作使用，优先说明当前项目状态、架构边界、接口契约和第 1-2 天四人分工。
 
-- `routes` 不写业务逻辑。
-- `controllers` 不直接拼复杂业务结果。
-- `services` 承担业务实现，后续真实功能优先在这里替换 mock。
-- `types` 维护跨模块共享的数据结构。
-- `AiEngineService` 只负责调用 FastAPI AI Engine。
-- `LLMService` 保持通用，不塞学习计划、测验、错题本等具体业务逻辑。
-
-## 已有能力
+## 当前项目状态
 
 已完成：
 
-- Express + TypeScript 后端基础结构
-- 统一成功/失败响应格式
-- Express 到 FastAPI AI Engine 的 `/api/ai/chat` 桥接
-- OpenAI-compatible LLM 调用服务
-- 健康检查接口
-- 通用 LLM chat/generate 接口
-- EduTower 业务模块 API 框架
-- 各模块 mock 数据和领域类型
-- API 契约与模块文档
+- Express + TypeScript 主后端骨架。
+- 统一成功/失败响应格式。
+- `GET /api/health` 健康检查。
+- `POST /api/ai/chat` 产品聊天入口，由 Express 转发到 FastAPI AI Engine。
+- `POST /chat` 临时兼容当前静态前端，后续前端应迁移到 `/api/ai/chat`。
+- `POST /api/llm/chat`、`POST /api/llm/generate` 底层 LLM Provider 调试接口。
+- `materials / plan / skills / quiz / wrongbook / memory` 模块 mock/stub 接口。
+- `.venv`、`node_modules`、`dist` 不再进入 Git 追踪。
 
-## 暂未实现
+仍未完成：
 
-以下功能还没有真实实现，目前只保留接口和 mock/stub：
+- 前端还需要从 legacy `/chat` 迁移到 `/api/ai/chat`。
+- AI Engine 还需要补依赖文件、启动说明、`/health` 和真实 LLM 调用。
+- Express 后端还缺学习助教上下文 stub，例如科目、知识点、薄弱点、session history。
+- 真实资料上传、RAG、知识点抽取、学习计划、测验判分、错题本、长期记忆、数据库、登录鉴权都还没做。
 
-- 资料上传、解析、切块
-- RAG 和向量数据库
-- 知识点自动抽取
-- 学习计划真实生成
-- 测验题真实生成和判分
-- 错题本持久化
-- 长期记忆持久化和更新策略
-- 用户系统、登录鉴权
-- 数据库接入
-- 前端页面
+## 架构边界
 
-## 安装
+```text
+Frontend / static
+  只调用 Express API
+
+Express Backend / src
+  产品 API、业务流程、统一响应、mock/stub、AI Engine bridge
+
+FastAPI AI Engine / AI-Agent
+  Agent、prompt、工具调用、LLM provider、模型错误处理
+
+LLM Provider
+  DeepSeek / OpenAI / OpenRouter / 硅基流动等 OpenAI-compatible 服务
+```
+
+核心规则：
+
+- 前端不要直接调用 FastAPI。
+- Express 是唯一面向前端的后端入口。
+- FastAPI 只作为 AI Engine，不直接操作产品数据。
+- 业务模块不要直接绕过 Express 流程调用 AI Engine。
+- `LLMService` 只保留底层 Provider 调试能力，不放业务 prompt 和业务 JSON schema。
+
+## 技术栈
+
+| 层 | 技术栈 | 当前目录 |
+| --- | --- | --- |
+| 前端演示页 | HTML / CSS / JavaScript | `static/` |
+| 主后端 | Node.js + TypeScript + Express | `src/` |
+| AI Engine | Python + FastAPI | `AI-Agent/` |
+| LLM Provider | OpenAI-compatible API | 由 AI Engine 负责接入 |
+| 文档 | Markdown | `docs/` |
+
+## 第 1-2 天四人分工
+
+### 前端
+
+负责范围：聊天页面 + 调 Express API。
+
+下一步任务：
+
+1. 找到当前静态演示页里的聊天区域。
+2. 新建或整理 API 请求函数。
+3. 聊天接口统一调用 Express 的 `POST /api/ai/chat`。
+4. 页面显示用户消息。
+5. 页面显示 AI 回复。
+6. 请求中显示 loading。
+7. 请求失败显示 error。
+8. 不直接调用 FastAPI。
+
+验收标准：
+
+前端打开网页，输入一句话，能看到 AI 回复；断网或后端报错时，也能看到清楚的错误提示。
+
+注意事项：
+
+这两天不要做复杂页面，不要做技能树、错题本、资料上传，只做聊天链路页面。
+
+### Express 后端 A
+
+负责范围：主后端桥接 + API 契约。
+
+当前状态：
+
+桥接基础已完成，`/api/ai/chat` 已能调用 FastAPI `/chat`，并把结果包装成统一响应格式。
+
+下一步任务：
+
+1. 维护 `POST /api/ai/chat` 路由。
+2. 接收前端 `message / session_id`。
+3. 调用 FastAPI `POST /chat`。
+4. 维护 `AI_ENGINE_BASE_URL` 和 `AI_ENGINE_TIMEOUT_MS` 环境变量。
+5. 做超时处理。
+6. 做错误处理。
+7. 把 FastAPI 返回包装成统一格式。
+8. 保证前端不需要知道 FastAPI 存在。
+
+验收标准：
+
+用 Postman/curl 调 `POST /api/ai/chat`，Express 能成功转发到 FastAPI，并返回统一格式。
+
+注意事项：
+
+不要写 `materials / quiz / wrongbook` 的具体业务。第 1-2 天只管桥接链路稳定。
+
+### Express 后端 B
+
+负责范围：聊天相关业务上下文 stub。
+
+下一步任务：
+
+1. 准备 demo 学科资料 mock。
+2. 准备 demo 知识点 mock。
+3. 准备 demo 薄弱点 mock。
+4. 准备 demo session history mock。
+5. 提供一个 `chatContext` service。
+6. 让 Express A 可以把上下文传给 AI Engine。
+
+建议新增文件：
+
+```text
+src/mock/chatContext.ts
+src/services/chatContext.service.ts
+src/types/chatContext.ts
+```
+
+验收标准：
+
+用户问“我该怎么复习”，AI 回复里能体现“当前科目、知识点、薄弱点”，而不是普通聊天机器人回复。
+
+注意事项：
+
+重点是让 AI 聊天从“通用聊天”变成“学习助教聊天”。先做 stub，不接数据库，不做真实 RAG。
+
+### AI Engine
+
+负责范围：FastAPI + Agent + LLM。
+
+下一步任务：
+
+1. 整理 FastAPI 项目入口。
+2. 提供 `POST /chat`。
+3. 接收 `message / session_id / context`。
+4. 拼接学习助教 prompt。
+5. 调用 LLM provider。
+6. 返回标准 JSON。
+7. 做模型调用错误处理。
+8. 不直接修改产品数据。
+
+建议补齐：
+
+```text
+AI-Agent/requirements.txt
+GET /health
+AI Engine 启动说明
+```
+
+验收标准：
+
+单独调用 FastAPI `POST /chat`，传入 `message` 和 `context`，能得到真实模型回复。
+
+注意事项：
+
+AI Engine 不直接写技能树状态、不直接写错题本、不直接写学习进度、不直接操作 Express 数据库。AI Engine 只负责：输入上下文，输出 AI 回复。
+
+## 本地启动
+
+### 1. 安装 Express 依赖
 
 ```bash
 npm install
 ```
 
-## 环境变量
+### 2. 配置环境变量
 
 复制示例文件：
 
@@ -91,7 +190,13 @@ npm install
 cp .env.example .env
 ```
 
-示例：
+Windows PowerShell 可手动复制：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+核心配置：
 
 ```env
 PORT=3000
@@ -109,20 +214,21 @@ LLM_MAX_OUTPUT_TOKENS=1000
 
 说明：
 
-- `AI_ENGINE_BASE_URL` 是 FastAPI AI Engine 地址，默认 `http://127.0.0.1:8000`。
-- `AI_ENGINE_TIMEOUT_MS` 是 Express 调用 AI Engine 的超时时间。
-- `LLM_PROVIDER` 用来标识当前模型服务商。
-- `LLM_API_KEY` 是模型服务 API Key。
-- `LLM_MODEL` 是模型名称。
-- `LLM_BASE_URL` 是 OpenAI-compatible 服务地址。
-- `OPENAI_API_KEY`、`OPENAI_MODEL`、`OPENAI_BASE_URL` 仍可作为旧配置 fallback。
+- `AI_ENGINE_BASE_URL` 是 Express 调用 FastAPI 的地址。
+- `AI_ENGINE_TIMEOUT_MS` 是 Express 等待 AI Engine 的超时时间。
+- `LLM_*` 当前主要用于底层 LLM 调试接口；最终真实模型调用优先放在 AI Engine。
+- 不要提交 `.env`。
 
-## 本地开发
-
-启动开发服务：
+### 3. 启动 Express
 
 ```bash
 npm run dev
+```
+
+Windows PowerShell 如遇执行策略问题：
+
+```bash
+npm.cmd run dev
 ```
 
 默认地址：
@@ -131,79 +237,157 @@ npm run dev
 http://localhost:3000
 ```
 
-Windows PowerShell 如果遇到 `npm.ps1` 执行策略问题，可以使用：
+### 4. 启动 AI Engine
 
-```bash
-npm.cmd run dev
+当前 AI Engine 位于：
+
+```text
+AI-Agent/
 ```
 
-## 构建和启动
+AI Engine 同学需要补齐依赖文件后，使用团队约定的 Python 环境启动。当前入口是：
 
 ```bash
-npm run build
-npm start
+cd AI-Agent
+python main.py
 ```
 
-Windows PowerShell 可使用：
+默认地址：
 
-```bash
-npm.cmd run build
-npm.cmd start
+```text
+http://127.0.0.1:8000
 ```
 
-## API 概览
+## 接口契约
 
-已具备真实能力：
+### 健康检查
 
-| Method | Path | 说明 |
-| --- | --- | --- |
-| GET | `/api/health` | 健康检查 |
-| POST | `/api/llm/chat` | 通用 LLM 多轮消息接口 |
-| POST | `/api/llm/generate` | 通用文本生成接口 |
-| POST | `/api/ai/chat` | 面向 EduTower 的 chat 入口，由 Express 调用 FastAPI AI Engine |
-| POST | `/chat` | 兼容当前静态前端的 chat 入口，返回 `{ reply }` |
+```http
+GET /api/health
+```
 
-业务模块占位接口：
+响应：
 
-| Method | Path | 当前状态 |
-| --- | --- | --- |
-| POST | `/api/materials/upload` | mock/stub |
-| GET | `/api/materials/chunks` | mock/stub |
-| POST | `/api/plan/generate` | mock/stub |
-| GET | `/api/skills/tree` | mock/stub |
-| POST | `/api/quiz/generate` | mock/stub |
-| POST | `/api/quiz/submit` | mock/stub |
-| GET | `/api/wrongbook` | mock/stub |
-| GET | `/api/memory/profile` | mock/stub |
-| POST | `/api/memory/update` | mock/stub |
+```json
+{
+  "ok": true,
+  "data": {
+    "status": "ok"
+  }
+}
+```
 
-详细契约见 `docs/API_CONTRACT.md`。
+### 前端聊天入口
 
-## 后续怎么开发
+```http
+POST /api/ai/chat
+```
 
-建议按下面顺序推进：
+请求：
 
-1. Materials 模块：实现真实上传、解析、切块，替换 `src/services/materials.service.ts` 的 mock 返回。
-2. Skills 模块：基于资料 chunks 抽取知识点，完善 `src/types/edutower.ts` 中的知识点结构。
-3. Plan 模块：根据知识点、学习目标和时间生成学习计划。
-4. Quiz 模块：根据知识点生成题目，并实现提交判分。
-5. Wrongbook 模块：记录错题、解释、复习次数和复习状态。
-6. Memory 模块：沉淀用户画像、薄弱点、偏好和长期学习状态。
-7. Database/Auth：等业务数据结构稳定后再接数据库和用户系统。
+```json
+{
+  "session_id": "demo-session",
+  "message": "我该怎么复习导数？"
+}
+```
 
-开发新模块时建议保持这个节奏：
+响应：
 
-1. 先在 `src/types/edutower.ts` 定义类型。
-2. 在 `src/mock/` 准备最小 mock 数据。
-3. 在 `src/services/` 写服务函数。
-4. 在 `src/controllers/` 接入请求和响应。
-5. 在 `src/routes/` 暴露路由。
-6. 在 `src/app.ts` 挂载路由。
-7. 更新 `docs/API_CONTRACT.md`。
-8. 跑 `npm run build` 确认类型通过。
+```json
+{
+  "ok": true,
+  "data": {
+    "reply": "建议你先复习导数定义...",
+    "text": "建议你先复习导数定义...",
+    "engine": "fastapi"
+  }
+}
+```
 
-## 文档
+### 临时兼容接口
 
-- `docs/API_CONTRACT.md`: API 路径、响应格式、当前实现状态
-- `docs/MODULE_SPLIT.md`: 模块拆分和代码边界
-- `docs/DEVELOPMENT_FLOW.md`: 推荐开发阶段和推进顺序
+```http
+POST /chat
+```
+
+该接口只用于兼容当前静态前端，返回：
+
+```json
+{
+  "reply": "..."
+}
+```
+
+后续前端迁移完成后，优先使用 `/api/ai/chat`。
+
+### 底层 LLM 调试接口
+
+```http
+POST /api/llm/chat
+POST /api/llm/generate
+```
+
+这两个接口用于调试 OpenAI-compatible Provider，不作为产品聊天主入口。
+
+## 当前目录说明
+
+```text
+src/
+  app.ts
+  server.ts
+  config/
+  routes/
+  controllers/
+  services/
+  mock/
+  types/
+  utils/
+
+AI-Agent/
+  main.py
+  Module/
+
+static/
+  index.html
+  app.js
+  style.css
+
+docs/
+  API_CONTRACT.md
+  MODULE_SPLIT.md
+  DEVELOPMENT_FLOW.md
+```
+
+## 开发规则
+
+- 改接口前先更新 `docs/API_CONTRACT.md`。
+- Express 主后端改动后必须跑 `npm run build`。
+- 前端只对接 Express。
+- AI Engine 只暴露给 Express。
+- `.env`、`.venv`、`node_modules`、`dist` 不提交。
+- 提交信息默认使用中文，格式为 `<type>: <description>`。
+
+## 当前最小验收目标
+
+第 1-2 天只验收这一条主链路：
+
+```text
+前端输入一句话
+-> POST /api/ai/chat
+-> Express 调 FastAPI /chat
+-> AI Engine 返回 reply
+-> 前端展示 AI 回复
+```
+
+暂时不验收：
+
+- 数据库
+- 登录
+- 文件上传
+- RAG
+- 向量数据库
+- 技能树真实生成
+- 测验真实生成
+- 错题本持久化
+- 长期记忆
