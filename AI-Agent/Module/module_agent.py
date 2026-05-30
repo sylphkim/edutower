@@ -4,6 +4,8 @@ import json
 import re
 from collections import defaultdict
 
+from .Module_LLM import call_llm
+
 
 class ChatAgent:
     """阻塞式 ReAct Agent，对外暴露 run() 入口。"""
