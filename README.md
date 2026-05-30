@@ -1,31 +1,84 @@
-# AI Learning Assistant Backend
+# EduTower Backend
 
-AI 学习助手后端第一阶段项目：提供 Node.js + TypeScript + Express 的基础后端结构，并完成通用 LLM Provider 接入层。
+EduTower 是一个 AI 学习助手后端项目。当前仓库负责提供后端 API、LLM 调用底座、业务模块框架和 mock 数据，方便后续逐步实现资料上传、知识点抽取、学习计划、测验、错题本和长期记忆等能力。
 
-当前大模型接入层支持 OpenAI-compatible API 服务。虽然项目使用 `openai` 这个 npm 包，但它只是 SDK 客户端；通过 `LLM_BASE_URL` 可以调用 OpenAI、DeepSeek、OpenRouter、硅基流动等兼容 Chat Completions API 的服务。
+当前阶段重点是“先把整体框架搭稳”，不是一次性完成全部业务功能。除了已有的通用 LLM 调用接口，其它 EduTower 业务模块目前都是可运行的 mock/stub。
 
-## 当前阶段范围
+## 技术栈
 
-- 基础 Express 服务
-- 通用 LLM Provider 环境变量配置
-- 通用 LLM 调用服务
-- Chat Completions API 调用封装
+- Runtime: Node.js
+- Language: TypeScript
+- Web framework: Express
+- LLM SDK: `openai`
+- Config: `dotenv`
+- Dev runner: `tsx`
+- Build: `tsc`
+- API style: REST API
+
+LLM 接入层使用 OpenAI-compatible Chat Completions API。虽然依赖包叫 `openai`，但通过 `LLM_BASE_URL` 可以接 DeepSeek、OpenRouter、硅基流动或其它兼容服务。
+
+## 当前框架
+
+项目采用传统后端分层：
+
+```text
+src/
+  app.ts                  # Express app，统一挂载 API 路由和错误处理
+  server.ts               # 服务启动入口
+  config/
+    env.ts                # 环境变量读取和默认值
+  routes/                 # 路由层：只定义 URL 和 HTTP method
+  controllers/            # 控制器层：处理 req/res，做轻量参数检查
+  services/               # 服务层：业务逻辑、LLM 调用、mock/stub 返回
+  mock/                   # 当前阶段的演示数据
+  types/                  # 共享类型定义
+  utils/                  # 响应格式、错误、日志等通用工具
+docs/                     # API 契约、模块拆分、开发流程说明
+```
+
+核心原则：
+
+- `routes` 不写业务逻辑。
+- `controllers` 不直接拼复杂业务结果。
+- `services` 承担业务实现，后续真实功能优先在这里替换 mock。
+- `types` 维护跨模块共享的数据结构。
+- `LLMService` 保持通用，不塞学习计划、测验、错题本等具体业务逻辑。
+
+## 已有能力
+
+已完成：
+
+- Express + TypeScript 后端基础结构
+- 统一成功/失败响应格式
+- OpenAI-compatible LLM 调用服务
 - 健康检查接口
-- 简单 LLM 连通性测试接口
-- 通用文本生成接口
-- 统一响应格式和错误处理
+- 通用 LLM chat/generate 接口
+- EduTower 业务模块 API 框架
+- 各模块 mock 数据和领域类型
+- API 契约与模块文档
 
-## 当前不包含
+## 暂未实现
 
-本阶段不实现资料上传、RAG、向量数据库、知识点生成、技能树、小测验、错题本、答案批改、学习计划、每日总结、长期记忆、业务 JSON Schema、复杂 prompt 模板管理、前端页面、用户登录和数据库。
+以下功能还没有真实实现，目前只保留接口和 mock/stub：
 
-## 安装依赖
+- 资料上传、解析、切块
+- RAG 和向量数据库
+- 知识点自动抽取
+- 学习计划真实生成
+- 测验题真实生成和判分
+- 错题本持久化
+- 长期记忆持久化和更新策略
+- 用户系统、登录鉴权
+- 数据库接入
+- 前端页面
+
+## 安装
 
 ```bash
 npm install
 ```
 
-## 配置环境变量
+## 环境变量
 
 复制示例文件：
 
@@ -33,47 +86,30 @@ npm install
 cp .env.example .env
 ```
 
-不要提交 `.env`，只提交 `.env.example`。
-
-### DeepSeek 示例
+示例：
 
 ```env
 PORT=3000
 
 LLM_PROVIDER=deepseek
-LLM_API_KEY=你的 DeepSeek API Key
+LLM_API_KEY=your_api_key_here
 LLM_MODEL=deepseek-v4-pro
 LLM_BASE_URL=https://api.deepseek.com
 LLM_TIMEOUT_MS=30000
 LLM_MAX_OUTPUT_TOKENS=1000
 ```
 
-### OpenAI 官方服务示例
+说明：
 
-```env
-PORT=3000
+- `LLM_PROVIDER` 用来标识当前服务商。
+- `LLM_API_KEY` 是模型服务 API Key。
+- `LLM_MODEL` 是模型名称。
+- `LLM_BASE_URL` 是 OpenAI-compatible 服务地址。
+- `OPENAI_API_KEY`、`OPENAI_MODEL`、`OPENAI_BASE_URL` 仍可作为旧配置 fallback。
 
-LLM_PROVIDER=openai
-LLM_API_KEY=你的 OpenAI API Key
-LLM_MODEL=你的模型名
-LLM_BASE_URL=
-LLM_TIMEOUT_MS=30000
-LLM_MAX_OUTPUT_TOKENS=1000
-```
+## 本地开发
 
-### 其他 OpenAI-compatible 服务
-
-将 `LLM_PROVIDER` 写成服务标识，将 `LLM_BASE_URL` 配置成对应服务的 OpenAI-compatible API 地址，并填写对应的 `LLM_API_KEY` 和 `LLM_MODEL`。
-
-旧配置仍可作为 fallback 使用：
-
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
-- `OPENAI_BASE_URL`
-
-优先级为：`LLM_*` > `OPENAI_*` > 默认值。
-
-## 启动开发服务器
+启动开发服务：
 
 ```bash
 npm run dev
@@ -85,85 +121,78 @@ npm run dev
 http://localhost:3000
 ```
 
-## 构建和生产启动
+Windows PowerShell 如果遇到 `npm.ps1` 执行策略问题，可以使用：
+
+```bash
+npm.cmd run dev
+```
+
+## 构建和启动
 
 ```bash
 npm run build
 npm start
 ```
 
-## 接口测试
-
-### 健康检查
+Windows PowerShell 可使用：
 
 ```bash
-curl http://localhost:3000/api/health
+npm.cmd run build
+npm.cmd start
 ```
 
-示例返回：
+## API 概览
 
-```json
-{
-  "ok": true,
-  "data": {
-    "status": "ok"
-  }
-}
-```
+已具备真实能力：
 
-### 简单聊天测试
+| Method | Path | 说明 |
+| --- | --- | --- |
+| GET | `/api/health` | 健康检查 |
+| POST | `/api/llm/chat` | 通用 LLM 多轮消息接口 |
+| POST | `/api/llm/generate` | 通用文本生成接口 |
+| POST | `/api/ai/chat` | 面向 EduTower 的 chat 入口，目前复用 `/api/llm/chat` |
 
-```bash
-curl -X POST http://localhost:3000/api/llm/chat \
-  -H "Content-Type: application/json" \
-  -d "{\"message\":\"请解释导数的定义\"}"
-```
+业务模块占位接口：
 
-### 通用生成
+| Method | Path | 当前状态 |
+| --- | --- | --- |
+| POST | `/api/materials/upload` | mock/stub |
+| GET | `/api/materials/chunks` | mock/stub |
+| POST | `/api/plan/generate` | mock/stub |
+| GET | `/api/skills/tree` | mock/stub |
+| POST | `/api/quiz/generate` | mock/stub |
+| POST | `/api/quiz/submit` | mock/stub |
+| GET | `/api/wrongbook` | mock/stub |
+| GET | `/api/memory/profile` | mock/stub |
+| POST | `/api/memory/update` | mock/stub |
 
-```bash
-curl -X POST http://localhost:3000/api/llm/generate \
-  -H "Content-Type: application/json" \
-  -d "{\"systemPrompt\":\"你是一个学习助手。\",\"userPrompt\":\"请解释导数。\",\"temperature\":0.7,\"maxOutputTokens\":1000}"
-```
+详细契约见 `docs/API_CONTRACT.md`。
 
-## 统一响应格式
+## 后续怎么开发
 
-成功：
+建议按下面顺序推进：
 
-```json
-{
-  "ok": true,
-  "data": {}
-}
-```
+1. Materials 模块：实现真实上传、解析、切块，替换 `src/services/materials.service.ts` 的 mock 返回。
+2. Skills 模块：基于资料 chunks 抽取知识点，完善 `src/types/edutower.ts` 中的知识点结构。
+3. Plan 模块：根据知识点、学习目标和时间生成学习计划。
+4. Quiz 模块：根据知识点生成题目，并实现提交判分。
+5. Wrongbook 模块：记录错题、解释、复习次数和复习状态。
+6. Memory 模块：沉淀用户画像、薄弱点、偏好和长期学习状态。
+7. Database/Auth：等业务数据结构稳定后再接数据库和用户系统。
 
-失败：
+开发新模块时建议保持这个节奏：
 
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "ERROR_CODE",
-    "message": "错误说明"
-  }
-}
-```
+1. 先在 `src/types/edutower.ts` 定义类型。
+2. 在 `src/mock/` 准备最小 mock 数据。
+3. 在 `src/services/` 写服务函数。
+4. 在 `src/controllers/` 接入请求和响应。
+5. 在 `src/routes/` 暴露路由。
+6. 在 `src/app.ts` 挂载路由。
+7. 更新 `docs/API_CONTRACT.md`。
+8. 跑 `npm run build` 确认类型通过。
 
-错误码包括：
+## 文档
 
-- `MISSING_API_KEY`
-- `INVALID_REQUEST`
-- `LLM_AUTH_FAILED`
-- `LLM_MODEL_ERROR`
-- `LLM_RATE_LIMITED`
-- `LLM_TIMEOUT`
-- `LLM_CONNECTION_ERROR`
-- `LLM_REQUEST_FAILED`
-- `INTERNAL_ERROR`
-
-## 给后续协作者的说明
-
-当前仓库只提供通用 LLM 调用底座。业务同学可以在此基础上新增资料上传、RAG、知识点结构化生成、测验、错题本、学习计划、长期记忆等模块，但这些业务结构不要耦合进 `LLMService`。
-
-`LLMService` 应继续保持通用：接收 prompt 或 messages，返回模型文本、provider、model 和基础 usage。不在这里实现知识点、小测验、学习计划、记忆等业务 JSON 解析或校验。
+- `docs/API_CONTRACT.md`: API 路径、响应格式、当前实现状态
+- `docs/MODULE_SPLIT.md`: 模块拆分和代码边界
+- `docs/DEVELOPMENT_FLOW.md`: 推荐开发阶段和推进顺序
