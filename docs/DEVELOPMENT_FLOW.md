@@ -19,6 +19,15 @@ Completed in this scaffold:
 - Mock data
 - Placeholder module services and controllers
 - API contract documentation
+- Express-to-FastAPI AI Engine bridge through `/api/ai/chat`
+
+## Phase 2.5: Mainline Alignment
+
+Current architecture decision:
+
+- Express is the main backend and product-flow owner.
+- FastAPI is the AI Engine and owns Agent/model execution.
+- Frontend should prefer Express endpoints. Current `/chat` is kept as a compatibility adapter for the static UI.
 
 ## Phase 3: Replace Stubs Incrementally
 

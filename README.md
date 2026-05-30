@@ -1,19 +1,22 @@
 # EduTower Backend
 
-EduTower 是一个 AI 学习助手后端项目。当前仓库负责提供后端 API、LLM 调用底座、业务模块框架和 mock 数据，方便后续逐步实现资料上传、知识点抽取、学习计划、测验、错题本和长期记忆等能力。
+EduTower 是一个 AI 学习助手后端项目。当前仓库以 Express 作为主后端，负责产品 API、流程编排、静态页面托管、业务模块框架和 mock 数据；FastAPI 作为 AI Engine，负责 Agent 和模型推理能力。
 
-当前阶段重点是“先把整体框架搭稳”，不是一次性完成全部业务功能。除了已有的通用 LLM 调用接口，其它 EduTower 业务模块目前都是可运行的 mock/stub。
+当前阶段重点是“先把整体框架搭稳”，不是一次性完成全部业务功能。除了已有的通用 LLM 调用接口和 Express 到 FastAPI 的 AI Engine 桥接，其它 EduTower 业务模块目前都是可运行的 mock/stub。
 
 ## 技术栈
 
 - Runtime: Node.js
 - Language: TypeScript
 - Web framework: Express
+- AI Engine: FastAPI
 - LLM SDK: `openai`
 - Config: `dotenv`
 - Dev runner: `tsx`
 - Build: `tsc`
 - API style: REST API
+
+Express 是产品主入口。`/api/ai/chat` 会调用 FastAPI AI Engine 的 `/chat`；`/api/llm/*` 保留为底层 OpenAI-compatible Provider 直连测试接口。
 
 LLM 接入层使用 OpenAI-compatible Chat Completions API。虽然依赖包叫 `openai`，但通过 `LLM_BASE_URL` 可以接 DeepSeek、OpenRouter、硅基流动或其它兼容服务。
 
@@ -42,6 +45,7 @@ docs/                     # API 契约、模块拆分、开发流程说明
 - `controllers` 不直接拼复杂业务结果。
 - `services` 承担业务实现，后续真实功能优先在这里替换 mock。
 - `types` 维护跨模块共享的数据结构。
+- `AiEngineService` 只负责调用 FastAPI AI Engine。
 - `LLMService` 保持通用，不塞学习计划、测验、错题本等具体业务逻辑。
 
 ## 已有能力
@@ -50,6 +54,7 @@ docs/                     # API 契约、模块拆分、开发流程说明
 
 - Express + TypeScript 后端基础结构
 - 统一成功/失败响应格式
+- Express 到 FastAPI AI Engine 的 `/api/ai/chat` 桥接
 - OpenAI-compatible LLM 调用服务
 - 健康检查接口
 - 通用 LLM chat/generate 接口
@@ -91,6 +96,9 @@ cp .env.example .env
 ```env
 PORT=3000
 
+AI_ENGINE_BASE_URL=http://127.0.0.1:8000
+AI_ENGINE_TIMEOUT_MS=30000
+
 LLM_PROVIDER=deepseek
 LLM_API_KEY=your_api_key_here
 LLM_MODEL=deepseek-v4-pro
@@ -101,7 +109,9 @@ LLM_MAX_OUTPUT_TOKENS=1000
 
 说明：
 
-- `LLM_PROVIDER` 用来标识当前服务商。
+- `AI_ENGINE_BASE_URL` 是 FastAPI AI Engine 地址，默认 `http://127.0.0.1:8000`。
+- `AI_ENGINE_TIMEOUT_MS` 是 Express 调用 AI Engine 的超时时间。
+- `LLM_PROVIDER` 用来标识当前模型服务商。
 - `LLM_API_KEY` 是模型服务 API Key。
 - `LLM_MODEL` 是模型名称。
 - `LLM_BASE_URL` 是 OpenAI-compatible 服务地址。
@@ -150,7 +160,8 @@ npm.cmd start
 | GET | `/api/health` | 健康检查 |
 | POST | `/api/llm/chat` | 通用 LLM 多轮消息接口 |
 | POST | `/api/llm/generate` | 通用文本生成接口 |
-| POST | `/api/ai/chat` | 面向 EduTower 的 chat 入口，目前复用 `/api/llm/chat` |
+| POST | `/api/ai/chat` | 面向 EduTower 的 chat 入口，由 Express 调用 FastAPI AI Engine |
+| POST | `/chat` | 兼容当前静态前端的 chat 入口，返回 `{ reply }` |
 
 业务模块占位接口：
 
