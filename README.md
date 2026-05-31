@@ -1,12 +1,12 @@
 # EduTower 开发说明
 
-EduTower 是一个 AI 学习助手项目。当前阶段的目标不是一次性做完整产品，而是先打通第一个可演示闭环：
+EduTower 是一个 AI 学习助手项目。当前阶段的目标是先打通可演示闭环：
 
 ```text
 静态前端页面 -> Express 主后端 -> FastAPI AI Engine -> LLM Provider -> 返回 AI 回复
 ```
 
-本 README 面向开发协作使用，优先说明当前项目状态、架构边界、接口契约和第 1-2 天四人分工。
+Express 是面向前端的主后端。FastAPI 作为 AI Engine，负责 Agent、prompt 和模型调用。当前 Express 已经能在聊天请求中注入一份 demo 学习上下文，让 AI 回复从“通用聊天”开始靠近“学习助教聊天”。
 
 ## 当前项目状态
 
@@ -16,16 +16,25 @@ EduTower 是一个 AI 学习助手项目。当前阶段的目标不是一次性�
 - 统一成功/失败响应格式。
 - `GET /api/health` 健康检查。
 - `POST /api/ai/chat` 产品聊天入口，由 Express 转发到 FastAPI AI Engine。
-- `POST /chat` 临时兼容当前静态前端，后续前端应迁移到 `/api/ai/chat`。
+- `POST /chat` 兼容旧静态前端，内部同样会走 AI Engine。
 - `POST /api/llm/chat`、`POST /api/llm/generate` 底层 LLM Provider 调试接口。
 - `materials / plan / skills / quiz / wrongbook / memory` 模块 mock/stub 接口。
-- `.venv`、`node_modules`、`dist` 不再进入 Git 追踪。
+- demo chat context 类型、mock 数据和组装服务。
+- `/api/ai/chat` 和 `/chat` 调用 AI Engine 时会附带 demo chat context。
+- `/api/ai/chat` 响应会返回 `debugContextSummary`，便于 demo 验收。
+
+当前 demo chat context 使用“高中数学二次函数”场景，包含：
+
+- demo 学科信息。
+- demo 学习资料：老师课件、板书照片、考点大纲。
+- demo 知识点：二次函数定义、图像与开口方向、顶点式、对称轴、最值问题、实际应用题等。
+- demo 薄弱点：顶点式转换不熟、不会从图像读参数、最值应用题容易漏定义域等。
+- demo session history：最近几轮学习对话。
 
 仍未完成：
 
-- 前端还需要从 legacy `/chat` 迁移到 `/api/ai/chat`。
-- AI Engine 还需要补依赖文件、启动说明、`/health` 和真实 LLM 调用。
-- Express 后端还缺学习助教上下文 stub，例如科目、知识点、薄弱点、session history。
+- 前端建议从 legacy `/chat` 迁移到 `/api/ai/chat`。
+- AI Engine 需要确保读取 `context`，并把学习上下文融入 prompt。
 - 真实资料上传、RAG、知识点抽取、学习计划、测验判分、错题本、长期记忆、数据库、登录鉴权都还没做。
 
 ## 架构边界
@@ -35,7 +44,7 @@ Frontend / static
   只调用 Express API
 
 Express Backend / src
-  产品 API、业务流程、统一响应、mock/stub、AI Engine bridge
+  产品 API、业务流程、统一响应、mock/stub、chat context、AI Engine bridge
 
 FastAPI AI Engine / AI-Agent
   Agent、prompt、工具调用、LLM provider、模型错误处理
@@ -49,7 +58,8 @@ LLM Provider
 - 前端不要直接调用 FastAPI。
 - Express 是唯一面向前端的后端入口。
 - FastAPI 只作为 AI Engine，不直接操作产品数据。
-- 业务模块不要直接绕过 Express 流程调用 AI Engine。
+- Express 负责组装产品侧上下文，例如 `ChatContext`。
+- AI Engine 接收 `message / session_id / context`，负责生成回复。
 - `LLMService` 只保留底层 Provider 调试能力，不放业务 prompt 和业务 JSON schema。
 
 ## 技术栈
@@ -62,117 +72,45 @@ LLM Provider
 | LLM Provider | OpenAI-compatible API | 由 AI Engine 负责接入 |
 | 文档 | Markdown | `docs/` |
 
-## 第 1-2 天四人分工
+## Chat Context Demo
 
-### 前端
+当前 chat context 仍是 demo/mock，不接数据库。所有 `sessionId` 会返回同一份二次函数学习上下文。
 
-负责范围：聊天页面 + 调 Express API。
-
-下一步任务：
-
-1. 找到当前静态演示页里的聊天区域。
-2. 新建或整理 API 请求函数。
-3. 聊天接口统一调用 Express 的 `POST /api/ai/chat`。
-4. 页面显示用户消息。
-5. 页面显示 AI 回复。
-6. 请求中显示 loading。
-7. 请求失败显示 error。
-8. 不直接调用 FastAPI。
-
-验收标准：
-
-前端打开网页，输入一句话，能看到 AI 回复；断网或后端报错时，也能看到清楚的错误提示。
-
-注意事项：
-
-这两天不要做复杂页面，不要做技能树、错题本、资料上传，只做聊天链路页面。
-
-### Express 后端 A
-
-负责范围：主后端桥接 + API 契约。
-
-当前状态：
-
-桥接基础已完成，`/api/ai/chat` 已能调用 FastAPI `/chat`，并把结果包装成统一响应格式。
-
-下一步任务：
-
-1. 维护 `POST /api/ai/chat` 路由。
-2. 接收前端 `message / session_id`。
-3. 调用 FastAPI `POST /chat`。
-4. 维护 `AI_ENGINE_BASE_URL` 和 `AI_ENGINE_TIMEOUT_MS` 环境变量。
-5. 做超时处理。
-6. 做错误处理。
-7. 把 FastAPI 返回包装成统一格式。
-8. 保证前端不需要知道 FastAPI 存在。
-
-验收标准：
-
-用 Postman/curl 调 `POST /api/ai/chat`，Express 能成功转发到 FastAPI，并返回统一格式。
-
-注意事项：
-
-不要写 `materials / quiz / wrongbook` 的具体业务。第 1-2 天只管桥接链路稳定。
-
-### Express 后端 B
-
-负责范围：聊天相关业务上下文 stub。
-
-下一步任务：
-
-1. 准备 demo 学科资料 mock。
-2. 准备 demo 知识点 mock。
-3. 准备 demo 薄弱点 mock。
-4. 准备 demo session history mock。
-5. 提供一个 `chatContext` service。
-6. 让 Express A 可以把上下文传给 AI Engine。
-
-建议新增文件：
+相关文件：
 
 ```text
-src/mock/chatContext.ts
-src/services/chatContext.service.ts
 src/types/chatContext.ts
+src/mock/demoSubject.ts
+src/mock/demoMaterials.ts
+src/mock/demoKnowledgePoints.ts
+src/mock/demoWeakPoints.ts
+src/mock/demoSessionHistory.ts
+src/services/chatContext.service.ts
 ```
 
-验收标准：
+组装入口：
 
-用户问“我该怎么复习”，AI 回复里能体现“当前科目、知识点、薄弱点”，而不是普通聊天机器人回复。
+```ts
+chatContextService.buildContext({ sessionId })
+```
 
-注意事项：
-
-重点是让 AI 聊天从“通用聊天”变成“学习助教聊天”。先做 stub，不接数据库，不做真实 RAG。
-
-### AI Engine
-
-负责范围：FastAPI + Agent + LLM。
-
-下一步任务：
-
-1. 整理 FastAPI 项目入口。
-2. 提供 `POST /chat`。
-3. 接收 `message / session_id / context`。
-4. 拼接学习助教 prompt。
-5. 调用 LLM provider。
-6. 返回标准 JSON。
-7. 做模型调用错误处理。
-8. 不直接修改产品数据。
-
-建议补齐：
+当前返回结构：
 
 ```text
-AI-Agent/requirements.txt
-GET /health
-AI Engine 启动说明
+ChatContext
+  subject
+  materials
+  knowledgePoints
+  weakPoints
+  sessionHistory
+  generatedAt
 ```
 
-验收标准：
+说明：
 
-单独调用 FastAPI `POST /chat`，传入 `message` 和 `context`，能得到真实模型回复。
-
-注意事项：
-
-AI Engine 不直接写技能树状态、不直接写错题本、不直接写学习进度、不直接操作 Express 数据库。AI Engine 只负责：输入上下文，输出 AI 回复。
+- 现在 demo 阶段暂时忽略真实用户系统。
+- 代码保留了 `sessionId` 参数。
+- 后续可以根据 `sessionId` 查询数据库里的用户资料、历史记录和长期记忆。
 
 ## 本地启动
 
@@ -216,7 +154,7 @@ LLM_MAX_OUTPUT_TOKENS=1000
 
 - `AI_ENGINE_BASE_URL` 是 Express 调用 FastAPI 的地址。
 - `AI_ENGINE_TIMEOUT_MS` 是 Express 等待 AI Engine 的超时时间。
-- `LLM_*` 当前主要用于底层 LLM 调试接口；最终真实模型调用优先放在 AI Engine。
+- `LLM_*` 当前主要用于底层 LLM 调试接口；产品聊天主链路优先走 AI Engine。
 - 不要提交 `.env`。
 
 ### 3. 启动 Express
@@ -260,6 +198,8 @@ http://127.0.0.1:8000
 
 ## 接口契约
 
+详细说明见 [docs/API_CONTRACT.md](docs/API_CONTRACT.md)。
+
 ### 健康检查
 
 ```http
@@ -283,12 +223,29 @@ GET /api/health
 POST /api/ai/chat
 ```
 
-请求：
+前端请求格式不变，只需要传 `message` 和 `session_id`：
 
 ```json
 {
   "session_id": "demo-session",
-  "message": "我该怎么复习导数？"
+  "message": "我总是不会把二次函数一般式转成顶点式，应该怎么复习？"
+}
+```
+
+Express 内部会构建 demo chat context，并转发给 FastAPI AI Engine：
+
+```json
+{
+  "session_id": "demo-session",
+  "message": "我总是不会把二次函数一般式转成顶点式，应该怎么复习？",
+  "context": {
+    "subject": {},
+    "materials": [],
+    "knowledgePoints": [],
+    "weakPoints": [],
+    "sessionHistory": [],
+    "generatedAt": "2026-05-31T00:00:00.000Z"
+  }
 }
 ```
 
@@ -298,9 +255,15 @@ POST /api/ai/chat
 {
   "ok": true,
   "data": {
-    "reply": "建议你先复习导数定义...",
-    "text": "建议你先复习导数定义...",
-    "engine": "fastapi"
+    "reply": "可以先从顶点式转换开始复习...",
+    "text": "可以先从顶点式转换开始复习...",
+    "engine": "fastapi",
+    "debugContextSummary": {
+      "materialCount": 3,
+      "knowledgePointCount": 7,
+      "weakPointCount": 3,
+      "sessionHistoryCount": 6
+    }
   }
 }
 ```
@@ -311,7 +274,7 @@ POST /api/ai/chat
 POST /chat
 ```
 
-该接口只用于兼容当前静态前端，返回：
+该接口用于兼容当前静态前端。内部也会给 AI Engine 传 demo chat context，但响应仍保持旧格式：
 
 ```json
 {
@@ -340,8 +303,16 @@ src/
   routes/
   controllers/
   services/
+    aiEngine.service.ts
+    chatContext.service.ts
   mock/
+    demoSubject.ts
+    demoMaterials.ts
+    demoKnowledgePoints.ts
+    demoWeakPoints.ts
+    demoSessionHistory.ts
   types/
+    chatContext.ts
   utils/
 
 AI-Agent/
@@ -359,6 +330,60 @@ docs/
   DEVELOPMENT_FLOW.md
 ```
 
+## 当前协作重点
+
+### 前端
+
+负责范围：聊天页面 + 调 Express API。
+
+下一步任务：
+
+1. 将聊天接口统一切到 Express 的 `POST /api/ai/chat`。
+2. 请求体继续发送 `message` 和 `session_id`。
+3. 页面显示用户消息、AI 回复、loading 和 error。
+4. 不直接调用 FastAPI。
+
+验收标准：
+
+前端打开网页，输入一句二次函数相关问题，能看到 AI 回复；断网或后端报错时，也能看到清楚的错误提示。
+
+### Express 后端
+
+负责范围：产品 API、chat context、AI Engine bridge。
+
+当前状态：
+
+桥接基础已完成，`/api/ai/chat` 和 `/chat` 都会调用 FastAPI `/chat`，并向 AI Engine 传入 demo chat context。
+
+下一步任务：
+
+1. 维护 `POST /api/ai/chat` 路由和统一响应。
+2. 继续维护 `AI_ENGINE_BASE_URL` 和 `AI_ENGINE_TIMEOUT_MS` 环境变量。
+3. 根据 demo 验收反馈调整 chat context mock 内容。
+4. 后续逐步把 mock context 替换为数据库、RAG 和长期记忆数据。
+
+验收标准：
+
+用 Postman/curl 调 `POST /api/ai/chat`，Express 能成功转发到 FastAPI，并返回 `debugContextSummary`。
+
+### AI Engine
+
+负责范围：FastAPI + Agent + LLM。
+
+下一步任务：
+
+1. 提供或维护 `POST /chat`。
+2. 接收 `message / session_id / context`。
+3. 将 `context` 整理进学习助教 prompt。
+4. 调用 LLM provider。
+5. 返回标准 JSON。
+6. 做模型调用错误处理。
+7. 不直接修改产品数据。
+
+验收标准：
+
+单独调用 FastAPI `POST /chat`，传入 `message` 和 `context`，能得到体现学科、知识点、薄弱点和历史对话的模型回复。
+
 ## 开发规则
 
 - 改接口前先更新 `docs/API_CONTRACT.md`。
@@ -370,13 +395,14 @@ docs/
 
 ## 当前最小验收目标
 
-第 1-2 天只验收这一条主链路：
+当前只验收这一条主链路：
 
 ```text
-前端输入一句话
+前端输入一句二次函数学习问题
 -> POST /api/ai/chat
+-> Express 构建 demo chat context
 -> Express 调 FastAPI /chat
--> AI Engine 返回 reply
+-> AI Engine 基于 context 返回 reply
 -> 前端展示 AI 回复
 ```
 
