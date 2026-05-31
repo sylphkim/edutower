@@ -47,13 +47,13 @@ def chat(request: ChatRequest):
     return {"reply": reply} 
  
 # 将本地的 "static" 目录映射到链接的 "/static" 路径下
-app.mount("/static", StaticFiles(directory="static"), name="static") 
+app.mount("/static", StaticFiles(directory="../static"), name="static") 
 
 # 当用户直接访问网址根路径（比如 127.0.0.1:8000）时执行的操作
 @app.get("/") 
 def index(): 
     # 返回 static 文件夹内的 index.html 文件给用户查看
-    return FileResponse("static/index.html") 
+    return FileResponse("../static/index.html") 
 
 # --- 运行脚本 ---
 if __name__ == "__main__": 
