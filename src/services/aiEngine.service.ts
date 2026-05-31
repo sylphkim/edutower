@@ -1,10 +1,12 @@
 import { env } from "../config/env";
+import type { ChatContext } from "../types/chatContext";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
 
 export interface AiEngineChatParams {
   sessionId: string;
   message: string;
+  context?: ChatContext;
 }
 
 export interface AiEngineChatResult {
@@ -37,7 +39,8 @@ export class AiEngineService {
         },
         body: JSON.stringify({
           session_id: sessionId,
-          message
+          message,
+          context: params.context
         }),
         signal: controller.signal
       });
