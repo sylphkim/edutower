@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import { aiEngineService } from "../services/aiEngine.service";
+import { chatContextService } from "../services/chatContext.service";
 import { sendSuccess } from "../utils/apiResponse";
 import { AppError } from "../utils/errors";
 
@@ -7,12 +8,19 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
   try {
     const message = readMessage(req.body);
     const sessionId = readSessionId(req.body);
-    const result = await aiEngineService.chat({ sessionId, message });
+    const context = chatContextService.buildContext({ sessionId });
+    const result = await aiEngineService.chat({ sessionId, message, context });
 
     sendSuccess(res, {
       reply: result.reply,
       text: result.reply,
-      engine: "fastapi"
+      engine: "fastapi",
+      debugContextSummary: {
+        materialCount: context.materials.length,
+        knowledgePointCount: context.knowledgePoints.length,
+        weakPointCount: context.weakPoints.length,
+        sessionHistoryCount: context.sessionHistory.length
+      }
     });
   } catch (error) {
     next(error);
@@ -23,7 +31,8 @@ export async function legacyChat(req: Request, res: Response, next: NextFunction
   try {
     const message = readMessage(req.body);
     const sessionId = readSessionId(req.body);
-    const result = await aiEngineService.chat({ sessionId, message });
+    const context = chatContextService.buildContext({ sessionId });
+    const result = await aiEngineService.chat({ sessionId, message, context });
 
     res.json({
       reply: result.reply
