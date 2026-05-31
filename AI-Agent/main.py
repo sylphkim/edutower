@@ -11,20 +11,11 @@ from pydantic import BaseModel
 
 # 从 Module.module_agent 中导入编排好的智能体类
 from Module.module_agent import ChatAgent
-# 导入 LLM 模块
-from Module.Module_LLM import LLM
 
 
-app = FastAPI() 
-# 实例化 LLM 客户端（接入 DeepSeek V4 Pro API）
-llm = LLM(
-    api_key="sk-xxx",  # TODO: 替换为真实 API key，或从环境变量读取
-    model="deepseek-chat",
-    max_retries=3,
-    timeout=60,
-)
-# 实例化 Agent，注入 LLM 客户端
-agent = ChatAgent(llm_client=llm) 
+app = FastAPI()
+# 实例化 Agent（当前使用模块内默认能力）
+agent = ChatAgent()
 
 # --- 2. 跨域补丁--- 
 # 给你的服务器添加"通行证"配置
