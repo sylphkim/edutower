@@ -13,9 +13,9 @@ from pydantic import BaseModel
 from Module.module_agent import ChatAgent
 
 
-app = FastAPI() 
-# 实例化 Agent，它会自动通过 api_manager 调取共享的 DeepSeek V4 Pro API
-agent = ChatAgent() 
+app = FastAPI()
+# 实例化 Agent（当前使用模块内默认能力）
+agent = ChatAgent()
 
 # --- 2. 跨域补丁--- 
 # 给你的服务器添加"通行证"配置
