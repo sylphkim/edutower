@@ -5,7 +5,7 @@
   "use strict";
 
   const SESSION_STORAGE_KEY = "edutower_session_id";
-  const CHAT_API_PATH = "/api/ai/chat";
+  const CHAT_API_PATH = (window.EDUTOWER_API || "") + "/api/ai/chat";
 
   const chatBody = document.getElementById("chatBody");
   const chatMessages = document.getElementById("chat-messages");
