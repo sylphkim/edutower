@@ -1,8 +1,18 @@
 import { Router } from "express";
-import { listWrongbookItems } from "../controllers/wrongbook.controller";
+import {
+  createWrongbookItem,
+  deleteWrongbookItem,
+  getWrongbookItem,
+  listWrongbookItems,
+  updateWrongbookItem
+} from "../controllers/wrongbook.controller";
 
 const router = Router();
 
 router.get("/", listWrongbookItems);
+router.get("/:id", getWrongbookItem);
+router.post("/", createWrongbookItem);
+router.patch("/:id", updateWrongbookItem);
+router.delete("/:id", deleteWrongbookItem);
 
 export default router;
