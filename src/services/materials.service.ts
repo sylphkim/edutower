@@ -1,8 +1,21 @@
 import { mockMaterialChunks, mockMaterials } from "../mock/materials";
-import type { Material, MaterialChunk, StubPayload } from "../types/edutower";
+import type { Material, MaterialChunk, MaterialSourceType, StubPayload } from "../types/edutower";
 import { createStubPayload } from "./stub.service";
 
 export const materialsService = {
+  createMaterial(params: {
+    title: string;
+    sourceType: MaterialSourceType;
+  }): StubPayload<{ material: Material }> {
+    const base = mockMaterials[0];
+    const material: Material = {
+      ...base,
+      title: params.title,
+      sourceType: params.sourceType
+    };
+    return createStubPayload("materials.upload", "Material uploaded (mock).", { material });
+  },
+
   createUploadPlaceholder(): StubPayload<{ material: Material }> {
     return createStubPayload("materials.upload", "Material upload is scaffolded only.", {
       material: mockMaterials[0]
