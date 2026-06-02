@@ -4,12 +4,29 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>EduTower · AI 智能备考</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <script>
+    window.EDUTOWER_STATIC = location.protocol === "file:" ? "./" : "/static/";
+    window.EDUTOWER_API = location.protocol === "file:" ? "http://127.0.0.1:3000" : "";
+  </script>
+  <link rel="stylesheet" id="edutowerStylesheet" href="/static/style.css" />
+  <script>
+    if (location.protocol === "file:") {
+      document.getElementById("edutowerStylesheet").href = "./style.css";
+    }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Noto+Sans+SC:wght@300;400;500;600&display=swap" rel="stylesheet" />
 </head>
 <body>
+  <div id="localFileWarning" class="local-file-warning" hidden>
+    检测到你是直接打开 HTML 文件。请优先访问 <strong>http://localhost:3000</strong>（需先运行 <code>npm run dev</code>），否则样式和接口可能异常。
+  </div>
+  <script>
+    if (location.protocol === "file:") {
+      document.getElementById("localFileWarning").hidden = false;
+    }
+  </script>
   <div class="app">
     <!-- 左侧导航 -->
     <aside class="app-sidebar">
@@ -22,21 +39,21 @@
       </div>
 
       <nav class="sidebar-nav" aria-label="主导航">
-        <a href="#" class="nav-item">
+        <a href="#" class="nav-item" data-view="home">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 10.5L12 4l9 6.5V20a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1v-9.5z"/></svg>
           <span>首页</span>
         </a>
-        <a href="#" class="nav-item nav-item--active" aria-current="page">
+        <a href="#" class="nav-item nav-item--active" data-view="chat" aria-current="page">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
           <span>AI 智能复习</span>
         </a>
-        <a href="#" class="nav-item">
+        <a href="#" class="nav-item" data-view="wrongbook">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
           <span>错题本</span>
         </a>
-        <a href="#" class="nav-item">
+        <a href="#" class="nav-item" data-view="materials">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
-          <span>资源中心</span>
+          <span>资料录入</span>
         </a>
       </nav>
 
@@ -55,13 +72,13 @@
     <main class="app-main">
       <div class="main-workspace">
         <!-- 对话区 70% -->
-        <section class="chat-zone">
+        <section class="chat-zone view-panel" id="view-chat" data-view="chat">
           <header class="chat-header">
             <div class="chat-header__titles">
               <h1 class="chat-greeting">下午好，李同学</h1>
               <nav class="chat-breadcrumb" aria-label="面包屑">
                 <span class="breadcrumb-sep">|</span>
-                <span class="breadcrumb-current">AI 智能助教</span>
+                <span class="breadcrumb-current" id="viewBreadcrumb">AI 智能助教</span>
               </nav>
             </div>
             <div class="chat-header__actions">
@@ -118,8 +135,112 @@
           </footer>
         </section>
 
+        <!-- 资料录入区 70% -->
+        <section class="materials-zone view-panel is-hidden" id="view-materials" data-view="materials" aria-hidden="true">
+          <header class="chat-header">
+            <div class="chat-header__titles">
+              <h1 class="chat-greeting">资料录入</h1>
+              <nav class="chat-breadcrumb" aria-label="面包屑">
+                <span class="breadcrumb-sep">|</span>
+                <span class="breadcrumb-current">学习资料管理</span>
+              </nav>
+            </div>
+          </header>
+
+          <div class="materials-body">
+            <p class="materials-intro">
+              录入笔记、链接或文档资料，供 AI 助教在复习时引用。当前后端为演示接口，提交后会进入待索引队列。
+            </p>
+
+            <div id="materialsStatus" class="materials-status" role="status" aria-live="polite" hidden></div>
+
+            <form id="materialForm" class="material-form" novalidate>
+              <div class="form-row">
+                <label class="form-label" for="materialTitle">资料标题</label>
+                <input
+                  id="materialTitle"
+                  name="title"
+                  class="form-input"
+                  type="text"
+                  maxlength="120"
+                  placeholder="例如：函数与导数课堂笔记"
+                  required
+                />
+              </div>
+
+              <div class="form-row">
+                <span class="form-label">资料类型</span>
+                <div class="source-type-tabs" role="tablist" aria-label="资料类型">
+                  <button type="button" class="source-type-tab source-type-tab--active" data-source-type="text" role="tab" aria-selected="true">文本笔记</button>
+                  <button type="button" class="source-type-tab" data-source-type="link" role="tab" aria-selected="false">网页链接</button>
+                  <button type="button" class="source-type-tab" data-source-type="pdf" role="tab" aria-selected="false">PDF 文档</button>
+                  <button type="button" class="source-type-tab" data-source-type="doc" role="tab" aria-selected="false">Word 文档</button>
+                </div>
+              </div>
+
+              <div class="form-row">
+                <label class="form-label" for="materialSubject">所属学科（可选）</label>
+                <input
+                  id="materialSubject"
+                  name="subject"
+                  class="form-input"
+                  type="text"
+                  maxlength="40"
+                  placeholder="例如：数学"
+                />
+              </div>
+
+              <div class="form-row form-row--source" data-source-panel="text">
+                <label class="form-label" for="materialContent">笔记内容</label>
+                <textarea
+                  id="materialContent"
+                  name="content"
+                  class="form-textarea"
+                  rows="8"
+                  placeholder="粘贴或输入你的学习笔记、公式推导、课堂重点…"
+                ></textarea>
+              </div>
+
+              <div class="form-row form-row--source is-hidden" data-source-panel="link">
+                <label class="form-label" for="materialLink">网页地址</label>
+                <input
+                  id="materialLink"
+                  name="url"
+                  class="form-input"
+                  type="url"
+                  placeholder="https://example.com/notes"
+                />
+              </div>
+
+              <div class="form-row form-row--source is-hidden" data-source-panel="pdf">
+                <label class="form-label" for="materialPdf">选择 PDF 文件</label>
+                <div class="file-drop">
+                  <input id="materialPdf" name="pdfFile" type="file" accept=".pdf,application/pdf" />
+                  <p class="file-drop__hint">支持 PDF，演示阶段仅记录文件名，实际上传能力待后端接入。</p>
+                </div>
+              </div>
+
+              <div class="form-row form-row--source is-hidden" data-source-panel="doc">
+                <label class="form-label" for="materialDoc">选择 Word 文件</label>
+                <div class="file-drop">
+                  <input id="materialDoc" name="docFile" type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+                  <p class="file-drop__hint">支持 .doc / .docx，演示阶段仅记录文件名。</p>
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button type="button" class="btn btn--ghost" id="materialResetBtn">清空表单</button>
+                <button type="submit" class="btn btn--primary" id="materialSubmitBtn">
+                  <span class="btn__label">提交资料</span>
+                  <span class="btn__loading is-hidden" aria-hidden="true">提交中…</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+
         <!-- Agent 辅助面板 30% -->
-        <aside class="agent-panel">
+        <aside class="agent-panel view-side-panel" id="agentPanel" data-view-side="chat">
           <div class="panel-card panel-card--status">
             <h2 class="panel-title">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
@@ -199,6 +320,25 @@
             </ul>
           </div>
         </aside>
+
+        <!-- 资料列表面板 30% -->
+        <aside class="materials-panel view-side-panel is-hidden" id="materialsPanel" data-view-side="materials" aria-hidden="true">
+          <div class="panel-card panel-card--materials">
+            <h2 class="panel-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+              已录入资料
+            </h2>
+            <p class="materials-panel__hint">包含本地录入与后端 mock 索引片段</p>
+            <ul id="materialsList" class="materials-list"></ul>
+            <p id="materialsListEmpty" class="materials-list__empty">暂无资料，请在左侧表单提交第一条。</p>
+          </div>
+
+          <div class="panel-card panel-card--chunks">
+            <h2 class="panel-title">知识片段预览</h2>
+            <ul id="materialChunksList" class="chunk-list"></ul>
+            <p id="materialChunksEmpty" class="materials-list__empty">提交资料后将展示可检索片段。</p>
+          </div>
+        </aside>
       </div>
 
       <footer class="app-footer">
@@ -216,6 +356,15 @@
     </main>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script>
+    (function () {
+      var base = window.EDUTOWER_STATIC || "/static/";
+      ["shell.js", "app.js", "materials.js"].forEach(function (file) {
+        var script = document.createElement("script");
+        script.src = base + file;
+        document.body.appendChild(script);
+      });
+    })();
+  </script>
 </body>
 </html>
