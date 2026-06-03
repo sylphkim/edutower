@@ -12,8 +12,10 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
     const result = await aiEngineService.chat({ sessionId, message, context });
 
     sendSuccess(res, {
+      answer: result.reply,
       reply: result.reply,
       text: result.reply,
+      session_id: sessionId,
       engine: "fastapi",
       debugContextSummary: {
         materialCount: context.materials.length,

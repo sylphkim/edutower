@@ -1,317 +1,146 @@
 /**
- * EduTower — 前端与 FastAPI /api/ai/chat 对接
+ * EduTower — 前端交互逻辑
+ * 与 Express 服务器 /api/ai/chat 对接（Express 代理到 FastAPI）
  */
 (function () {
   "use strict";
 
-  const SESSION_STORAGE_KEY = "edutower_session_id";
-  const CHAT_API_PATH = (window.EDUTOWER_API || "") + "/api/ai/chat";
-
-  const chatBody = document.getElementById("chatBody");
+  /* ===== DOM 引用 ===== */
   const chatMessages = document.getElementById("chat-messages");
   const userInput = document.getElementById("user-input");
   const sendBtn = document.getElementById("send-btn");
+  const chatBody = document.getElementById("chatBody");
   const chatDateEl = document.getElementById("chatDate");
 
   if (!chatMessages || !userInput || !sendBtn) {
-    console.error("[EduTower] 缺少必要的 DOM 元素：#chat-messages、#user-input 或 #send-btn");
+    console.error("[EduTower] 缺少必要的 DOM 元素");
     return;
   }
 
+  /* ===== 状态 ===== */
+  const SESSION_KEY = "edutower_session_id";
+  let sessionId = sessionStorage.getItem(SESSION_KEY) || "";
   let isSending = false;
 
-  const AI_AVATAR_SVG =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">' +
-    '<path d="M12 3l1.5 4.5H18l-3.5 2.5 1.5 4.5L12 12l-4 2.5 1.5-4.5L6 7.5h4.5L12 3z"/></svg>';
-
-  initChatDate();
-  bindEvents();
-  scrollToBottom();
-
-  /** ---------- Session ---------- */
-
-  function getSessionId() {
-    let sessionId = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!sessionId) {
-      sessionId =
-        typeof crypto !== "undefined" && crypto.randomUUID
-          ? crypto.randomUUID()
-          : "sess_" + Date.now() + "_" + Math.random().toString(36).slice(2, 11);
-      localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-    }
-    return sessionId;
+  /* ===== 工具函数 ===== */
+  function getTimestamp() {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2, "0");
+    const m = String(now.getMinutes()).padStart(2, "0");
+    return `${h}:${m}`;
   }
 
-  /** ---------- UI helpers ---------- */
-
-  function initChatDate() {
+  function setChatDate() {
     if (!chatDateEl) return;
     const now = new Date();
+    const y = now.getFullYear();
+    const mo = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
     const weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
-    chatDateEl.textContent =
-      now.getFullYear() +
-      "年" +
-      (now.getMonth() + 1) +
-      "月" +
-      now.getDate() +
-      "日 · " +
-      weekdays[now.getDay()];
+    chatDateEl.textContent = `${y}年${mo}月${d}日 ${weekdays[now.getDay()]}`;
   }
 
-  function formatTime() {
-    return new Date().toLocaleTimeString("zh-CN", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-  }
-
-  function getScrollContainer() {
-    return chatBody || chatMessages;
-  }
-
-  function scrollToBottom() {
-    const container = getScrollContainer();
-    requestAnimationFrame(function () {
-      container.scrollTop = container.scrollHeight;
-    });
-  }
-
-  function autoResizeTextarea() {
-    userInput.style.height = "auto";
-    userInput.style.height = Math.min(userInput.scrollHeight, 120) + "px";
-  }
-
-  function setComposerDisabled(disabled) {
-    userInput.disabled = disabled;
-    sendBtn.disabled = disabled;
-    isSending = disabled;
-  }
-
-  function fillBubbleText(bubbleEl, text) {
-    bubbleEl.innerHTML = "";
-    const lines = String(text).split(/\n/).filter(function (line, i, arr) {
-      return line.length > 0 || (arr.length === 1 && i === 0);
-    });
-    if (lines.length === 0) {
-      const p = document.createElement("p");
-      p.textContent = "";
-      bubbleEl.appendChild(p);
-      return;
-    }
-    lines.forEach(function (line) {
-      const p = document.createElement("p");
-      p.textContent = line;
-      bubbleEl.appendChild(p);
-    });
-  }
-
-  /** ---------- Message DOM ---------- */
-
-  function createUserMessage(text) {
-    const wrap = document.createElement("div");
-    wrap.className = "message message--user user-message";
-
-    const content = document.createElement("div");
-    content.className = "message-content message-content--user";
-
-    const bubble = document.createElement("div");
-    bubble.className = "message-bubble message-bubble--user";
-    const p = document.createElement("p");
-    p.textContent = text;
-    bubble.appendChild(p);
-
-    const time = document.createElement("time");
-    time.className = "message-time";
-    time.textContent = formatTime();
-
-    content.appendChild(bubble);
-    content.appendChild(time);
-    wrap.appendChild(content);
-    return wrap;
-  }
-
-  function createAiMessageShell(options) {
-    const opts = options || {};
-    const wrap = document.createElement("div");
-    wrap.className = "message message--ai ai-message";
-    if (opts.loading) wrap.classList.add("loading-status");
-    if (opts.error) wrap.classList.add("message--error");
-    if (opts.id) wrap.id = opts.id;
+  /* ===== 添加消息气泡 ===== */
+  function addMessage(role, text) {
+    const div = document.createElement("div");
+    div.className = `message ${role === "user" ? "message--user" : "message--ai"}`;
 
     const avatar = document.createElement("div");
-    avatar.className = "message-avatar message-avatar--ai";
-    avatar.setAttribute("aria-hidden", "true");
-    avatar.innerHTML = AI_AVATAR_SVG;
+    avatar.className = "message__avatar";
+    avatar.textContent = role === "user" ? "🧑" : "🤖";
 
     const content = document.createElement("div");
-    content.className = "message-content";
+    content.className = "message__content";
+    content.textContent = text;
 
-    const sender = document.createElement("span");
-    sender.className = "message-sender";
-    sender.textContent = opts.error ? "系统提示" : "EduTower Agent";
+    const time = document.createElement("div");
+    time.className = "message__time";
+    time.textContent = getTimestamp();
 
-    const bubble = document.createElement("div");
-    bubble.className = "message-bubble message-bubble--ai";
+    div.appendChild(avatar);
+    div.appendChild(content);
+    div.appendChild(time);
+    chatMessages.appendChild(div);
 
-    const time = document.createElement("time");
-    time.className = "message-time";
-    time.textContent = formatTime();
-
-    content.appendChild(sender);
-    content.appendChild(bubble);
-    content.appendChild(time);
-    wrap.appendChild(avatar);
-    wrap.appendChild(content);
-
-    return { wrap: wrap, bubble: bubble, time: time };
+    // 自动滚动到底部
+    chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  function createLoadingMessage() {
-    const id = "loading-" + Date.now();
-    const shell = createAiMessageShell({ loading: true, id: id });
-    const loadingLine = document.createElement("p");
-    loadingLine.className = "loading-text";
-    loadingLine.textContent = "AI 正在思考中";
-
-    const dots = document.createElement("span");
-    dots.className = "loading-dots";
-    dots.setAttribute("aria-hidden", "true");
-    dots.innerHTML = "<span></span><span></span><span></span>";
-
-    loadingLine.appendChild(dots);
-    shell.bubble.appendChild(loadingLine);
-
-    return { element: shell.wrap, id: id };
-  }
-
-  function appendUserMessage(text) {
-    chatMessages.appendChild(createUserMessage(text));
-    scrollToBottom();
-  }
-
-  function appendLoadingMessage() {
-    const loading = createLoadingMessage();
-    chatMessages.appendChild(loading.element);
-    scrollToBottom();
-    return loading;
-  }
-
-  function removeLoadingMessage(loadingRef) {
-    if (!loadingRef || !loadingRef.element) return;
-    loadingRef.element.remove();
-  }
-
-  function appendAiReply(text) {
-    const shell = createAiMessageShell();
-    fillBubbleText(shell.bubble, text);
-    chatMessages.appendChild(shell.wrap);
-    scrollToBottom();
-  }
-
-  function appendErrorMessage(message) {
-    const shell = createAiMessageShell({ error: true });
-    const p = document.createElement("p");
-    p.textContent = message;
-    shell.bubble.appendChild(p);
-    chatMessages.appendChild(shell.wrap);
-    scrollToBottom();
-  }
-
-  /** ---------- API ---------- */
-
-  async function requestChatReply(message) {
-    const response = await fetch(CHAT_API_PATH, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        session_id: getSessionId(),
-        message: message,
-      }),
-    });
-
-    let result = null;
-    try {
-      result = await response.json();
-    } catch (_parseErr) {
-      if (!response.ok) {
-        throw new Error("服务器返回了无法解析的响应（HTTP " + response.status + "）");
-      }
-      throw new Error("服务器返回了无效的 JSON 数据");
-    }
-
-    if (result && result.ok === true) {
-      const reply = result.data && result.data.reply;
-      if (typeof reply !== "string") {
-        throw new Error("服务器响应格式异常，未找到 data.reply 字段");
-      }
-      return reply;
-    }
-
-    const backendMessage = result && result.error && result.error.message;
-    if (typeof backendMessage === "string" && backendMessage.trim()) {
-      throw new Error(backendMessage.trim());
-    }
-
-    if (!response.ok) {
-      throw new Error("请求失败（HTTP " + response.status + "）");
-    }
-
-    throw new Error("服务器响应格式异常，预期 { ok, data/error }");
-  }
-
-  /** ---------- Send flow ---------- */
-
+  /* ===== 发送消息 ===== */
   async function sendMessage() {
     if (isSending) return;
 
-    const text = userInput.value.trim();
-    if (!text) return;
+    const message = userInput.value.trim();
+    if (!message) return;
 
-    appendUserMessage(text);
+    // 清空输入
     userInput.value = "";
-    autoResizeTextarea();
-    setComposerDisabled(true);
 
-    const loadingRef = appendLoadingMessage();
+    // 显示用户消息
+    addMessage("user", message);
+
+    // 显示 AI 正在输入提示
+    isSending = true;
+    sendBtn.disabled = true;
+    sendBtn.textContent = "发送中...";
 
     try {
-      const reply = await requestChatReply(text);
-      appendAiReply(reply);
+      const response = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message,
+          session_id: sessionId || null
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`服务器错误: ${response.status}`);
+      }
+
+      const responseData = await response.json();
+
+      // 解包 { ok, data } 响应格式
+      const data = responseData && responseData.ok === true ? responseData.data : responseData;
+
+      // 保存 session_id（如果是新的）
+      if (data && data.session_id) {
+        sessionId = data.session_id;
+        sessionStorage.setItem(SESSION_KEY, sessionId);
+      }
+
+      // 显示 AI 回复（兼容 answer / reply / text 字段）
+      const replyText = data && (data.answer || data.reply || data.text);
+      addMessage("ai", replyText || "抱歉，我没有理解您的问题。");
+
     } catch (err) {
-      console.error("[EduTower] /api/ai/chat 请求失败:", err);
-
-      const friendly =
-        err instanceof TypeError && /fetch|network/i.test(String(err.message))
-          ? "网络连接似乎出了问题，请确认后端服务已启动，然后稍后再试。"
-          : "抱歉，暂时无法获取 AI 回复：" +
-            (err.message || "未知错误") +
-            "。请稍后重试。";
-
-      appendErrorMessage(friendly);
+      console.error("[EduTower] 请求失败:", err);
+      addMessage("ai", `连接失败: ${err.message}。请检查网络连接后重试。`);
     } finally {
-      removeLoadingMessage(loadingRef);
-      setComposerDisabled(false);
-      userInput.focus();
+      isSending = false;
+      sendBtn.disabled = false;
+      sendBtn.textContent = "发送";
     }
   }
 
-  /** ---------- Events ---------- */
+  /* ===== 事件绑定 ===== */
+  sendBtn.addEventListener("click", sendMessage);
 
-  function bindEvents() {
-    sendBtn.addEventListener("click", function () {
+  userInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
       sendMessage();
-    });
+    }
+  });
 
-    userInput.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
+  // 初始设置日期
+  setChatDate();
 
-    userInput.addEventListener("input", autoResizeTextarea);
+  // 如果有 sessionId 但无消息，清空并重置
+  if (sessionId && chatMessages.children.length === 0) {
+    // 新会话，显示欢迎语
+    addMessage("ai", "你好！我是 EduTower AI 助手，有什么可以帮助你的？");
   }
+
+  console.log("[EduTower] 前端逻辑已加载");
 })();

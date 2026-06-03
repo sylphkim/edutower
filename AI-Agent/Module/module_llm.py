@@ -3,7 +3,7 @@ import time
 import logging
 from pathlib import Path
 from typing import List, Dict, Generator
-from openai import OpenAI, APIConnectionError, APITimeoutError
+from openai import OpenAI, APIConnectionError, APITimeoutError, InternalServerError
 import httpx
 from dotenv import load_dotenv
 
@@ -29,7 +29,6 @@ def _is_transient_error(exc: Exception) -> bool:
         return True
     if isinstance(exc, (APIConnectionError, APITimeoutError)):
         return True
-    from openai import InternalServerError
     if isinstance(exc, InternalServerError):
         return True
     status_err = getattr(exc, "status_code", None)
@@ -50,10 +49,10 @@ class LLMConfig:
         top_p: float = 1.0,
         system_prompt: str = "You are a helpful assistant.",
     ):
-        # 优先级：显式传入 > 环境变量 > 硬编码默认值
-        self.api_key = api_key or os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or ""
-        self.base_url = base_url or os.getenv("LLM_BASE_URL") or "https://api.deepseek.com"
-        self.model = model or os.getenv("LLM_MODEL") or "deepseek-v4-flash"
+        # 优先级：显式传入 > 环境变量
+        self.api_key = api_key or os.getenv("LLM_API_KEY") or ""
+        self.base_url = base_url or os.getenv("LLM_BASE_URL") or ""
+        self.model = model or os.getenv("LLM_MODEL") or ""
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.top_p = top_p
@@ -70,6 +69,21 @@ def configure(**kwargs):
 
 
 def _build_client() -> OpenAI:
+    if not _config.api_key:
+        raise RuntimeError(
+            "LLM_API_KEY is not configured. "
+            "Set it in AI-Agent/Module/.env or pass it via configure(api_key=...)."
+        )
+    if not _config.base_url:
+        raise RuntimeError(
+            "LLM_BASE_URL is not configured. "
+            "Set it in AI-Agent/Module/.env or pass it via configure(base_url=...)."
+        )
+    if not _config.model:
+        raise RuntimeError(
+            "LLM_MODEL is not configured. "
+            "Set it in AI-Agent/Module/.env or pass it via configure(model=...)."
+        )
     return OpenAI(
         api_key=_config.api_key,
         base_url=_config.base_url,
@@ -113,18 +127,26 @@ def _stream_response(response) -> Generator:
 
 
 def call_llm(messages: List[Dict], **overrides) -> str:
+    system_prompt = overrides.get("system_prompt")
+    if system_prompt is None:
+        system_prompt = _config.system_prompt
+
     msgs = []
-    if _config.system_prompt:
-        msgs.append({"role": "system", "content": _config.system_prompt})
+    if system_prompt:
+        msgs.append({"role": "system", "content": system_prompt})
     msgs.extend(messages)
 
     return _call_with_retry(msgs, stream=False)
 
 
 def call_llm_stream(messages: List[Dict], **overrides) -> Generator:
+    system_prompt = overrides.get("system_prompt")
+    if system_prompt is None:
+        system_prompt = _config.system_prompt
+
     msgs = []
-    if _config.system_prompt:
-        msgs.append({"role": "system", "content": _config.system_prompt})
+    if system_prompt:
+        msgs.append({"role": "system", "content": system_prompt})
     msgs.extend(messages)
 
     yield from _call_with_retry(msgs, stream=True)

@@ -31,18 +31,20 @@ app.add_middleware(
 
 # --- 3. 数据契约：定义前后端沟通的"暗号" --- 
 # 定义一个聊天请求的结构，前端必须按这个格式发数据，否则 FastAPI 会自动报错拦截
-class ChatRequest(BaseModel): 
+class ChatRequest(BaseModel):
     # 要求必须包含 session_id（字符串类型），用于区分不同用户的对话
     session_id: str
     # 要求必须包含 message（字符串类型），这就是用户输入的提问内容
     message: str
+    # 可选：Express 后端传来的学习上下文（学生画像、知识图谱、错题等）
+    context: dict | None = None
 
 # --- 4. 路由逻辑：处理真正的聊天请求 ---
 # 定义一个 POST 类型的接口，路径是 /chat
-@app.post("/chat") 
-def chat(request: ChatRequest): 
+@app.post("/chat")
+def chat(request: ChatRequest):
     # 调用 agent 的阻塞式 run 方法，中间步骤会自动打印到 stdout
-    reply = agent.run(request.session_id, request.message)
+    reply = agent.run(request.session_id, request.message, context=request.context)
     # 将 AI 的回复封装成 JSON 格式返回给前端显示
     return {"reply": reply} 
  
