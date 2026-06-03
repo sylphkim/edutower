@@ -1,35 +1,34 @@
 import { Request, Response } from "express";
 import { materialsService } from "../services/materials.service";
-import { sendSuccess, sendError } from "../utils/apiResponse";
-import { MaterialSourceType } from "../types/edutower";
+import { sendSuccess } from "../utils/apiResponse";
 
-const VALID_SOURCE_TYPES: MaterialSourceType[] = ["pdf", "doc", "text", "link"];
-
-export function uploadMaterial(req: Request, res: Response): void {
-  const { title, sourceType } = req.body;
-
-  if (!title || typeof title !== "string" || !title.trim()) {
-    sendError(res, 400, "INVALID_REQUEST", "title is required and must be a non-empty string.");
-    return;
-  }
-
-  if (!VALID_SOURCE_TYPES.includes(sourceType)) {
-    sendError(
-      res,
-      400,
-      "INVALID_REQUEST",
-      `sourceType must be one of: ${VALID_SOURCE_TYPES.join(", ")}.`
-    );
-    return;
-  }
-
-  const result = materialsService.createMaterial({
-    title: title.trim(),
-    sourceType
-  });
-  sendSuccess(res, result, 202);
+export function listMaterials(_req: Request, res: Response): void {
+  sendSuccess(res, materialsService.list());
 }
 
-export function listMaterialChunks(_req: Request, res: Response): void {
-  sendSuccess(res, materialsService.listChunks());
+export function getMaterial(req: Request, res: Response): void {
+  const { id } = req.params;
+  const result = materialsService.getById(id);
+
+  sendSuccess(res, result);
+}
+
+export function createMaterial(req: Request, res: Response): void {
+  const result = materialsService.create(req.body);
+
+  sendSuccess(res, result, 201);
+}
+
+export function updateMaterial(req: Request, res: Response): void {
+  const { id } = req.params;
+  const result = materialsService.update(id, req.body);
+
+  sendSuccess(res, result);
+}
+
+export function deleteMaterial(req: Request, res: Response): void {
+  const { id } = req.params;
+  const result = materialsService.remove(id);
+
+  sendSuccess(res, result);
 }
