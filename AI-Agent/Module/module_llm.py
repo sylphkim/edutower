@@ -9,15 +9,17 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-# 加载 Module 目录下的 .env 文件
-_ENV_PATH = Path(__file__).resolve().parent / ".env"
-if _ENV_PATH.exists():
-    load_dotenv(_ENV_PATH)
-else:
-    # 回退：尝试加载项目根目录的 .env
-    _ROOT_ENV = Path(__file__).resolve().parent.parent / ".env"
-    if _ROOT_ENV.exists():
-        load_dotenv(_ROOT_ENV)
+# 环境变量加载顺序（与 README / 团队约定一致）：
+# 1. 项目根目录 edutower/.env（主配置）
+# 2. AI-Agent/Module/.env（可选本地覆盖）
+_MODULE_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT_ENV = _MODULE_DIR.parent.parent / ".env"
+_MODULE_ENV = _MODULE_DIR / ".env"
+
+if _PROJECT_ROOT_ENV.exists():
+    load_dotenv(_PROJECT_ROOT_ENV)
+if _MODULE_ENV.exists():
+    load_dotenv(_MODULE_ENV, override=True)
 
 _LLM_TIMEOUT = httpx.Timeout(600.0, connect=15.0)
 _MAX_RETRIES = 3
@@ -72,7 +74,7 @@ def _build_client() -> OpenAI:
     if not _config.api_key:
         raise RuntimeError(
             "LLM_API_KEY is not configured. "
-            "Set it in AI-Agent/Module/.env or pass it via configure(api_key=...)."
+            "Set it in the project root .env (recommended) or AI-Agent/Module/.env."
         )
     if not _config.base_url:
         raise RuntimeError(

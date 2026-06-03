@@ -1,13 +1,12 @@
 /**
  * EduTower — 资料录入与列表
+ * 对接 Express CRUD：GET/POST /api/materials
  */
 (function () {
   "use strict";
 
-  var LOCAL_STORAGE_KEY = "edutower_materials_local";
   var API_BASE = window.EDUTOWER_API || "";
-  var UPLOAD_API = API_BASE + "/api/materials/upload";
-  var CHUNKS_API = API_BASE + "/api/materials/chunks";
+  var MATERIALS_API = API_BASE + "/api/materials";
 
   var form = document.getElementById("materialForm");
   if (!form) {
@@ -32,6 +31,7 @@
 
   var currentSourceType = "text";
   var isSubmitting = false;
+  var isDeleting = false;
 
   bindEvents();
   refresh();
@@ -49,6 +49,21 @@
     });
 
     resetBtn.addEventListener("click", resetForm);
+
+    listEl.addEventListener("click", function (event) {
+      var target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (!target.matches("[data-action='delete-material']")) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      var materialId = target.getAttribute("data-material-id");
+      var materialTitle = target.getAttribute("data-material-title") || "该资料";
+      if (materialId) {
+        deleteMaterial(materialId, materialTitle);
+      }
+    });
   }
 
   function setSourceType(type) {
@@ -150,6 +165,43 @@
     };
   }
 
+  function buildSummary(payload) {
+    var subjectPrefix = payload.subject ? "【" + payload.subject + "】 " : "";
+
+    if (payload.sourceType === "text") {
+      return subjectPrefix + payload.content;
+    }
+
+    if (payload.sourceType === "link") {
+      return subjectPrefix + payload.url;
+    }
+
+    return subjectPrefix + payload.fileName;
+  }
+
+  function mapToApiBody(payload) {
+    var typeMap = {
+      text: "note",
+      link: "other",
+      pdf: "slides",
+      doc: "outline",
+    };
+
+    return {
+      title: payload.title,
+      type: typeMap[payload.sourceType] || "other",
+      source: payload.sourceType === "text" || payload.sourceType === "link" ? "manual" : "uploaded",
+      summary: buildSummary(payload),
+    };
+  }
+
+  function extractErrorMessage(result, response) {
+    if (result && result.error && typeof result.error.message === "string") {
+      return result.error.message.trim();
+    }
+    return "请求失败（HTTP " + response.status + "）";
+  }
+
   async function submitMaterial() {
     if (isSubmitting) return;
 
@@ -160,37 +212,22 @@
     hideStatus();
 
     try {
-      var response = await fetch(UPLOAD_API, {
+      var response = await fetch(MATERIALS_API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(mapToApiBody(payload)),
       });
 
       var result = await response.json();
 
-      if (result && result.ok === true) {
-        var material = extractMaterial(result.data);
-        var localEntry = buildLocalEntry(payload, material);
-        saveLocalMaterial(localEntry);
-
-        var stubMessage =
-          result.data &&
-          result.data.meta &&
-          typeof result.data.meta.message === "string"
-            ? result.data.meta.message
-            : "资料已提交。";
-
-        showStatus("提交成功：" + localEntry.title + "（" + stubMessage + "）", "success");
+      if (result && result.ok === true && result.data) {
+        showStatus("提交成功：" + result.data.title, "success");
         resetForm();
         refresh();
         return;
       }
 
-      var errorMessage =
-        result && result.error && result.error.message
-          ? result.error.message
-          : "提交失败（HTTP " + response.status + "）";
-      showStatus(errorMessage, "error");
+      showStatus(extractErrorMessage(result, response), "error");
     } catch (err) {
       var friendly =
         err instanceof TypeError && /fetch|network/i.test(String(err.message))
@@ -202,57 +239,82 @@
     }
   }
 
-  function extractMaterial(data) {
-    if (!data || typeof data !== "object") return null;
-    if (data.result && data.result.material) return data.result.material;
-    if (data.material) return data.material;
-    return null;
-  }
-
-  function buildLocalEntry(payload, serverMaterial) {
-    return {
-      id: (serverMaterial && serverMaterial.id) || "local-" + Date.now(),
-      title: payload.title,
-      subject: payload.subject || "未分类",
-      sourceType: payload.sourceType,
-      status: (serverMaterial && serverMaterial.status) || "pending",
-      uploadedAt: new Date().toISOString(),
-      preview:
-        payload.sourceType === "text"
-          ? payload.content.slice(0, 120)
-          : payload.sourceType === "link"
-            ? payload.url
-            : payload.fileName,
-    };
-  }
-
-  function readLocalMaterials() {
+  async function fetchMaterials() {
     try {
-      var raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-      var parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (_err) {
-      return [];
-    }
-  }
-
-  function saveLocalMaterial(entry) {
-    var list = readLocalMaterials();
-    list.unshift(entry);
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(list.slice(0, 50)));
-  }
-
-  async function fetchChunks() {
-    try {
-      var response = await fetch(CHUNKS_API);
+      var response = await fetch(MATERIALS_API);
       var result = await response.json();
-      if (result && result.ok === true && result.data && result.data.result) {
-        return result.data.result.chunks || [];
+
+      if (result && result.ok === true && result.data && Array.isArray(result.data.items)) {
+        return result.data.items;
       }
     } catch (_err) {
       /* ignore */
     }
+
     return [];
+  }
+
+  function buildPreviewChunks(items) {
+    var chunks = [];
+
+    items.forEach(function (item) {
+      if (!item.summary) return;
+
+      var parts = item.summary
+        .split(/\n+|(?<=[。！？.!?])\s*/)
+        .map(function (part) {
+          return part.trim();
+        })
+        .filter(Boolean);
+
+      if (parts.length === 0) {
+        parts = [item.summary];
+      }
+
+      parts.forEach(function (text) {
+        chunks.push({
+          order: chunks.length + 1,
+          text: text,
+          title: item.title,
+        });
+      });
+    });
+
+    return chunks;
+  }
+
+  async function deleteMaterial(id, title) {
+    if (isDeleting) return;
+
+    if (!window.confirm("确定删除「" + title + "」吗？删除后不可恢复。")) {
+      return;
+    }
+
+    isDeleting = true;
+    hideStatus();
+
+    try {
+      var response = await fetch(MATERIALS_API + "/" + encodeURIComponent(id), {
+        method: "DELETE",
+      });
+      var result = await response.json();
+
+      if (result && result.ok === true) {
+        showStatus("已删除：" + title, "success");
+        refresh();
+        return;
+      }
+
+      showStatus(extractErrorMessage(result, response), "error");
+    } catch (err) {
+      var friendly =
+        err instanceof TypeError && /fetch|network/i.test(String(err.message))
+          ? "网络连接失败，请确认 Express 后端已启动。"
+          : err.message || "未知错误";
+      showStatus("删除失败：" + friendly, "error");
+    } finally {
+      isDeleting = false;
+    }
   }
 
   function renderMaterialsList(items) {
@@ -264,24 +326,39 @@
       var li = document.createElement("li");
       li.className = "materials-list__item";
 
+      var header = document.createElement("div");
+      header.className = "materials-list__header";
+
       var title = document.createElement("strong");
       title.className = "materials-list__title";
       title.textContent = item.title;
 
+      var deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "materials-list__delete";
+      deleteBtn.setAttribute("data-action", "delete-material");
+      deleteBtn.setAttribute("data-material-id", item.id);
+      deleteBtn.setAttribute("data-material-title", item.title);
+      deleteBtn.setAttribute("aria-label", "删除资料：" + item.title);
+      deleteBtn.textContent = "删除";
+
+      header.appendChild(title);
+      header.appendChild(deleteBtn);
+
       var meta = document.createElement("span");
       meta.className = "materials-list__meta";
       meta.textContent =
-        formatSourceType(item.sourceType) +
+        formatMaterialType(item.type) +
         " · " +
-        (item.subject || "未分类") +
+        formatMaterialSource(item.source) +
         " · " +
         formatStatus(item.status);
 
       var preview = document.createElement("p");
       preview.className = "materials-list__preview";
-      preview.textContent = item.preview || "—";
+      preview.textContent = item.summary || "—";
 
-      li.appendChild(title);
+      li.appendChild(header);
       li.appendChild(meta);
       li.appendChild(preview);
       listEl.appendChild(li);
@@ -305,36 +382,53 @@
       text.className = "chunk-list__text";
       text.textContent = chunk.text;
 
+      if (chunk.title) {
+        var source = document.createElement("span");
+        source.className = "chunk-list__source";
+        source.textContent = chunk.title;
+        li.appendChild(source);
+      }
+
       li.appendChild(order);
       li.appendChild(text);
       chunksEl.appendChild(li);
     });
   }
 
-  function formatSourceType(type) {
+  function formatMaterialType(type) {
     var map = {
-      text: "文本笔记",
-      link: "网页链接",
-      pdf: "PDF",
-      doc: "Word",
+      note: "文本笔记",
+      slides: "PDF/课件",
+      outline: "Word/大纲",
+      photo: "图片",
+      other: "其他",
     };
     return map[type] || type;
   }
 
+  function formatMaterialSource(source) {
+    var map = {
+      manual: "手动录入",
+      uploaded: "文件上传",
+      mock: "系统示例",
+    };
+    return map[source] || source;
+  }
+
   function formatStatus(status) {
     var map = {
-      indexed: "已索引",
-      uploaded: "已上传",
+      ready: "已就绪",
       pending: "待处理",
+      processing: "处理中",
+      failed: "失败",
     };
     return map[status] || status || "待处理";
   }
 
   async function refresh() {
-    var localItems = readLocalMaterials();
-    renderMaterialsList(localItems);
-    var chunks = await fetchChunks();
-    renderChunksList(chunks);
+    var items = await fetchMaterials();
+    renderMaterialsList(items);
+    renderChunksList(buildPreviewChunks(items));
   }
 
   window.EduTowerMaterials = {
