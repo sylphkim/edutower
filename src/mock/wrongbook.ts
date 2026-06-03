@@ -1,4 +1,4 @@
-import type { WrongbookItem } from "../types/edutower";
+import type { WrongbookItem } from "../types/wrongbook";
 import { mockQuizSession } from "./quiz";
 
 export const mockWrongbookItems: WrongbookItem[] = [

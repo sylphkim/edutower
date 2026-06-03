@@ -1,4 +1,5 @@
-import type { QuizSession, QuizSubmissionResult } from "../types/edutower";
+import type { QuizSession } from "../types/edutower";
+import type { QuizItem } from "../types/quiz";
 
 export const mockQuizSession: QuizSession = {
   id: "quiz-001",
@@ -30,10 +31,22 @@ export const mockQuizSession: QuizSession = {
   ]
 };
 
-export const mockQuizSubmissionResult: QuizSubmissionResult = {
-  sessionId: "quiz-001",
-  total: 1,
-  correct: 0,
-  score: 0,
-  wrongQuestionIds: ["q-001"]
-};
+export const mockQuizItems: QuizItem[] = [
+  {
+    id: "quiz-001",
+    title: "Derivative Basics Check",
+    materialId: "mat-001",
+    difficulty: "pass",
+    questions: [
+      {
+        id: "q-001",
+        type: "single_choice",
+        prompt: "What does a derivative measure at a point?",
+        options: ["Average value", "Instantaneous rate of change", "Area under a curve"],
+        answer: "Instantaneous rate of change",
+        explanation: "A derivative captures the instantaneous rate of change at a point."
+      }
+    ],
+    createdAt: "2026-05-27T00:00:00.000Z"
+  }
+];

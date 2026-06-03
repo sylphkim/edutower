@@ -1,28 +1,14 @@
-import type { Material, MaterialChunk } from "../types/edutower";
+import type { MaterialItem } from "../types/materials";
 
-export const mockMaterials: Material[] = [
+export const mockMaterials: MaterialItem[] = [
   {
     id: "mat-001",
     title: "Calculus Starter Notes",
-    sourceType: "pdf",
-    status: "indexed",
-    uploadedAt: "2026-05-27T00:00:00.000Z"
-  }
-];
-
-export const mockMaterialChunks: MaterialChunk[] = [
-  {
-    id: "chunk-001",
-    materialId: "mat-001",
-    order: 1,
-    text: "A derivative describes the instantaneous rate of change of a function.",
-    knowledgePointIds: ["kp-derivative"]
-  },
-  {
-    id: "chunk-002",
-    materialId: "mat-001",
-    order: 2,
-    text: "The chain rule helps differentiate composite functions.",
-    knowledgePointIds: ["kp-chain-rule"]
+    type: "note",
+    source: "mock",
+    status: "ready",
+    summary: "A short starter note for derivative basics.",
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z"
   }
 ];
