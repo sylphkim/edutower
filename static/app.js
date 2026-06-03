@@ -1,11 +1,11 @@
 /**
- * EduTower — 前端与 FastAPI /chat 对接
+ * EduTower — 前端与 FastAPI /api/ai/chat 对接
  */
 (function () {
   "use strict";
 
   const SESSION_STORAGE_KEY = "edutower_session_id";
-  const CHAT_API_PATH = "/chat";
+  const CHAT_API_PATH = (window.EDUTOWER_API || "") + "/api/ai/chat";
 
   const chatBody = document.getElementById("chatBody");
   const chatMessages = document.getElementById("chat-messages");
@@ -232,9 +232,9 @@
       }),
     });
 
-    let data = null;
+    let result = null;
     try {
-      data = await response.json();
+      result = await response.json();
     } catch (_parseErr) {
       if (!response.ok) {
         throw new Error("服务器返回了无法解析的响应（HTTP " + response.status + "）");
@@ -242,26 +242,24 @@
       throw new Error("服务器返回了无效的 JSON 数据");
     }
 
+    if (result && result.ok === true) {
+      const reply = result.data && result.data.reply;
+      if (typeof reply !== "string") {
+        throw new Error("服务器响应格式异常，未找到 data.reply 字段");
+      }
+      return reply;
+    }
+
+    const backendMessage = result && result.error && result.error.message;
+    if (typeof backendMessage === "string" && backendMessage.trim()) {
+      throw new Error(backendMessage.trim());
+    }
+
     if (!response.ok) {
-      const detail =
-        (data && (data.detail || data.message)) ||
-        "请求失败（HTTP " + response.status + "）";
-      const detailText =
-        typeof detail === "string"
-          ? detail
-          : Array.isArray(detail)
-            ? detail.map(function (d) {
-                return d.msg || JSON.stringify(d);
-              }).join("；")
-            : JSON.stringify(detail);
-      throw new Error(detailText);
+      throw new Error("请求失败（HTTP " + response.status + "）");
     }
 
-    if (!data || typeof data.reply !== "string") {
-      throw new Error("服务器响应格式异常，未找到 reply 字段");
-    }
-
-    return data.reply;
+    throw new Error("服务器响应格式异常，预期 { ok, data/error }");
   }
 
   /** ---------- Send flow ---------- */
@@ -281,11 +279,9 @@
 
     try {
       const reply = await requestChatReply(text);
-      removeLoadingMessage(loadingRef);
       appendAiReply(reply);
     } catch (err) {
-      console.error("[EduTower] /chat 请求失败:", err);
-      removeLoadingMessage(loadingRef);
+      console.error("[EduTower] /api/ai/chat 请求失败:", err);
 
       const friendly =
         err instanceof TypeError && /fetch|network/i.test(String(err.message))
@@ -296,6 +292,7 @@
 
       appendErrorMessage(friendly);
     } finally {
+      removeLoadingMessage(loadingRef);
       setComposerDisabled(false);
       userInput.focus();
     }
