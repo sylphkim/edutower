@@ -14,6 +14,9 @@
   var progressEl = document.getElementById("homeProgressCard");
   var checklistEl = document.getElementById("homeChecklistCard");
   var weakPointEl = document.getElementById("homeWeakPoint");
+  var graphMountEl = document.getElementById("homeKnowledgeGraphMount");
+  var graphSubtitleEl = document.getElementById("homeGraphSubtitle");
+  var graphMounted = false;
 
   if (!greetingEl) {
     return;
@@ -37,6 +40,44 @@
         }
       });
     });
+
+    document.querySelectorAll("[data-action='relayout-home-graph']").forEach(function (el) {
+      el.addEventListener("click", function () {
+        if (window.EduTowerKnowledgeGraph && typeof window.EduTowerKnowledgeGraph.relayout === "function") {
+          window.EduTowerKnowledgeGraph.relayout();
+        }
+      });
+    });
+  }
+
+  function renderKnowledgeGraph() {
+    if (!graphMountEl) return;
+
+    if (!window.EduTowerGraphData || !window.EduTowerKnowledgeGraph || typeof d3 === "undefined") {
+      graphMountEl.innerHTML =
+        '<p class="home-card__empty">知识图谱模块加载中，请稍候刷新页面。</p>';
+      return;
+    }
+
+    var graph = window.EduTowerGraphData.buildFullGraph();
+
+    if (graphSubtitleEl) {
+      graphSubtitleEl.textContent =
+        graph.subtitle + " · 共 " + graph.links.length + " 条关联";
+    }
+
+    var mounted = window.EduTowerKnowledgeGraph.mount(graphMountEl, graph, {
+      compact: true,
+      canvasId: "homeKnowledgeGraphCanvas",
+      detailId: "homeKnowledgeGraphDetail",
+    });
+
+    graphMounted = mounted;
+
+    if (!mounted) {
+      graphMountEl.innerHTML =
+        '<p class="home-card__empty">知识图谱渲染失败，请检查网络后刷新。</p>';
+    }
   }
 
   function refresh() {
@@ -44,6 +85,7 @@
     renderDate();
     renderChecklistPreview();
     fetchProgress();
+    renderKnowledgeGraph();
   }
 
   function renderGreeting() {
@@ -138,11 +180,63 @@
   function renderChecklistPreview() {
     if (!checklistEl) return;
 
-    var checklist = loadChecklist();
+    var localChecklist = loadChecklist();
+    if (localChecklist.length) {
+      renderChecklistItems(localChecklist);
+      return;
+    }
+
+    fetchPlanChecklistPreview();
+  }
+
+  async function fetchPlanChecklistPreview() {
+    if (!checklistEl) return;
+
+    checklistEl.innerHTML = '<p class="home-card__loading">正在同步学习计划…</p>';
+
+    try {
+      var data = await (window.EduTowerApi
+        ? window.EduTowerApi.get("/api/plan")
+        : fetch(API_BASE + "/api/plan").then(function (r) {
+            return r.json();
+          }).then(function (r) {
+            return r.data;
+          }));
+
+      var plans = data && Array.isArray(data.items) ? data.items : [];
+      var active =
+        plans.find(function (p) {
+          return p.status === "active";
+        }) || plans[0];
+
+      if (!active || !active.days || !active.days.length) {
+        checklistEl.innerHTML =
+          '<p class="home-card__empty">今日还没有安排复习清单。</p>' +
+          '<button type="button" class="btn btn--ghost btn--compact" data-go-view="plan">查看学习计划</button>';
+        bindChecklistGoView();
+        return;
+      }
+
+      var tasks = (active.days[0].tasks || []).map(function (task) {
+        var status = task.status === "done" ? "done" : task.status === "in_progress" ? "active" : "pending";
+        return { title: task.title, timeRange: "", status: status };
+      });
+
+      renderChecklistItems(tasks, true);
+    } catch (_err) {
+      checklistEl.innerHTML =
+        '<p class="home-card__empty">今日还没有安排复习清单。</p>' +
+        '<button type="button" class="btn btn--ghost btn--compact" data-go-view="chat">去 AI 复习页添加</button>';
+      bindChecklistGoView();
+    }
+  }
+
+  function renderChecklistItems(checklist, fromPlan) {
     if (!checklist.length) {
       checklistEl.innerHTML =
         '<p class="home-card__empty">今日还没有安排复习清单。</p>' +
         '<button type="button" class="btn btn--ghost btn--compact" data-go-view="chat">去 AI 复习页添加</button>';
+      bindChecklistGoView();
       return;
     }
 
@@ -171,10 +265,17 @@
       itemsHtml +
       "</ul>" +
       (checklist.length > 4
-        ? '<p class="home-card__more">还有 ' + (checklist.length - 4) + " 项，前往 AI 复习查看</p>"
+        ? '<p class="home-card__more">还有 ' + (checklist.length - 4) + " 项</p>"
         : "") +
-      '<button type="button" class="btn btn--ghost btn--compact" data-go-view="chat">进入 AI 复习</button>';
+      (fromPlan
+        ? '<button type="button" class="btn btn--ghost btn--compact" data-go-view="plan">查看完整计划</button>'
+        : '<button type="button" class="btn btn--ghost btn--compact" data-go-view="chat">进入 AI 复习</button>');
 
+    bindChecklistGoView();
+  }
+
+  function bindChecklistGoView() {
+    if (!checklistEl) return;
     checklistEl.querySelectorAll("[data-go-view]").forEach(function (el) {
       el.addEventListener("click", function () {
         if (window.EduTowerShell) {
@@ -213,5 +314,10 @@
 
   window.EduTowerHome = {
     refresh: refresh,
+    resizeKnowledgeGraph: function () {
+      if (graphMounted && window.EduTowerKnowledgeGraph) {
+        window.EduTowerKnowledgeGraph.resize();
+      }
+    },
   };
 })();
