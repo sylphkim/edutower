@@ -9,16 +9,67 @@
       breadcrumb: "学习首页",
       panelId: "view-home",
       sideId: null,
+      refresh: function () {
+        if (window.EduTowerHome) window.EduTowerHome.refresh();
+      },
     },
     chat: {
       breadcrumb: "AI 智能助教",
       panelId: "view-chat",
       sideId: "agentPanel",
+      refresh: function () {
+        if (window.EduTowerAgentPanel) window.EduTowerAgentPanel.refreshFromBackend();
+      },
+    },
+    wrongbook: {
+      breadcrumb: "错题本",
+      panelId: "view-wrongbook",
+      sideId: null,
+      refresh: function () {
+        if (window.EduTowerWrongbook) {
+          window.EduTowerWrongbook.refresh();
+        }
+      },
+    },
+    plan: {
+      breadcrumb: "学习计划",
+      panelId: "view-plan",
+      sideId: null,
+      refresh: function () {
+        if (window.EduTowerPlan) window.EduTowerPlan.refresh();
+      },
+    },
+    quiz: {
+      breadcrumb: "练习测验",
+      panelId: "view-quiz",
+      sideId: null,
+      refresh: function () {
+        if (window.EduTowerQuiz) window.EduTowerQuiz.refresh();
+      },
+    },
+    skills: {
+      breadcrumb: "技能图谱",
+      panelId: "view-skills",
+      sideId: null,
+      refresh: function () {
+        if (window.EduTowerSkills) window.EduTowerSkills.refresh();
+      },
+    },
+    memory: {
+      breadcrumb: "学习记忆",
+      panelId: "view-memory",
+      sideId: null,
+      refresh: function () {
+        if (window.EduTowerMemory) window.EduTowerMemory.refresh();
+      },
     },
     materials: {
       breadcrumb: "资料录入",
       panelId: "view-materials",
       sideId: "materialsPanel",
+      refresh: function () {
+        if (window.EduTowerMaterials) window.EduTowerMaterials.refresh();
+      },
     },
   };
 
@@ -57,20 +108,12 @@
       side.setAttribute("aria-hidden", showSide ? "false" : "true");
     });
 
-    if (breadcrumbEl) {
+    if (breadcrumbEl && viewName !== "home") {
       breadcrumbEl.textContent = config.breadcrumb;
     }
 
-    if (viewName === "home" && window.EduTowerHome) {
-      window.EduTowerHome.refresh();
-    }
-
-    if (viewName === "materials" && window.EduTowerMaterials) {
-      window.EduTowerMaterials.refresh();
-    }
-
-    if (viewName === "chat" && window.EduTowerAgentPanel) {
-      window.EduTowerAgentPanel.refreshFromBackend();
+    if (typeof config.refresh === "function") {
+      config.refresh();
     }
   }
 

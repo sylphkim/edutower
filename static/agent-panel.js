@@ -385,6 +385,53 @@
       .join("");
   }
 
+  async function importFromPlan() {
+    if (!window.EduTowerApi) {
+      showChecklistStatus("API 模块未加载");
+      return;
+    }
+
+    try {
+      var data = await window.EduTowerApi.get("/api/plan");
+      var plans = data && Array.isArray(data.items) ? data.items : [];
+      var active =
+        plans.find(function (p) {
+          return p.status === "active";
+        }) || plans[0];
+
+      if (!active || !active.days || !active.days.length) {
+        showChecklistStatus("暂无可导入的学习计划");
+        return;
+      }
+
+      var tasks = [];
+      active.days.forEach(function (day) {
+        (day.tasks || []).forEach(function (task) {
+          var status =
+            task.status === "done" ? "done" : task.status === "in_progress" ? "active" : "pending";
+          tasks.push({
+            title: task.title,
+            timeRange: "",
+            status: status,
+          });
+        });
+      });
+
+      if (!tasks.length) {
+        showChecklistStatus("计划中没有任务");
+        return;
+      }
+
+      checklist = tasks.map(normalizeChecklistItem);
+      saveChecklist();
+      renderChecklist();
+      renderChecklistEditor();
+      showChecklistStatus("已从「" + active.title + "」导入 " + tasks.length + " 项");
+    } catch (_err) {
+      showChecklistStatus("导入失败，请确认后端已启动");
+    }
+  }
+
   function renderChecklistEditor() {
     if (!checklistEditorEl) return;
 
@@ -396,12 +443,17 @@
       .join("");
 
     checklistEditorEl.innerHTML =
-      '<p class="agent-editor-intro">自行规划今日复习安排。请用时间选择器设定起止时间，填写后点击「保存清单」。</p>' +
+      '<p class="agent-editor-intro">自行规划今日复习安排，或<button type="button" class="btn-link" id="checklistSyncPlan">从学习计划导入</button>。请用时间选择器设定起止时间，填写后点击「保存清单」。</p>' +
       checklistHtml +
       '<div class="agent-editor-actions">' +
       '<button type="button" class="btn btn--ghost btn--compact" data-action="add-checklist">+ 添加一项</button>' +
       '<button type="button" class="btn btn--primary btn--compact" data-action="apply-checklist">保存清单</button></div>' +
       '<p id="checklistEditorStatus" class="agent-editor-status" role="status" aria-live="polite" hidden></p>';
+
+    var syncPlanBtn = document.getElementById("checklistSyncPlan");
+    if (syncPlanBtn) {
+      syncPlanBtn.addEventListener("click", importFromPlan);
+    }
   }
 
   function checklistStatusOptions(selected) {
@@ -436,8 +488,25 @@
     return escapeHtml(text).replace(/'/g, "&#39;");
   }
 
+  function getProgressTopic() {
+    if (!backendData || !backendData.progress) {
+      return "";
+    }
+
+    var progress = backendData.progress;
+    var subject = progress.subject || "";
+    var topic = progress.topic || "";
+
+    if (subject && topic) {
+      return subject + " · " + topic;
+    }
+
+    return subject || topic || "";
+  }
+
   window.EduTowerAgentPanel = {
     refreshFromBackend: refreshFromBackend,
+    getProgressTopic: getProgressTopic,
     getChecklist: function () {
       return checklist.slice();
     },

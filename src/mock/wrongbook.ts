@@ -6,6 +6,8 @@ export const mockWrongbookItems: WrongbookItem[] = [
     id: "wrong-001",
     question: mockQuizSession.questions[0],
     wrongAnswer: "A",
-    reviewCount: 0
+    reviewCount: 0,
+    subject: "math-calculus",
+    category: "concept"
   }
 ];

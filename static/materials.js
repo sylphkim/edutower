@@ -32,6 +32,7 @@
   var currentSourceType = "text";
   var isSubmitting = false;
   var isDeleting = false;
+  var isEditing = false;
 
   bindEvents();
   refresh();
@@ -53,15 +54,27 @@
     listEl.addEventListener("click", function (event) {
       var target = event.target;
       if (!(target instanceof HTMLElement)) return;
-      if (!target.matches("[data-action='delete-material']")) return;
 
-      event.preventDefault();
-      event.stopPropagation();
+      if (target.matches("[data-action='delete-material']")) {
+        event.preventDefault();
+        event.stopPropagation();
 
-      var materialId = target.getAttribute("data-material-id");
-      var materialTitle = target.getAttribute("data-material-title") || "该资料";
-      if (materialId) {
-        deleteMaterial(materialId, materialTitle);
+        var materialId = target.getAttribute("data-material-id");
+        var materialTitle = target.getAttribute("data-material-title") || "该资料";
+        if (materialId) {
+          deleteMaterial(materialId, materialTitle);
+        }
+        return;
+      }
+
+      if (target.matches("[data-action='edit-material']")) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        var editId = target.getAttribute("data-material-id");
+        if (editId) {
+          openEditDialog(editId);
+        }
       }
     });
   }
@@ -283,6 +296,64 @@
     return chunks;
   }
 
+  async function openEditDialog(id) {
+    if (isEditing) return;
+
+    try {
+      var api = window.EduTowerApi;
+      var item = api
+        ? await api.get("/api/materials/" + encodeURIComponent(id))
+        : null;
+
+      if (!item) {
+        var items = await fetchMaterials();
+        item = items.find(function (entry) {
+          return entry.id === id;
+        });
+      }
+
+      if (!item) {
+        showStatus("找不到该资料。", "error");
+        return;
+      }
+
+      var newTitle = window.prompt("修改资料标题", item.title);
+      if (newTitle === null) return;
+
+      var trimmedTitle = newTitle.trim();
+      if (!trimmedTitle) {
+        showStatus("标题不能为空。", "error");
+        return;
+      }
+
+      var newSummary = window.prompt("修改摘要/内容预览", item.summary || "");
+      if (newSummary === null) return;
+
+      isEditing = true;
+      hideStatus();
+
+      var patchBody = { title: trimmedTitle, summary: newSummary.trim() };
+      var response = await fetch(MATERIALS_API + "/" + encodeURIComponent(id), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patchBody),
+      });
+      var result = await response.json();
+
+      if (result && result.ok === true) {
+        showStatus("已更新：" + trimmedTitle, "success");
+        refresh();
+        return;
+      }
+
+      showStatus(extractErrorMessage(result, response), "error");
+    } catch (err) {
+      showStatus("更新失败：" + (err.message || "未知错误"), "error");
+    } finally {
+      isEditing = false;
+    }
+  }
+
   async function deleteMaterial(id, title) {
     if (isDeleting) return;
 
@@ -342,8 +413,21 @@
       deleteBtn.setAttribute("aria-label", "删除资料：" + item.title);
       deleteBtn.textContent = "删除";
 
+      var editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "materials-list__edit";
+      editBtn.setAttribute("data-action", "edit-material");
+      editBtn.setAttribute("data-material-id", item.id);
+      editBtn.setAttribute("aria-label", "编辑资料：" + item.title);
+      editBtn.textContent = "编辑";
+
+      var actions = document.createElement("div");
+      actions.className = "materials-list__actions";
+      actions.appendChild(editBtn);
+      actions.appendChild(deleteBtn);
+
       header.appendChild(title);
-      header.appendChild(deleteBtn);
+      header.appendChild(actions);
 
       var meta = document.createElement("span");
       meta.className = "materials-list__meta";
@@ -352,7 +436,10 @@
         " · " +
         formatMaterialSource(item.source) +
         " · " +
-        formatStatus(item.status);
+        formatStatus(item.status) +
+        (item.updatedAt || item.createdAt
+          ? " · " + formatMaterialDate(item.updatedAt || item.createdAt)
+          : "");
 
       var preview = document.createElement("p");
       preview.className = "materials-list__preview";
@@ -423,6 +510,13 @@
       failed: "失败",
     };
     return map[status] || status || "待处理";
+  }
+
+  function formatMaterialDate(iso) {
+    if (window.EduTowerApi && typeof window.EduTowerApi.formatDate === "function") {
+      return window.EduTowerApi.formatDate(iso);
+    }
+    return iso || "";
   }
 
   async function refresh() {

@@ -1,25 +1,54 @@
 import type { QuizQuestion } from "./edutower";
 
+export interface WrongbookTaxonomyEntry {
+  id: string;
+  label: string;
+  hint?: string;
+  builtIn?: boolean;
+}
+
 export interface WrongbookItem {
   id: string;
   question: QuizQuestion;
   wrongAnswer: string;
   reviewCount: number;
   lastReviewedAt?: string;
+  /** 学科 / 主题 id */
+  subject: string;
+  /** 错因 id */
+  category: string;
 }
 
-// 创建时不传 id，由 service 统一生成。
 export interface CreateWrongbookInput {
   question: QuizQuestion;
   wrongAnswer: string;
   reviewCount?: number;
   lastReviewedAt?: string;
+  subject?: string;
+  category?: string;
 }
 
-// PATCH 只需要传要修改的字段。
 export interface UpdateWrongbookInput {
   question?: QuizQuestion;
   wrongAnswer?: string;
   reviewCount?: number;
   lastReviewedAt?: string;
+  subject?: string;
+  category?: string;
+}
+
+export interface CreateWrongbookTaxonomyInput {
+  label: string;
+  hint?: string;
+}
+
+export interface WrongbookListPayload {
+  items: WrongbookItem[];
+  subjects: WrongbookTaxonomyEntry[];
+  categories: WrongbookTaxonomyEntry[];
+}
+
+export interface DeleteWrongbookTaxonomyResult {
+  removed: WrongbookTaxonomyEntry;
+  reassignedItemCount: number;
 }
