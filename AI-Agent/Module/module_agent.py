@@ -1,118 +1,210 @@
-"""ReAct agent for learning-assistance website."""
+"""ReAct agent powered by LLM for learning-assistance website."""
 
-import json
 import re
 from collections import defaultdict
 
 from .module_llm import call_llm
 
+# ── ReAct prompt template ──────────────────────────────────────────
+
+SYSTEM_PROMPT = """You are EduTower AI Assistant, a helpful learning tutor. You help students review knowledge points, answer questions, and practice exercises.
+
+You can use tools to search for information. Follow this format strictly:
+
+Thought: <your step-by-step reasoning about what to do next>
+Action: <tool_name or "Final">
+Action Input: <tool input, or your final answer text>
+
+Available tools:
+- web_search(query: str) — search the web for information
+- no_tool — use this when you already know the answer
+
+When you are ready to give the final answer, use:
+Action: Final
+Action Input: <your complete answer to the user>
+
+Rules:
+- Always think before acting. Write your reasoning in "Thought:".
+- If you don't know something, use web_search.
+- Give answers in Chinese (Simplified) unless the user asks in another language.
+- Be concise but thorough. Include examples when helpful.
+- Never mention internal tool names or the ReAct format in your final answer."""
+
+REACT_PATTERN = re.compile(
+    r"Thought:\s*(.*?)\s*\n\s*Action:\s*(\w+)\s*\n\s*Action Input:\s*(.*)",
+    re.DOTALL | re.IGNORECASE,
+)
+
 
 class ChatAgent:
-    """阻塞式 ReAct Agent，对外暴露 run() 入口。"""
+    """LLM-powered ReAct Agent that uses call_llm for reasoning."""
 
     def __init__(self, tools=None):
-        self.tools = tools or {"web_search": lambda q: f"[stub] web_search({q})"}
-        self._history = defaultdict(list)
-        self.max_steps = 10
+        self.tools = tools or {
+            "web_search": lambda q: f"[web_search] No results found for: {q}",
+            "no_tool": lambda _: "",
+        }
+        self._history: dict[str, list[dict]] = defaultdict(list)
+        self.max_steps = 8
 
-    # ---- 公共入口 ----
+    # ── Public API ────────────────────────────────────────────────
 
-    def run(self, session_id: str, message: str) -> str:
-        """阻塞式 ReAct 循环，返回最终答案。"""
-        hist = self._history[session_id]
-        self._add_to_history(hist, "user", message)
-        self._emit(session_id, "User", message)
+    def run(self, session_id: str, message: str, context: dict | None = None) -> str:
+        """Run the ReAct loop and return the final answer."""
+        hist = self._get_history(session_id)
+        hist.append({"role": "user", "content": message})
+
+        system_content = SYSTEM_PROMPT
+        if context:
+            system_content = self._enrich_system_prompt(system_content, context)
 
         for step in range(self.max_steps):
             try:
-                thought = self._think(hist)
-                self._emit(session_id, "Thought", thought)
-                # Thought / Action 仅调试输出，不入历史
+                raw = call_llm(
+                    messages=hist,
+                    system_prompt=system_content,
+                )
 
-                action = self._decide(hist)
+                parsed = self._parse_react(raw)
 
-                if action is None:
-                    final = self._finalize(hist)
-                    self._add_to_history(hist, "assistant", final)
-                    self._emit(session_id, "Final", final)
-                    return final
+                print(
+                    f"[{session_id}] Step {step + 1}: "
+                    f"Action={parsed['action']}",
+                    flush=True,
+                )
 
-                tool_name = action["tool"]
-                tool_input = action["input"]
+                if parsed["action"].lower() in ("final", "final answer"):
+                    final_text = parsed["action_input"].strip()
+                    hist.append({"role": "assistant", "content": final_text})
+                    self._emit(session_id, "Final", final_text)
+                    return final_text
+
+                tool_name = parsed["action"]
+                tool_input = parsed["action_input"]
                 self._emit(session_id, "Action", f"{tool_name}({tool_input})")
 
                 observation = self._execute_tool(tool_name, tool_input)
                 self._emit(session_id, "Observation", observation)
-                self._add_to_history(hist, "system", observation)
+
+                hist.append(
+                    {
+                        "role": "system",
+                        "content": f"Tool [{tool_name}] returned: {observation}",
+                    }
+                )
 
             except Exception as e:
                 err_msg = f"[Error] Step {step}: {type(e).__name__}: {e}"
                 self._emit(session_id, "[Error]", err_msg)
-                self._add_to_history(hist, "system", err_msg)
-                return f"Sorry, something went wrong: {e}"
+                hist.append({"role": "system", "content": err_msg})
+                fallback = self._fallback_answer(hist)
+                hist.append({"role": "assistant", "content": fallback})
+                return fallback
 
-        timeout = f"(Max steps {self.max_steps} reached.)"
-        self._emit(session_id, "Final", timeout)
-        return timeout
+        final = self._fallback_answer(hist)
+        hist.append({"role": "assistant", "content": final})
+        return final
 
-    # ---- 策略区（后续替换为 LLM） ----
-
-    @staticmethod
-    def _think(history: list) -> str:
-        if not history:
-            return "Analyzing..."
-        if history[-1].startswith("System:"):
-            return "Processing observation..."
-        return f"Considering: {history[0]}"
+    # ── ReAct parsing ─────────────────────────────────────────────
 
     @staticmethod
-    def _decide(history: list) -> dict | None:
-        text = "\n".join(history)
-        if "System:" in text:
-            return None
-        q = history[0].replace("User: ", "")
-        hints = ["search", "find", "look up", "what is", "tell me about"]
-        if any(h in q.lower() for h in hints):
-            return {"tool": "web_search", "input": q}
-        return None
+    def _parse_react(text: str) -> dict:
+        """Parse ReAct output into {thought, action, action_input}."""
+        text = text.strip()
+        match = REACT_PATTERN.search(text)
+        if match:
+            return {
+                "thought": match.group(1).strip(),
+                "action": match.group(2).strip(),
+                "action_input": match.group(3).strip(),
+            }
+
+        # Fallback: treat entire output as final answer
+        return {
+            "thought": "",
+            "action": "Final",
+            "action_input": text,
+        }
+
+    # ── Helpers ───────────────────────────────────────────────────
+
+    def _get_history(self, session_id: str) -> list[dict]:
+        return self._history[session_id]
 
     @staticmethod
-    def _finalize(history: list) -> str:
-        m = re.search(r"System: (.+)$", "\n".join(history), re.MULTILINE)
-        return f"Result: {m.group(1)}" if m else "No tools needed."
+    def _enrich_system_prompt(base: str, context: dict) -> str:
+        """Inject learning context into the system prompt."""
+        parts = [base, "", "## Current Learning Context"]
 
-    # ---- 执行区 ----
+        subject = context.get("subject")
+        if subject and isinstance(subject, dict):
+            parts.append(
+                f"- Subject: {subject.get('name', 'N/A')} "
+                f"(Goal: {subject.get('learningGoal', 'N/A')})"
+            )
+
+        materials = context.get("materials") or []
+        if materials:
+            parts.append("- Study materials:")
+            for m in materials[:5]:
+                if isinstance(m, dict):
+                    parts.append(f"  * {m.get('title', '?')}: {m.get('summary', '')}")
+
+        knowledge_points = context.get("knowledgePoints") or []
+        if knowledge_points:
+            parts.append("- Knowledge points & mastery:")
+            for kp in knowledge_points[:8]:
+                if isinstance(kp, dict):
+                    parts.append(
+                        f"  * {kp.get('title', '?')} (mastery: {kp.get('mastery', 0)}%)"
+                    )
+
+        weak_points = context.get("weakPoints") or []
+        if weak_points:
+            parts.append("- Weak areas to focus on:")
+            for wp in weak_points[:5]:
+                if isinstance(wp, dict):
+                    parts.append(
+                        f"  * {wp.get('title', '?')} — {wp.get('reason', '')} "
+                        f"(suggested: {wp.get('suggestedAction', '')})"
+                    )
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def _emit(session_id: str, label: str, content: str):
+        """Print structured log to stdout."""
+        preview = content[:200] + "…" if len(content) > 200 else content
+        print(f"[{session_id}] {label}: {preview}", flush=True)
 
     def _execute_tool(self, name: str, inp: str) -> str:
         fn = self.tools.get(name)
         if not fn:
             return f"[Error] Unknown tool: {name}"
         try:
-            return f"[{name}] {fn(inp)}"
+            return str(fn(inp))
         except Exception as e:
             return f"[Error] {type(e).__name__}: {e}"
 
-    # ---- 持久化区 ----
+    def _fallback_answer(self, hist: list[dict]) -> str:
+        """Generate a graceful fallback when the agent gets stuck."""
+        try:
+            msgs = hist + [
+                {
+                    "role": "system",
+                    "content": (
+                        "The agent loop ended. Please give a brief, helpful summary "
+                        "of what you know so far, in Chinese."
+                    ),
+                }
+            ]
+            return call_llm(messages=msgs, system_prompt=SYSTEM_PROMPT)
+        except Exception:
+            return "抱歉，处理您的请求时遇到了问题。请稍后再试。"
 
-    @staticmethod
-    def _add_to_history(hist: list, role: str, content: str):
-        """追加记录到历史列表，不打印。"""
-        hist.append(f"{role.capitalize()}: {content}")
+    # ── Persistence ───────────────────────────────────────────────
 
-    @staticmethod
-    def _emit(session_id: str, label: str, content: str):
-        """打印日志到 stdout，不修改历史状态。"""
-        print(f"[{session_id}] {label}: {content}", flush=True)
-
-    def save_state(self, path: str):
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(dict(self._history), f, ensure_ascii=False, indent=2)
-
-    def load_state(self, path: str):
-        with open(path, "r", encoding="utf-8") as f:
-            self._history = defaultdict(list, json.load(f))
-
-    def clear(self, sid: str = None):
+    def clear(self, sid: str | None = None):
         if sid:
             self._history.pop(sid, None)
         else:

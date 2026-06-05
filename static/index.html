@@ -17,6 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Noto+Sans+SC:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
 </head>
 <body>
   <div id="localFileWarning" class="local-file-warning" hidden>
@@ -27,7 +28,37 @@
       document.getElementById("localFileWarning").hidden = false;
     }
   </script>
-  <div class="app">
+  <div id="loginScreen" class="login-screen" aria-hidden="false">
+    <div class="login-screen__backdrop" aria-hidden="true"></div>
+    <div class="login-card" role="dialog" aria-labelledby="loginTitle" aria-modal="true">
+      <div class="login-card__brand">
+        <svg class="login-card__icon" viewBox="0 0 24 32" aria-hidden="true">
+          <path d="M12 2L4 8v16l8 6 8-6V8L12 2z" fill="none" stroke="currentColor" stroke-width="1.2"/>
+          <path d="M12 8v12M8 12h8" stroke="currentColor" stroke-width="1"/>
+        </svg>
+        <span>EduTower</span>
+      </div>
+      <h1 class="login-card__title" id="loginTitle">欢迎来到 EduTower</h1>
+      <p class="login-card__subtitle">轻量登录：输入称呼即可开始学习。无需密码，信息仅保存在本机浏览器。</p>
+      <form id="loginForm" class="login-form" novalidate>
+        <label class="login-form__label" for="loginName">你的称呼</label>
+        <input
+          id="loginName"
+          class="login-form__input"
+          type="text"
+          name="name"
+          maxlength="20"
+          autocomplete="nickname"
+          placeholder="例如：李、小明"
+          required
+        />
+        <p class="login-form__hint">将显示为「李同学」这样的问候语</p>
+        <p id="loginError" class="login-form__error" role="alert" hidden></p>
+        <button type="submit" class="btn btn--primary login-form__submit">进入学习</button>
+      </form>
+    </div>
+  </div>
+  <div class="app is-hidden" id="appRoot" aria-hidden="true">
     <!-- 左侧导航 -->
     <aside class="app-sidebar">
       <div class="sidebar-brand">
@@ -39,11 +70,11 @@
       </div>
 
       <nav class="sidebar-nav" aria-label="主导航">
-        <a href="#" class="nav-item" data-view="home">
+        <a href="#" class="nav-item nav-item--active" data-view="home" aria-current="page">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 10.5L12 4l9 6.5V20a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1v-9.5z"/></svg>
           <span>首页</span>
         </a>
-        <a href="#" class="nav-item nav-item--active" data-view="chat" aria-current="page">
+        <a href="#" class="nav-item" data-view="chat">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
           <span>AI 智能复习</span>
         </a>
@@ -57,13 +88,13 @@
         </a>
       </nav>
 
-      <div class="sidebar-quote">
+      <div class="sidebar-quote" id="sidebarQuote" title="点击换一句">
         <div class="quote-bg" aria-hidden="true"></div>
         <blockquote>
           <span class="quote-mark quote-mark--open">"</span>
-          <p>学而时习之，不亦说乎。有朋自远方来，不亦乐乎。</p>
+          <p id="sidebarQuoteText">学而时习之，不亦说乎。有朋自远方来，不亦乐乎。</p>
           <span class="quote-mark quote-mark--close">"</span>
-          <cite>—— 《论语·学而》</cite>
+          <cite id="sidebarQuoteSource">—— 《论语·学而》</cite>
         </blockquote>
       </div>
     </aside>
@@ -71,11 +102,75 @@
     <!-- 右侧主区：对话 + Agent 面板 -->
     <main class="app-main">
       <div class="main-workspace">
+        <!-- 首页 -->
+        <section class="home-zone view-panel" id="view-home" data-view="home">
+          <div class="home-body">
+            <header class="home-hero">
+              <div class="home-hero__content">
+                <p class="home-hero__eyebrow" id="homeDate"></p>
+                <h1 class="home-hero__title" id="homeGreeting" data-user-greeting>你好</h1>
+                <p class="home-hero__subtitle">
+                  学以立塔，志以行远。从下方入口开始今天的复习，Agent 会同步你的学习进度与薄弱点。
+                </p>
+                <div class="home-hero__actions">
+                  <button type="button" class="btn btn--primary home-hero__cta" data-go-view="chat">开始 AI 复习</button>
+                  <button type="button" class="btn btn--ghost home-hero__cta" data-go-view="materials">录入学习资料</button>
+                </div>
+              </div>
+              <div class="home-hero__badge" aria-label="当前聚焦薄弱点">
+                <span class="home-hero__badge-label">当前聚焦</span>
+                <strong id="homeWeakPoint">加载中…</strong>
+              </div>
+            </header>
+
+            <section class="home-section" aria-labelledby="homeQuickTitle">
+              <h2 class="home-section__title" id="homeQuickTitle">快速入口</h2>
+              <div class="home-quick-grid">
+                <button type="button" class="home-quick-card home-quick-card--featured" data-go-view="chat">
+                  <span class="home-quick-card__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2"/></svg>
+                  </span>
+                  <span class="home-quick-card__title">AI 智能复习</span>
+                  <span class="home-quick-card__desc">向助教提问、梳理考点、演练错题</span>
+                </button>
+                <button type="button" class="home-quick-card" data-go-view="materials">
+                  <span class="home-quick-card__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+                  </span>
+                  <span class="home-quick-card__title">资料录入</span>
+                  <span class="home-quick-card__desc">上传笔记与文档，供 AI 引用</span>
+                </button>
+                <button type="button" class="home-quick-card home-quick-card--muted" data-go-view="wrongbook">
+                  <span class="home-quick-card__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
+                  </span>
+                  <span class="home-quick-card__title">错题本</span>
+                  <span class="home-quick-card__desc">即将上线，敬请期待</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="home-section home-section--overview" aria-labelledby="homeOverviewTitle">
+              <h2 class="home-section__title" id="homeOverviewTitle">今日概览</h2>
+              <div class="home-overview-grid">
+                <article class="home-overview-card">
+                  <h3 class="home-overview-card__title">复习进度</h3>
+                  <div id="homeProgressCard" class="home-overview-card__body"></div>
+                </article>
+                <article class="home-overview-card">
+                  <h3 class="home-overview-card__title">复习清单</h3>
+                  <div id="homeChecklistCard" class="home-overview-card__body"></div>
+                </article>
+              </div>
+            </section>
+          </div>
+        </section>
+
         <!-- 对话区 70% -->
-        <section class="chat-zone view-panel" id="view-chat" data-view="chat">
+        <section class="chat-zone view-panel is-hidden" id="view-chat" data-view="chat" aria-hidden="true">
           <header class="chat-header">
             <div class="chat-header__titles">
-              <h1 class="chat-greeting">下午好，李同学</h1>
+              <h1 class="chat-greeting" data-user-greeting>你好</h1>
               <nav class="chat-breadcrumb" aria-label="面包屑">
                 <span class="breadcrumb-sep">|</span>
                 <span class="breadcrumb-current" id="viewBreadcrumb">AI 智能助教</span>
@@ -89,8 +184,8 @@
               <button type="button" class="icon-btn" aria-label="通知">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.66V4a2 2 0 10-4 0v1.34A6 6 0 006 11v3.2a2 2 0 01-.6 1.4L4 17h5"/><path d="M10 20a2 2 0 004 0"/></svg>
               </button>
-              <button type="button" class="user-avatar" aria-label="用户菜单">
-                <span class="avatar-inner">李</span>
+              <button type="button" class="user-avatar" aria-label="用户菜单" data-action="logout" title="切换账号">
+                <span class="avatar-inner" data-user-avatar>学</span>
                 <svg class="avatar-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
               </button>
             </div>
@@ -110,7 +205,7 @@
                 <div class="message-content">
                   <span class="message-sender">EduTower Agent</span>
                   <div class="message-bubble message-bubble--ai">
-                    <p>你好，李同学。我是你的 AI 智能助教，可以帮你梳理考点、讲解错题、出题演练。直接在下方输入问题即可开始。</p>
+                    <p id="chatWelcomeMessage">你好。我是你的 AI 智能助教，可以帮你梳理考点、讲解错题、出题演练。直接在下方输入问题即可开始。</p>
                   </div>
                 </div>
               </div>
@@ -240,84 +335,29 @@
         </section>
 
         <!-- Agent 辅助面板 30% -->
-        <aside class="agent-panel view-side-panel" id="agentPanel" data-view-side="chat">
+        <aside class="agent-panel view-side-panel is-hidden" id="agentPanel" data-view-side="chat" aria-hidden="true">
           <div class="panel-card panel-card--status">
             <h2 class="panel-title">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
               Agent 执行状态
             </h2>
-            <div class="agent-status">
-              <span class="status-dot status-dot--active"></span>
-              <span class="status-label">推理中 · 考点路径规划</span>
-            </div>
-            <ol class="reasoning-path">
-              <li class="reasoning-step reasoning-step--done">
-                <span class="step-index">1</span>
-                <span class="step-text">读取学习档案与错题标签</span>
-              </li>
-              <li class="reasoning-step reasoning-step--done">
-                <span class="step-index">2</span>
-                <span class="step-text">匹配「函数与导数」薄弱子项</span>
-              </li>
-              <li class="reasoning-step reasoning-step--current">
-                <span class="step-index">3</span>
-                <span class="step-text">生成极值判定知识图谱</span>
-              </li>
-              <li class="reasoning-step">
-                <span class="step-index">4</span>
-                <span class="step-text">推送配套练习与复盘建议</span>
-              </li>
-            </ol>
+            <div id="agentStatusDisplay"></div>
           </div>
 
           <div class="panel-card panel-card--progress">
             <h2 class="panel-title">今日复习进度</h2>
-            <div class="progress-hero">
-              <span class="progress-value">68<small>%</small></span>
-              <span class="progress-subject">数学 · 函数与导数</span>
-            </div>
-            <div class="progress-bar" role="progressbar" aria-valuenow="68" aria-valuemin="0" aria-valuemax="100">
-              <div class="progress-bar__fill" style="width: 68%"></div>
-            </div>
-            <ul class="progress-stats">
-              <li><span class="stat-num">24</span><span class="stat-label">知识点</span></li>
-              <li><span class="stat-num">12</span><span class="stat-label">练习题</span></li>
-              <li><span class="stat-num">3</span><span class="stat-label">错题订正</span></li>
-            </ul>
+            <div id="agentProgressDisplay"></div>
           </div>
 
           <div class="panel-card panel-card--checklist">
-            <h2 class="panel-title">今日复习清单</h2>
-            <ul class="checklist">
-              <li class="checklist-item checklist-item--done">
-                <span class="check-icon" aria-hidden="true">✓</span>
-                <div class="checklist-body">
-                  <span class="checklist-title">导数定义与几何意义</span>
-                  <span class="checklist-time">09:00 – 09:45</span>
-                </div>
-              </li>
-              <li class="checklist-item checklist-item--done">
-                <span class="check-icon" aria-hidden="true">✓</span>
-                <div class="checklist-body">
-                  <span class="checklist-title">单调性与极值基础</span>
-                  <span class="checklist-time">10:00 – 10:50</span>
-                </div>
-              </li>
-              <li class="checklist-item checklist-item--active">
-                <span class="check-icon check-icon--ring"></span>
-                <div class="checklist-body">
-                  <span class="checklist-title">极值综合判定</span>
-                  <span class="checklist-time">14:00 – 15:00</span>
-                </div>
-              </li>
-              <li class="checklist-item">
-                <span class="check-icon check-icon--empty"></span>
-                <div class="checklist-body">
-                  <span class="checklist-title">切线方程应用题</span>
-                  <span class="checklist-time">15:30 – 16:20</span>
-                </div>
-              </li>
-            </ul>
+            <div class="panel-card__header">
+              <h2 class="panel-title">今日复习清单</h2>
+              <button type="button" class="btn btn--ghost btn--compact" id="checklistEditToggle" aria-expanded="false" aria-controls="checklistEditor">
+                编辑清单
+              </button>
+            </div>
+            <ul id="agentChecklistDisplay" class="checklist"></ul>
+            <div id="checklistEditor" class="checklist-editor is-hidden" aria-label="今日复习清单编辑"></div>
           </div>
         </aside>
 
@@ -359,11 +399,43 @@
   <script>
     (function () {
       var base = window.EDUTOWER_STATIC || "/static/";
-      ["shell.js", "app.js", "materials.js"].forEach(function (file) {
+      var cdnScripts = [
+        "https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js",
+        "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js",
+      ];
+      var localScripts = ["user.js", "shell.js", "quotes.js", "home.js", "chat-render.js", "agent-panel.js", "app.js", "materials.js"];
+
+      function loadScript(src, callback) {
         var script = document.createElement("script");
-        script.src = base + file;
+        script.src = src;
+        script.onload = callback;
+        script.onerror = callback;
         document.body.appendChild(script);
-      });
+      }
+
+      function loadLocalScripts(index) {
+        if (index >= localScripts.length) {
+          if (window.EduTowerUser && typeof window.EduTowerUser.bootstrap === "function") {
+            window.EduTowerUser.bootstrap();
+          }
+          return;
+        }
+        loadScript(base + localScripts[index], function () {
+          loadLocalScripts(index + 1);
+        });
+      }
+
+      function loadCdnScripts(index) {
+        if (index >= cdnScripts.length) {
+          loadLocalScripts(0);
+          return;
+        }
+        loadScript(cdnScripts[index], function () {
+          loadCdnScripts(index + 1);
+        });
+      }
+
+      loadCdnScripts(0);
     })();
   </script>
 </body>

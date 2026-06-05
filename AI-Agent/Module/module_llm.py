@@ -3,21 +3,23 @@ import time
 import logging
 from pathlib import Path
 from typing import List, Dict, Generator
-from openai import OpenAI, APIConnectionError, APITimeoutError
+from openai import OpenAI, APIConnectionError, APITimeoutError, InternalServerError
 import httpx
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-# 加载 Module 目录下的 .env 文件
-_ENV_PATH = Path(__file__).resolve().parent / ".env"
-if _ENV_PATH.exists():
-    load_dotenv(_ENV_PATH)
-else:
-    # 回退：尝试加载项目根目录的 .env
-    _ROOT_ENV = Path(__file__).resolve().parent.parent / ".env"
-    if _ROOT_ENV.exists():
-        load_dotenv(_ROOT_ENV)
+# 环境变量加载顺序（与 README / 团队约定一致）：
+# 1. 项目根目录 edutower/.env（主配置）
+# 2. AI-Agent/Module/.env（可选本地覆盖）
+_MODULE_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT_ENV = _MODULE_DIR.parent.parent / ".env"
+_MODULE_ENV = _MODULE_DIR / ".env"
+
+if _PROJECT_ROOT_ENV.exists():
+    load_dotenv(_PROJECT_ROOT_ENV)
+if _MODULE_ENV.exists():
+    load_dotenv(_MODULE_ENV, override=True)
 
 _LLM_TIMEOUT = httpx.Timeout(600.0, connect=15.0)
 _MAX_RETRIES = 3
@@ -29,7 +31,6 @@ def _is_transient_error(exc: Exception) -> bool:
         return True
     if isinstance(exc, (APIConnectionError, APITimeoutError)):
         return True
-    from openai import InternalServerError
     if isinstance(exc, InternalServerError):
         return True
     status_err = getattr(exc, "status_code", None)
@@ -50,10 +51,10 @@ class LLMConfig:
         top_p: float = 1.0,
         system_prompt: str = "You are a helpful assistant.",
     ):
-        # 优先级：显式传入 > 环境变量 > 硬编码默认值
-        self.api_key = api_key or os.getenv("LLM_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or ""
-        self.base_url = base_url or os.getenv("LLM_BASE_URL") or "https://api.deepseek.com"
-        self.model = model or os.getenv("LLM_MODEL") or "deepseek-v4-flash"
+        # 优先级：显式传入 > 环境变量
+        self.api_key = api_key or os.getenv("LLM_API_KEY") or ""
+        self.base_url = base_url or os.getenv("LLM_BASE_URL") or ""
+        self.model = model or os.getenv("LLM_MODEL") or ""
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.top_p = top_p
@@ -70,6 +71,21 @@ def configure(**kwargs):
 
 
 def _build_client() -> OpenAI:
+    if not _config.api_key:
+        raise RuntimeError(
+            "LLM_API_KEY is not configured. "
+            "Set it in the project root .env (recommended) or AI-Agent/Module/.env."
+        )
+    if not _config.base_url:
+        raise RuntimeError(
+            "LLM_BASE_URL is not configured. "
+            "Set it in AI-Agent/Module/.env or pass it via configure(base_url=...)."
+        )
+    if not _config.model:
+        raise RuntimeError(
+            "LLM_MODEL is not configured. "
+            "Set it in AI-Agent/Module/.env or pass it via configure(model=...)."
+        )
     return OpenAI(
         api_key=_config.api_key,
         base_url=_config.base_url,
@@ -113,18 +129,26 @@ def _stream_response(response) -> Generator:
 
 
 def call_llm(messages: List[Dict], **overrides) -> str:
+    system_prompt = overrides.get("system_prompt")
+    if system_prompt is None:
+        system_prompt = _config.system_prompt
+
     msgs = []
-    if _config.system_prompt:
-        msgs.append({"role": "system", "content": _config.system_prompt})
+    if system_prompt:
+        msgs.append({"role": "system", "content": system_prompt})
     msgs.extend(messages)
 
     return _call_with_retry(msgs, stream=False)
 
 
 def call_llm_stream(messages: List[Dict], **overrides) -> Generator:
+    system_prompt = overrides.get("system_prompt")
+    if system_prompt is None:
+        system_prompt = _config.system_prompt
+
     msgs = []
-    if _config.system_prompt:
-        msgs.append({"role": "system", "content": _config.system_prompt})
+    if system_prompt:
+        msgs.append({"role": "system", "content": system_prompt})
     msgs.extend(messages)
 
     yield from _call_with_retry(msgs, stream=True)

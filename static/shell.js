@@ -1,10 +1,15 @@
 /**
- * EduTower — 原生多视图切换（聊天 / 资料录入）
+ * EduTower — 原生多视图切换
  */
 (function () {
   "use strict";
 
   var VIEW_CONFIG = {
+    home: {
+      breadcrumb: "学习首页",
+      panelId: "view-home",
+      sideId: null,
+    },
     chat: {
       breadcrumb: "AI 智能助教",
       panelId: "view-chat",
@@ -19,7 +24,7 @@
 
   var navItems = document.querySelectorAll(".sidebar-nav .nav-item[data-view]");
   var breadcrumbEl = document.getElementById("viewBreadcrumb");
-  var currentView = "chat";
+  var currentView = "home";
 
   function switchView(viewName) {
     var config = VIEW_CONFIG[viewName];
@@ -47,17 +52,25 @@
     });
 
     document.querySelectorAll(".view-side-panel").forEach(function (side) {
-      var isTarget = side.id === config.sideId;
-      side.classList.toggle("is-hidden", !isTarget);
-      side.setAttribute("aria-hidden", isTarget ? "false" : "true");
+      var showSide = config.sideId && side.id === config.sideId;
+      side.classList.toggle("is-hidden", !showSide);
+      side.setAttribute("aria-hidden", showSide ? "false" : "true");
     });
 
     if (breadcrumbEl) {
       breadcrumbEl.textContent = config.breadcrumb;
     }
 
+    if (viewName === "home" && window.EduTowerHome) {
+      window.EduTowerHome.refresh();
+    }
+
     if (viewName === "materials" && window.EduTowerMaterials) {
       window.EduTowerMaterials.refresh();
+    }
+
+    if (viewName === "chat" && window.EduTowerAgentPanel) {
+      window.EduTowerAgentPanel.refreshFromBackend();
     }
   }
 
@@ -80,7 +93,7 @@
   navItems.forEach(function (item) {
     item.addEventListener("click", function (event) {
       event.preventDefault();
-      switchView(item.getAttribute("data-view") || "chat");
+      switchView(item.getAttribute("data-view") || "home");
     });
   });
 
