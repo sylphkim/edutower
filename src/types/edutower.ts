@@ -1,3 +1,7 @@
+import type { MaterialStatus } from "./materials";
+
+export type { MaterialOrigin, MaterialStatus } from "./materials";
+
 export type ModuleStatus = "stub" | "mock" | "ready";
 
 export interface StubMeta {
@@ -25,17 +29,6 @@ export type MaterialCategory =
   | "note"
   | "exam"
   | "other";
-
-export type MaterialOrigin =
-  | "uploaded"
-  | "manual"
-  | "mock";
-
-export type MaterialStatus =
-  | "pending"
-  | "processing"
-  | "ready"
-  | "failed";
 
 export type ProjectStatus =
   | "planning"

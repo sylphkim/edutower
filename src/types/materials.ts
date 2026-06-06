@@ -1,11 +1,7 @@
-import type {
-  MaterialOrigin,
-  MaterialStatus as SharedMaterialStatus
-} from "./edutower";
-
 export type MaterialType = "slides" | "photo" | "outline" | "note" | "other";
+export type MaterialOrigin = "uploaded" | "manual" | "mock";
 export type MaterialSource = MaterialOrigin;
-export type MaterialStatus = SharedMaterialStatus;
+export type MaterialStatus = "pending" | "processing" | "ready" | "failed";
 
 export interface MaterialItem {
   id: string;
