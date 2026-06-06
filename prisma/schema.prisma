@@ -13,11 +13,12 @@ datasource db {
 }
 
 model User {
-  id          String     @id @default(cuid())
-  displayName String
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  materials   Material[]
+  id            String         @id @default(cuid())
+  displayName   String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  materials     Material[]
+  studyProjects StudyProject[]
 }
 
 model Material {
@@ -33,6 +34,26 @@ model Material {
   extractedText String?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
+
+  @@index([userId])
+}
+
+model StudyProject {
+  id              String        @id @default(cuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  subject         String
+  goal            String
+  targetScore     String?
+  startDate       DateTime?
+  deadline        DateTime?
+  dailyMinutes    Int?
+  status          ProjectStatus @default(planning)
+  goalConfirmedAt DateTime?
+  planConfirmedAt DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   @@index([userId])
 }
