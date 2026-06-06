@@ -1,4 +1,10 @@
-import { mockMaterials } from "../mock/materials";
+import { materialsRepository } from "../repositories/materials.repository";
+import type {
+  Material,
+  MaterialCategory,
+  MaterialOrigin,
+  MaterialStatus as PrismaMaterialStatus
+} from "../generated/prisma/client";
 import type {
   CreateMaterialInput,
   MaterialItem,
@@ -8,30 +14,18 @@ import type {
   UpdateMaterialInput
 } from "../types/materials";
 import { AppError } from "../utils/errors";
+import { getDemoUserId } from "./demoUser.service";
 
 const VALID_TYPES: MaterialType[] = ["slides", "photo", "outline", "note", "other"];
 const VALID_SOURCES: MaterialSource[] = ["uploaded", "manual", "mock"];
 const VALID_STATUSES: MaterialStatus[] = ["pending", "processing", "ready", "failed"];
 
-// 先用内存数组保存资料 metadata，以后可以替换成数据库查询。
-const materialItems: MaterialItem[] = mockMaterials.map((item) => ({ ...item }));
-let nextMaterialNumber = materialItems.length + 1;
-
-function createMaterialId(): string {
-  const id = `mat-${String(nextMaterialNumber).padStart(3, "0")}`;
-  nextMaterialNumber += 1;
-  return id;
-}
-
-// 找不到 id 时直接抛错，避免调用方静默失败。
-function findIndexById(id: string): number {
-  const index = materialItems.findIndex((item) => item.id === id);
-
-  if (index === -1) {
+function ensureMaterialExists(item: Material | null): Material {
+  if (!item) {
     throw new AppError("INVALID_REQUEST", "Material item not found.", 404);
   }
 
-  return index;
+  return item;
 }
 
 function ensureValidCreateInput(input: CreateMaterialInput): void {
@@ -89,58 +83,93 @@ function ensureValidUpdateInput(input: UpdateMaterialInput): void {
   }
 }
 
+function toMaterialCategory(type: MaterialType): MaterialCategory {
+  return type as MaterialCategory;
+}
+
+function toMaterialOrigin(source: MaterialSource): MaterialOrigin {
+  return source as MaterialOrigin;
+}
+
+function toMaterialStatus(status: MaterialStatus): PrismaMaterialStatus {
+  return status as PrismaMaterialStatus;
+}
+
+function toApiMaterial(item: Material): MaterialItem {
+  return {
+    id: item.id,
+    title: item.title,
+    type: item.category as MaterialType,
+    source: item.origin as MaterialSource,
+    status: item.status as MaterialStatus,
+    summary: item.summary ?? undefined,
+    createdAt: item.createdAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString()
+  };
+}
+
 export const materialsService = {
-  list(): { items: MaterialItem[] } {
+  async list(): Promise<{ items: MaterialItem[] }> {
+    const userId = await getDemoUserId();
+    const items = await materialsRepository.listByUser(userId);
+
     return {
-      items: materialItems
+      items: items.map(toApiMaterial)
     };
   },
 
-  getById(id: string): MaterialItem {
-    return materialItems[findIndexById(id)];
+  async getById(id: string): Promise<MaterialItem> {
+    const userId = await getDemoUserId();
+    const item = ensureMaterialExists(await materialsRepository.findByIdForUser(id, userId));
+
+    return toApiMaterial(item);
   },
 
-  create(input: CreateMaterialInput): MaterialItem {
+  async create(input: CreateMaterialInput): Promise<MaterialItem> {
     ensureValidCreateInput(input);
 
-    const now = new Date().toISOString();
-    const item: MaterialItem = {
-      id: createMaterialId(),
+    const userId = await getDemoUserId();
+    const item = await materialsRepository.create({
+      userId,
       title: input.title.trim(),
-      type: input.type,
-      source: input.source ?? "manual",
-      status: "ready",
-      summary: input.summary,
-      createdAt: now,
-      updatedAt: now
-    };
+      category: toMaterialCategory(input.type),
+      origin: toMaterialOrigin(input.source ?? "manual"),
+      status: toMaterialStatus("ready"),
+      summary: input.summary
+    });
 
-    materialItems.push(item);
-    return item;
+    return toApiMaterial(item);
   },
 
-  update(id: string, input: UpdateMaterialInput): MaterialItem {
+  async update(id: string, input: UpdateMaterialInput): Promise<MaterialItem> {
     ensureValidUpdateInput(input);
 
-    const index = findIndexById(id);
-    const currentItem = materialItems[index];
-    const updatedItem: MaterialItem = {
-      ...currentItem,
-      title: input.title !== undefined ? input.title.trim() : currentItem.title,
-      type: input.type ?? currentItem.type,
-      status: input.status ?? currentItem.status,
-      summary: input.summary ?? currentItem.summary,
-      updatedAt: new Date().toISOString()
-    };
+    const userId = await getDemoUserId();
+    const currentItem = ensureMaterialExists(
+      await materialsRepository.findByIdForUser(id, userId)
+    );
 
-    materialItems[index] = updatedItem;
-    return updatedItem;
+    const updatedItem = await materialsRepository.updateByIdForUser(id, userId, {
+      title: input.title !== undefined ? input.title.trim() : currentItem.title,
+      category:
+        input.type !== undefined ? toMaterialCategory(input.type) : currentItem.category,
+      status:
+        input.status !== undefined
+          ? toMaterialStatus(input.status)
+          : currentItem.status,
+      summary: input.summary ?? currentItem.summary ?? undefined
+    });
+
+    return toApiMaterial(updatedItem);
   },
 
-  remove(id: string): MaterialItem {
-    const index = findIndexById(id);
-    const [removedItem] = materialItems.splice(index, 1);
+  async remove(id: string): Promise<MaterialItem> {
+    const userId = await getDemoUserId();
+    const currentItem = ensureMaterialExists(
+      await materialsRepository.findByIdForUser(id, userId)
+    );
+    const removedItem = await materialsRepository.deleteById(currentItem.id);
 
-    return removedItem;
+    return toApiMaterial(removedItem);
   }
 };

@@ -18,7 +18,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@prisma/adapter-better-sqlite3": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "better-sqlite3": "^12.10.0",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^4.22.2",
