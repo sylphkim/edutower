@@ -1,14 +1,23 @@
-import { mockPlanItems } from "../mock/plan";
+import {
+  projectsRepository,
+  type CreateStudyTaskRecordInput,
+  type StudyProjectWithPlan
+} from "../repositories/projects.repository";
+import { knowledgeNodesRepository } from "../repositories/knowledgeNodes.repository";
+import type { ProjectStatus, StudyTaskType } from "../generated/prisma/client";
 import type {
   CreatePlanInput,
   PlanDay,
   PlanItem,
   PlanStatus,
+  PlanTask,
   PlanTaskStatus,
   PlanTaskType,
   UpdatePlanInput
 } from "../types/plan";
 import { AppError } from "../utils/errors";
+import { getDemoProjectId } from "./demoProject.service";
+import { getDemoUserId } from "./demoUser.service";
 
 const VALID_PLAN_STATUSES: PlanStatus[] = ["draft", "active", "completed"];
 const VALID_TASK_TYPES: PlanTaskType[] = [
@@ -19,37 +28,12 @@ const VALID_TASK_TYPES: PlanTaskType[] = [
 ];
 const VALID_TASK_STATUSES: PlanTaskStatus[] = ["todo", "in_progress", "done"];
 
-// 先用内存数组保存学习计划，以后可以替换成数据库查询。
-const planItems: PlanItem[] = mockPlanItems.map((item) => ({
-  ...item,
-  materialIds: [...item.materialIds],
-  skillIds: [...item.skillIds],
-  days: copyDays(item.days)
-}));
-let nextPlanNumber = planItems.length + 1;
-
-function createPlanId(): string {
-  const id = `plan-${String(nextPlanNumber).padStart(3, "0")}`;
-  nextPlanNumber += 1;
-  return id;
-}
-
-// 找不到 id 时直接抛错，避免调用方静默失败。
-function findIndexById(id: string): number {
-  const index = planItems.findIndex((item) => item.id === id);
-
-  if (index === -1) {
+function ensurePlanExists(item: StudyProjectWithPlan | null): StudyProjectWithPlan {
+  if (!item) {
     throw new AppError("INVALID_REQUEST", "Plan item not found.", 404);
   }
 
-  return index;
-}
-
-function copyDays(days: PlanDay[]): PlanDay[] {
-  return days.map((day) => ({
-    ...day,
-    tasks: day.tasks.map((task) => ({ ...task }))
-  }));
+  return item;
 }
 
 function ensureStringArray(value: string[], fieldName: string): void {
@@ -176,62 +160,195 @@ function ensureValidUpdateInput(input: UpdatePlanInput): void {
   }
 }
 
+function toProjectStatus(status: PlanStatus): ProjectStatus {
+  if (status === "active") {
+    return "active";
+  }
+
+  if (status === "completed") {
+    return "completed";
+  }
+
+  return "planning";
+}
+
+function toPlanStatus(status: ProjectStatus): PlanStatus {
+  if (status === "active") {
+    return "active";
+  }
+
+  if (status === "completed" || status === "archived") {
+    return "completed";
+  }
+
+  return "draft";
+}
+
+function toTaskRecords(days: PlanDay[]): CreateStudyTaskRecordInput[] {
+  return days.flatMap((day) =>
+    day.tasks.map((task, index) => ({
+      id: task.id.trim(),
+      title: task.title.trim(),
+      type: task.type as StudyTaskType,
+      day: day.day,
+      order: index,
+      knowledgeNodeId: task.skillId,
+      status: task.status
+    }))
+  );
+}
+
+async function ensureMaterialsBelongToUser(materialIds: string[], userId: string): Promise<void> {
+  if (materialIds.length === 0) {
+    return;
+  }
+
+  const existingIds = await projectsRepository.findExistingMaterialIdsForUser(materialIds, userId);
+  const existingIdSet = new Set(existingIds);
+
+  if (materialIds.some((id) => !existingIdSet.has(id))) {
+    throw new AppError("INVALID_REQUEST", "materialIds must reference existing user materials.", 400);
+  }
+}
+
+async function ensureTaskSkillsBelongToProject(
+  tasks: CreateStudyTaskRecordInput[],
+  projectId: string
+): Promise<void> {
+  const skillIds = Array.from(
+    new Set(tasks.map((task) => task.knowledgeNodeId).filter((id): id is string => Boolean(id)))
+  );
+
+  const count = await knowledgeNodesRepository.countByIdsForProject(skillIds, projectId);
+
+  if (count !== skillIds.length) {
+    throw new AppError(
+      "INVALID_REQUEST",
+      "task skillId must reference a skill in the same project.",
+      400
+    );
+  }
+}
+
+function toApiPlan(project: StudyProjectWithPlan): PlanItem {
+  const taskDays = new Map<number, PlanTask[]>();
+
+  for (const task of project.studyTasks) {
+    if (task.day === null) {
+      continue;
+    }
+
+    const tasks = taskDays.get(task.day) ?? [];
+    tasks.push({
+      id: task.id,
+      title: task.title,
+      type: task.type as PlanTaskType,
+      skillId: task.knowledgeNodeId ?? undefined,
+      status: task.status as PlanTaskStatus
+    });
+    taskDays.set(task.day, tasks);
+  }
+
+  const days = Array.from(taskDays.entries())
+    .sort(([leftDay], [rightDay]) => leftDay - rightDay)
+    .map(([day, tasks]) => ({
+      day,
+      title: `Day ${day}`,
+      tasks
+    }));
+
+  return {
+    id: project.id,
+    title: project.title,
+    goal: project.goal || undefined,
+    materialIds: project.materialLinks.map((link) => link.materialId),
+    skillIds: project.knowledgeNodes.map((node) => node.id),
+    days,
+    status: toPlanStatus(project.status),
+    createdAt: project.createdAt.toISOString(),
+    updatedAt: project.updatedAt.toISOString()
+  };
+}
+
 export const planService = {
-  list(): { items: PlanItem[] } {
+  async list(): Promise<{ items: PlanItem[] }> {
+    const userId = await getDemoUserId();
+    await getDemoProjectId();
+    const items = await projectsRepository.listByUser(userId);
+
     return {
-      items: planItems
+      items: items.map(toApiPlan)
     };
   },
 
-  getById(id: string): PlanItem {
-    return planItems[findIndexById(id)];
+  async getById(id: string): Promise<PlanItem> {
+    const userId = await getDemoUserId();
+    const item = ensurePlanExists(await projectsRepository.findByIdForUser(id, userId));
+
+    return toApiPlan(item);
   },
 
-  create(input: CreatePlanInput): PlanItem {
+  async create(input: CreatePlanInput): Promise<PlanItem> {
     ensureValidCreateInput(input);
 
-    const now = new Date().toISOString();
-    const item: PlanItem = {
-      id: createPlanId(),
-      title: input.title.trim(),
-      goal: input.goal,
-      materialIds: input.materialIds ? [...input.materialIds] : [],
-      skillIds: input.skillIds ? [...input.skillIds] : [],
-      days: input.days ? copyDays(input.days) : [],
-      status: "draft",
-      createdAt: now,
-      updatedAt: now
-    };
+    const userId = await getDemoUserId();
+    const materialIds = input.materialIds ? [...input.materialIds] : [];
+    const tasks = toTaskRecords(input.days ?? []);
+    await ensureMaterialsBelongToUser(materialIds, userId);
 
-    planItems.push(item);
-    return item;
+    if (tasks.some((task) => task.knowledgeNodeId)) {
+      throw new AppError(
+        "INVALID_REQUEST",
+        "task skillId must reference a skill in the same project.",
+        400
+      );
+    }
+
+    const item = await projectsRepository.createPlan({
+      userId,
+      title: input.title.trim(),
+      goal: input.goal ?? "",
+      status: "planning",
+      materialIds,
+      tasks
+    });
+
+    return toApiPlan(item);
   },
 
-  update(id: string, input: UpdatePlanInput): PlanItem {
+  async update(id: string, input: UpdatePlanInput): Promise<PlanItem> {
     ensureValidUpdateInput(input);
 
-    const index = findIndexById(id);
-    const currentItem = planItems[index];
-    const updatedItem: PlanItem = {
-      ...currentItem,
+    const userId = await getDemoUserId();
+    const currentItem = ensurePlanExists(await projectsRepository.findByIdForUser(id, userId));
+    const tasks = input.days !== undefined ? toTaskRecords(input.days) : undefined;
+    const materialIds = input.materialIds !== undefined ? [...input.materialIds] : undefined;
+
+    if (materialIds) {
+      await ensureMaterialsBelongToUser(materialIds, userId);
+    }
+
+    if (tasks) {
+      await ensureTaskSkillsBelongToProject(tasks, currentItem.id);
+    }
+
+    const updatedItem = await projectsRepository.updatePlan(id, {
+      userId,
       title: input.title !== undefined ? input.title.trim() : currentItem.title,
       goal: input.goal ?? currentItem.goal,
-      materialIds:
-        input.materialIds !== undefined ? [...input.materialIds] : currentItem.materialIds,
-      skillIds: input.skillIds !== undefined ? [...input.skillIds] : currentItem.skillIds,
-      days: input.days !== undefined ? copyDays(input.days) : currentItem.days,
-      status: input.status ?? currentItem.status,
-      updatedAt: new Date().toISOString()
-    };
+      status: input.status !== undefined ? toProjectStatus(input.status) : currentItem.status,
+      materialIds,
+      tasks
+    });
 
-    planItems[index] = updatedItem;
-    return updatedItem;
+    return toApiPlan(updatedItem);
   },
 
-  remove(id: string): PlanItem {
-    const index = findIndexById(id);
-    const [removedItem] = planItems.splice(index, 1);
+  async remove(id: string): Promise<PlanItem> {
+    const userId = await getDemoUserId();
+    const currentItem = ensurePlanExists(await projectsRepository.findByIdForUser(id, userId));
+    await projectsRepository.deleteByIdForUser(id, userId);
 
-    return removedItem;
+    return toApiPlan(currentItem);
   }
 };

@@ -1,4 +1,8 @@
-import { mockSkillItems } from "../mock/skills";
+import { knowledgeNodesRepository } from "../repositories/knowledgeNodes.repository";
+import type {
+  KnowledgeNode,
+  KnowledgeNodeStatus
+} from "../generated/prisma/client";
 import type {
   CreateSkillInput,
   SkillItem,
@@ -7,28 +11,16 @@ import type {
   UpdateSkillInput
 } from "../types/skills";
 import { AppError } from "../utils/errors";
+import { getDemoProjectId } from "./demoProject.service";
 
 const VALID_STATUSES: SkillStatus[] = ["locked", "available", "in_progress", "mastered"];
 
-// 先用内存数组保存技能记录，以后可以替换成数据库查询。
-const skillItems: SkillItem[] = mockSkillItems.map((item) => ({ ...item }));
-let nextSkillNumber = skillItems.length + 1;
-
-function createSkillId(): string {
-  const id = `skill-${String(nextSkillNumber).padStart(3, "0")}`;
-  nextSkillNumber += 1;
-  return id;
-}
-
-// 找不到 id 时直接抛错，避免调用方静默失败。
-function findIndexById(id: string): number {
-  const index = skillItems.findIndex((item) => item.id === id);
-
-  if (index === -1) {
+function ensureSkillExists(item: KnowledgeNode | null): KnowledgeNode {
+  if (!item) {
     throw new AppError("INVALID_REQUEST", "Skill item not found.", 404);
   }
 
-  return index;
+  return item;
 }
 
 function ensureValidMastery(mastery: number): void {
@@ -141,6 +133,44 @@ function ensureValidUpdateInput(id: string, input: UpdateSkillInput): void {
   }
 }
 
+async function ensureParentBelongsToProject(
+  parentId: string | undefined,
+  projectId: string
+): Promise<void> {
+  if (!parentId) {
+    return;
+  }
+
+  const parent = await knowledgeNodesRepository.findByIdForProject(parentId, projectId);
+
+  if (!parent) {
+    throw new AppError(
+      "INVALID_REQUEST",
+      "parentId must reference an existing skill in the same project.",
+      400
+    );
+  }
+}
+
+function toKnowledgeNodeStatus(status: SkillStatus): KnowledgeNodeStatus {
+  return status as KnowledgeNodeStatus;
+}
+
+function toApiSkill(item: KnowledgeNode): SkillItem {
+  return {
+    id: item.id,
+    title: item.title,
+    description: item.description ?? undefined,
+    parentId: item.parentId ?? undefined,
+    prerequisites: [],
+    status: item.status as SkillStatus,
+    mastery: item.mastery,
+    order: item.order,
+    createdAt: item.createdAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString()
+  };
+}
+
 function buildTree(items: SkillItem[]): SkillTreeItem[] {
   const itemMap = new Map<string, SkillTreeItem>();
   const roots: SkillTreeItem[] = [];
@@ -171,69 +201,84 @@ function buildTree(items: SkillItem[]): SkillTreeItem[] {
 }
 
 export const skillsService = {
-  list(): { items: SkillItem[] } {
+  async list(): Promise<{ items: SkillItem[] }> {
+    const projectId = await getDemoProjectId();
+    const items = await knowledgeNodesRepository.listByProject(projectId);
+
     return {
-      items: skillItems
+      items: items.map(toApiSkill)
     };
   },
 
-  getById(id: string): SkillItem {
-    return skillItems[findIndexById(id)];
+  async getById(id: string): Promise<SkillItem> {
+    const projectId = await getDemoProjectId();
+    const item = ensureSkillExists(await knowledgeNodesRepository.findByIdForProject(id, projectId));
+
+    return toApiSkill(item);
   },
 
-  getTree(): { items: SkillTreeItem[] } {
+  async getTree(): Promise<{ items: SkillTreeItem[] }> {
+    const projectId = await getDemoProjectId();
+    const items = await knowledgeNodesRepository.listByProject(projectId);
+
     return {
-      items: buildTree(skillItems)
+      items: buildTree(items.map(toApiSkill))
     };
   },
 
-  create(input: CreateSkillInput): SkillItem {
+  async create(input: CreateSkillInput): Promise<SkillItem> {
     ensureValidCreateInput(input);
 
-    const now = new Date().toISOString();
-    const item: SkillItem = {
-      id: createSkillId(),
+    const projectId = await getDemoProjectId();
+    await ensureParentBelongsToProject(input.parentId, projectId);
+
+    const item = await knowledgeNodesRepository.create({
+      projectId,
       title: input.title.trim(),
       description: input.description,
       parentId: input.parentId,
-      prerequisites: input.prerequisites ? [...input.prerequisites] : [],
-      status: input.status ?? "available",
+      status: toKnowledgeNodeStatus(input.status ?? "available"),
       mastery: input.mastery ?? 0,
-      order: input.order ?? skillItems.length + 1,
-      createdAt: now,
-      updatedAt: now
-    };
+      order:
+        input.order ??
+        (await knowledgeNodesRepository.countByProject(projectId)) + 1
+    });
 
-    skillItems.push(item);
-    return item;
+    return toApiSkill(item);
   },
 
-  update(id: string, input: UpdateSkillInput): SkillItem {
+  async update(id: string, input: UpdateSkillInput): Promise<SkillItem> {
     ensureValidUpdateInput(id, input);
 
-    const index = findIndexById(id);
-    const currentItem = skillItems[index];
-    const updatedItem: SkillItem = {
-      ...currentItem,
-      title: input.title !== undefined ? input.title.trim() : currentItem.title,
-      description: input.description ?? currentItem.description,
-      parentId: input.parentId !== undefined ? input.parentId ?? undefined : currentItem.parentId,
-      prerequisites:
-        input.prerequisites !== undefined ? [...input.prerequisites] : currentItem.prerequisites,
-      status: input.status ?? currentItem.status,
-      mastery: input.mastery ?? currentItem.mastery,
-      order: input.order ?? currentItem.order,
-      updatedAt: new Date().toISOString()
-    };
+    const projectId = await getDemoProjectId();
+    const currentItem = ensureSkillExists(
+      await knowledgeNodesRepository.findByIdForProject(id, projectId)
+    );
+    await ensureParentBelongsToProject(input.parentId ?? undefined, projectId);
 
-    skillItems[index] = updatedItem;
-    return updatedItem;
+    const updatedItem = await knowledgeNodesRepository.updateByIdForProject(id, projectId, {
+      title: input.title !== undefined ? input.title.trim() : currentItem.title,
+      description: input.description ?? currentItem.description ?? undefined,
+      parentId:
+        input.parentId !== undefined ? input.parentId ?? null : currentItem.parentId,
+      status:
+        input.status !== undefined
+          ? toKnowledgeNodeStatus(input.status)
+          : currentItem.status,
+      mastery: input.mastery ?? currentItem.mastery,
+      order: input.order ?? currentItem.order
+    });
+
+    return toApiSkill(updatedItem);
   },
 
-  remove(id: string): SkillItem {
-    const index = findIndexById(id);
-    const [removedItem] = skillItems.splice(index, 1);
+  async remove(id: string): Promise<SkillItem> {
+    const projectId = await getDemoProjectId();
+    const currentItem = ensureSkillExists(
+      await knowledgeNodesRepository.findByIdForProject(id, projectId)
+    );
+    await knowledgeNodesRepository.deleteByIdForProject(id, projectId);
 
-    return removedItem;
+    return toApiSkill(currentItem);
   }
 };
