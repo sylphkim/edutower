@@ -1,60 +1,132 @@
-import { Request, Response } from "express";
+import { NextFunction, Request, Response } from "express";
 import { wrongbookService } from "../services/wrongbook.service";
 import { sendSuccess } from "../utils/apiResponse";
 
-export function listWrongbookItems(_req: Request, res: Response): void {
-  sendSuccess(res, wrongbookService.list());
+export async function listWrongbookItems(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    sendSuccess(res, await wrongbookService.list());
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function createWrongbookSubject(req: Request, res: Response): void {
-  const result = wrongbookService.createSubject(req.body);
+export async function createWrongbookSubject(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = wrongbookService.createSubject(req.body);
 
-  sendSuccess(res, result, 201);
+    sendSuccess(res, result, 201);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function createWrongbookCategory(req: Request, res: Response): void {
-  const result = wrongbookService.createCategory(req.body);
+export async function createWrongbookCategory(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = wrongbookService.createCategory(req.body);
 
-  sendSuccess(res, result, 201);
+    sendSuccess(res, result, 201);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function deleteWrongbookSubject(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = wrongbookService.removeSubject(id);
+export async function deleteWrongbookSubject(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await wrongbookService.removeSubject(id);
 
-  sendSuccess(res, result);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function deleteWrongbookCategory(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = wrongbookService.removeCategory(id);
+export async function deleteWrongbookCategory(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await wrongbookService.removeCategory(id);
 
-  sendSuccess(res, result);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function getWrongbookItem(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = wrongbookService.getById(id);
+export async function getWrongbookItem(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await wrongbookService.getById(id);
 
-  sendSuccess(res, result);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function createWrongbookItem(req: Request, res: Response): void {
-  const result = wrongbookService.create(req.body);
+export async function createWrongbookItem(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await wrongbookService.create(req.body);
 
-  sendSuccess(res, result, 201);
+    sendSuccess(res, result, 201);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function updateWrongbookItem(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = wrongbookService.update(id, req.body);
+export async function updateWrongbookItem(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await wrongbookService.update(id, req.body);
 
-  sendSuccess(res, result);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function deleteWrongbookItem(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = wrongbookService.remove(id);
+export async function deleteWrongbookItem(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await wrongbookService.remove(id);
 
-  sendSuccess(res, result);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
 }

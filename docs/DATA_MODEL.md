@@ -98,7 +98,10 @@ Prisma 关系能保证基本外键，但以下跨项目、跨用户规则必须�
 - API `reviewCount` 和 `lastReviewedAt` 映射到同名字段。
 - 订正状态映射到 `WrongbookItem.status`。
 - 手动删除映射到 `WrongbookItem.deletedAt`。
-- API `subject` 和 `category` 当前是错题分类契约，Prisma 第一版尚未建分类表；接入数据库前需要决定是保留字符串字段还是建 taxonomy 模型。
+- API `subject` 和 `category` 当前作为 `WrongbookItem.subject`、`WrongbookItem.category` 字符串字段持久化。
+- 内置 taxonomy 仍来自服务端常量；本版不新增 taxonomy 模型。
+- Quiz 提交时，整次提交的 `QuizAttempt` 写入和错题创建/订正在同一个 Prisma transaction 中完成。
+- 同一用户同一道 `QuizQuestion` 只保留一条未删除错题。重复答错会更新这条记录；答对一次会将其标记为 `corrected`，但不会自动更新 `KnowledgeNode.mastery` 或 `status`。
 
 ### Memory 和 Daily Summary
 

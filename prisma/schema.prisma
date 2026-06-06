@@ -284,6 +284,8 @@ model WrongbookItem {
   correctAnswer   String
   explanation     String?
   wrongAnswer     String
+  subject         String           @default("uncategorized")
+  category        String           @default("uncategorized")
   /// Correction status only. Soft deletion is represented by deletedAt.
   status          WrongbookStatus  @default(uncorrected)
   reviewCount     Int              @default(0)
@@ -295,6 +297,8 @@ model WrongbookItem {
   updatedAt       DateTime         @updatedAt
 
   @@index([userId, status])
+  @@index([userId, subject])
+  @@index([userId, category])
   @@index([projectId])
   @@index([knowledgeNodeId])
 }

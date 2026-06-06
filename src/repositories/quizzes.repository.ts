@@ -119,16 +119,6 @@ export const quizzesRepository = {
     ) as unknown as Promise<QuizWithQuestions>;
   },
 
-  createAttempt(questionId: string, userAnswer: string, isCorrect: boolean) {
-    return prisma.quizAttempt.create({
-      data: {
-        questionId,
-        userAnswer,
-        isCorrect
-      }
-    });
-  },
-
   deleteById(id: string): Promise<Quiz> {
     return prisma.quiz.delete({
       where: {

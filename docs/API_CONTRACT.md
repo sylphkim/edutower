@@ -96,7 +96,7 @@ EduTower 当前对外暴露 Express 后端 API。Express 是面向产品和前�
 
 ### Wrongbook
 
-当前使用内存数组保存错题记录，不接数据库。
+当前错题记录使用 Prisma/SQLite 持久化。`subject` 和 `category` 作为错题项上的字符串分类字段保存；内置 taxonomy 仍由服务端常量提供。
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -105,6 +105,13 @@ EduTower 当前对外暴露 Express 后端 API。Express 是面向产品和前�
 | POST | `/api/wrongbook` | 创建错题 |
 | PATCH | `/api/wrongbook/:id` | 更新错题 |
 | DELETE | `/api/wrongbook/:id` | 删除错题 |
+
+补充约定：
+
+- `POST /api/quiz/:id/submit` 会为每道题保存 `QuizAttempt`；答错题会自动写入或更新 `WrongbookItem`。
+- 同一用户对同一道 `QuizQuestion` 重复答错时，更新现有未删除错题，不新增重复错题。
+- `PATCH /api/wrongbook/:id` 传入 `wrongAnswer` 时会视为重新作答；答案等于正确答案则标记为 `corrected`，否则保持或恢复为 `uncorrected`。
+- `DELETE /api/wrongbook/:id` 是手动软删除；默认列表不返回 `deletedAt` 非空的记录。
 
 ### Memory
 

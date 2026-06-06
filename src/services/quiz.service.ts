@@ -1,5 +1,6 @@
 import { knowledgeNodesRepository } from "../repositories/knowledgeNodes.repository";
 import { quizzesRepository, type QuizWithQuestions } from "../repositories/quizzes.repository";
+import { wrongbookRepository } from "../repositories/wrongbook.repository";
 import type {
   CreateQuizInput,
   QuizDifficulty,
@@ -10,6 +11,7 @@ import type {
 } from "../types/quiz";
 import { AppError } from "../utils/errors";
 import { getDemoProjectId } from "./demoProject.service";
+import { getDemoUserId } from "./demoUser.service";
 
 const VALID_DIFFICULTIES: QuizDifficulty[] = ["pass", "high_score"];
 const MAX_QUESTION_COUNT = 20;
@@ -255,6 +257,7 @@ export const quizService = {
   async submit(id: string, input: SubmitQuizInput): Promise<SubmitQuizResult> {
     ensureValidSubmitInput(input);
 
+    const userId = await getDemoUserId();
     const projectId = await getDemoProjectId();
     const quiz = ensureQuizExists(await quizzesRepository.findByIdForProject(id, projectId));
     const answerMap = new Map(
@@ -266,14 +269,26 @@ export const quizService = {
       return submittedAnswer !== normalizeAnswer(question.answer);
     });
 
-    await Promise.all(
-      quiz.questions.map((question) => {
-        const userAnswer = input.answers.find((answer) => answer.questionId === question.id)?.answer ?? "";
+    await wrongbookRepository.recordQuizSubmission({
+      userId,
+      projectId,
+      knowledgeNodeId: quiz.knowledgeNodeId,
+      questions: quiz.questions.map((question) => {
+        const userAnswer =
+          input.answers.find((answer) => answer.questionId === question.id)?.answer ?? "";
         const isCorrect = normalizeAnswer(userAnswer) === normalizeAnswer(question.answer);
 
-        return quizzesRepository.createAttempt(question.id, userAnswer, isCorrect);
+        return {
+          questionId: question.id,
+          questionType: question.type,
+          questionPrompt: question.prompt,
+          correctAnswer: question.answer,
+          explanation: question.explanation ?? undefined,
+          userAnswer,
+          isCorrect
+        };
       })
-    );
+    });
 
     const total = quiz.questions.length;
     const correctCount = total - wrongQuestions.length;
