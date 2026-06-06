@@ -11,3 +11,33 @@ generator client {
 datasource db {
   provider = "sqlite"
 }
+
+enum MaterialSourceType {
+  PDF
+  DOC
+  IMAGE
+  TEXT
+  LINK
+}
+
+enum MaterialCategory {
+  SLIDES
+  BOARD
+  OUTLINE
+  NOTE
+  EXAM
+  OTHER
+}
+
+enum MaterialStatus {
+  PENDING
+  UPLOADED
+  INDEXED
+}
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
