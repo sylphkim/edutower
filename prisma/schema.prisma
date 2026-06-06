@@ -13,12 +13,15 @@ datasource db {
 }
 
 model User {
-  id            String         @id @default(cuid())
-  displayName   String
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  materials     Material[]
-  studyProjects StudyProject[]
+  id             String          @id @default(cuid())
+  displayName    String
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  materials      Material[]
+  studyProjects  StudyProject[]
+  conversations  Conversation[]
+  wrongbookItems WrongbookItem[]
+  dailySummaries DailySummary[]
 }
 
 model Material {
@@ -58,6 +61,10 @@ model StudyProject {
   materialLinks   ProjectMaterial[]
   knowledgeNodes  KnowledgeNode[]
   studyTasks      StudyTask[]
+  conversations   Conversation[]
+  studySessions   StudySession[]
+  wrongbookItems  WrongbookItem[]
+  dailySummaries  DailySummary[]
 
   @@index([userId])
 }
@@ -74,45 +81,244 @@ model ProjectMaterial {
 }
 
 model KnowledgeNode {
-  id            String              @id @default(cuid())
-  projectId     String
-  project       StudyProject        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  parentId      String?
-  parent        KnowledgeNode?      @relation("KnowledgeNodeChildren", fields: [parentId], references: [id], onDelete: SetNull)
-  children      KnowledgeNode[]     @relation("KnowledgeNodeChildren")
-  title         String
-  description   String?
-  status        KnowledgeNodeStatus @default(available)
-  selfMastery   Int?
-  systemMastery Int?
-  confidence    Float?
-  mastery       Int                 @default(0)
-  order         Int                 @default(0)
-  studyTasks    StudyTask[]
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
+  id                 String              @id @default(cuid())
+  projectId          String
+  project            StudyProject        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parentId           String?
+  parent             KnowledgeNode?      @relation("KnowledgeNodeChildren", fields: [parentId], references: [id], onDelete: SetNull)
+  children           KnowledgeNode[]     @relation("KnowledgeNodeChildren")
+  title              String
+  description        String?
+  /// Confirmed user-facing state. AI suggestions must be accepted before changing it.
+  status             KnowledgeNodeStatus @default(available)
+  /// User self-assessment signal; not authoritative by itself.
+  selfMastery        Int?
+  /// System-estimated signal; not authoritative until accepted.
+  systemMastery      Int?
+  /// Confidence score for systemMastery.
+  confidence         Float?
+  /// Confirmed progress value used by the existing skills API.
+  mastery            Int                 @default(0)
+  order              Int                 @default(0)
+  studyTasks         StudyTask[]
+  studySessions      StudySession[]
+  quizzes            Quiz[]
+  wrongbookItems     WrongbookItem[]
+  summarySuggestions SummarySuggestion[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@index([projectId, parentId])
 }
 
 model StudyTask {
-  id              String          @id @default(cuid())
-  projectId       String
-  project         StudyProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  knowledgeNodeId String?
-  knowledgeNode   KnowledgeNode?  @relation(fields: [knowledgeNodeId], references: [id], onDelete: SetNull)
-  title           String
-  type            StudyTaskType
-  day             Int?
-  order           Int             @default(0)
-  isRecommended   Boolean         @default(true)
-  isSelected      Boolean         @default(false)
-  status          StudyTaskStatus @default(todo)
-  completedAt     DateTime?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  id                 String              @id @default(cuid())
+  projectId          String
+  project            StudyProject        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  knowledgeNodeId    String?
+  knowledgeNode      KnowledgeNode?      @relation(fields: [knowledgeNodeId], references: [id], onDelete: SetNull)
+  title              String
+  type               StudyTaskType
+  day                Int?
+  order              Int                 @default(0)
+  isRecommended      Boolean             @default(true)
+  isSelected         Boolean             @default(false)
+  status             StudyTaskStatus     @default(todo)
+  completedAt        DateTime?
+  studySessions      StudySession[]
+  summarySuggestions SummarySuggestion[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@index([projectId])
+  @@index([knowledgeNodeId])
+}
+
+model Conversation {
+  id                String           @id @default(cuid())
+  userId            String
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId         String?
+  project           StudyProject?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  type              ConversationType @default(free_qa)
+  title             String?
+  externalSessionId String?
+  messages          Message[]
+  studySession      StudySession?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([userId])
+  @@index([projectId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           MessageRole
+  content        String
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model StudySession {
+  id              String             @id @default(cuid())
+  projectId       String
+  project         StudyProject       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  knowledgeNodeId String?
+  knowledgeNode   KnowledgeNode?     @relation(fields: [knowledgeNodeId], references: [id], onDelete: SetNull)
+  studyTaskId     String?
+  studyTask       StudyTask?         @relation(fields: [studyTaskId], references: [id], onDelete: SetNull)
+  conversationId  String?            @unique
+  conversation    Conversation?      @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  status          StudySessionStatus @default(in_progress)
+  startedAt       DateTime           @default(now())
+  completedAt     DateTime?
+  quizzes         Quiz[]
+  dailySummary    DailySummary?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([projectId, status])
+  @@index([knowledgeNodeId])
+  @@index([studyTaskId])
+}
+
+model Quiz {
+  id              String         @id @default(cuid())
+  knowledgeNodeId String
+  knowledgeNode   KnowledgeNode  @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
+  studySessionId  String?
+  studySession    StudySession?  @relation(fields: [studySessionId], references: [id], onDelete: SetNull)
+  title           String
+  difficulty      QuizDifficulty @default(pass)
+  round           Int            @default(1)
+  questions       QuizQuestion[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([knowledgeNodeId])
+  @@index([studySessionId])
+}
+
+model QuizQuestion {
+  id             String           @id @default(cuid())
+  quizId         String
+  quiz           Quiz             @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  type           QuizQuestionType
+  prompt         String
+  answer         String
+  explanation    String?
+  order          Int              @default(0)
+  options        QuizOption[]
+  attempts       QuizAttempt[]
+  wrongbookItems WrongbookItem[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([quizId])
+}
+
+model QuizOption {
+  id         String       @id @default(cuid())
+  questionId String
+  question   QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  label      String?
+  text       String
+  order      Int          @default(0)
+
+  @@index([questionId])
+}
+
+model QuizAttempt {
+  id               String         @id @default(cuid())
+  questionId       String
+  question         QuizQuestion   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  userAnswer       String
+  isCorrect        Boolean
+  answeredAt       DateTime       @default(now())
+  timeSpentSeconds Int?
+  wrongbookItem    WrongbookItem?
+  createdAt        DateTime       @default(now())
+
+  @@index([questionId])
+}
+
+model WrongbookItem {
+  id              String           @id @default(cuid())
+  userId          String
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId       String?
+  project         StudyProject?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  knowledgeNodeId String?
+  knowledgeNode   KnowledgeNode?   @relation(fields: [knowledgeNodeId], references: [id], onDelete: SetNull)
+  quizQuestionId  String?
+  quizQuestion    QuizQuestion?    @relation(fields: [quizQuestionId], references: [id], onDelete: SetNull)
+  quizAttemptId   String?          @unique
+  quizAttempt     QuizAttempt?     @relation(fields: [quizAttemptId], references: [id], onDelete: SetNull)
+  questionType    QuizQuestionType
+  questionPrompt  String
+  correctAnswer   String
+  explanation     String?
+  wrongAnswer     String
+  /// Correction status only. Soft deletion is represented by deletedAt.
+  status          WrongbookStatus  @default(uncorrected)
+  reviewCount     Int              @default(0)
+  lastReviewedAt  DateTime?
+  correctedAt     DateTime?
+  /// Non-null means the item was manually soft-deleted.
+  deletedAt       DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([userId, status])
+  @@index([projectId])
+  @@index([knowledgeNodeId])
+}
+
+model DailySummary {
+  id               String              @id @default(cuid())
+  userId           String
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId        String?
+  project          StudyProject?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  studySessionId   String?             @unique
+  studySession     StudySession?       @relation(fields: [studySessionId], references: [id], onDelete: SetNull)
+  summaryDate      DateTime            @default(now())
+  aiDraft          String
+  confirmedContent String?
+  weaknesses       String?
+  status           DailySummaryStatus  @default(draft)
+  confirmedAt      DateTime?
+  suggestions      SummarySuggestion[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@index([userId, summaryDate])
+  @@index([projectId])
+}
+
+model SummarySuggestion {
+  id              String                  @id @default(cuid())
+  summaryId       String
+  summary         DailySummary            @relation(fields: [summaryId], references: [id], onDelete: Cascade)
+  knowledgeNodeId String?
+  knowledgeNode   KnowledgeNode?          @relation(fields: [knowledgeNodeId], references: [id], onDelete: SetNull)
+  studyTaskId     String?
+  studyTask       StudyTask?              @relation(fields: [studyTaskId], references: [id], onDelete: SetNull)
+  type            SummarySuggestionType
+  content         String
+  proposedStatus  KnowledgeNodeStatus?
+  proposedMastery Int?
+  modifiedContent String?
+  status          SummarySuggestionStatus @default(pending)
+  decidedAt       DateTime?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@index([summaryId, status])
   @@index([knowledgeNodeId])
 }
 
@@ -172,4 +378,53 @@ enum StudyTaskStatus {
   todo
   in_progress
   done
+}
+
+enum ConversationType {
+  free_qa
+  project_setup
+  project_study
+}
+
+enum MessageRole {
+  user
+  assistant
+}
+
+enum StudySessionStatus {
+  in_progress
+  completed
+}
+
+enum QuizDifficulty {
+  pass
+  high_score
+}
+
+enum QuizQuestionType {
+  single_choice
+  short_answer
+}
+
+enum WrongbookStatus {
+  uncorrected
+  corrected
+}
+
+enum DailySummaryStatus {
+  draft
+  confirmed
+}
+
+enum SummarySuggestionType {
+  knowledge_status
+  weakness
+  review_suggestion
+}
+
+enum SummarySuggestionStatus {
+  pending
+  accepted
+  modified
+  rejected
 }
