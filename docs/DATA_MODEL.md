@@ -81,7 +81,7 @@ Prisma 关系能保证基本外键，但以下跨项目、跨用户规则必须�
 - API `status` 映射到 `KnowledgeNode.status`。
 - API `mastery` 映射到 `KnowledgeNode.mastery`。
 - API `order` 映射到 `KnowledgeNode.order`。
-- API `prerequisites` 当前 Prisma 未建模，后续如需要应增加单独关系表，不应塞入 JSON 字符串。
+- API `prerequisites` 映射到 `KnowledgeNodePrerequisite` 显式关系表，不塞入 JSON 字符串。
 
 ### Quiz
 
@@ -105,3 +105,17 @@ Prisma 关系能保证基本外键，但以下跨项目、跨用户规则必须�
 - API `MemoryItem.type = daily_summary` 的记录可由 `DailySummary` 生成。
 - API `DailySummaryInput.summary` 映射到 `DailySummary.aiDraft` 或用户确认后的 `confirmedContent`。
 - API `weaknesses` 和 `nextSuggestions` 不应作为 JSON 大字段直接保存；需要进入 `DailySummary.weaknesses` 文本摘要或拆为 `SummarySuggestion`。
+
+## Plan / Quiz / Skills 关系整理
+
+以下关系说明覆盖上文历史描述中的旧占位说明：
+
+- `PlanDay.title` 是 API 展示字段，由 `plan.service.ts` 根据 `day` 派生为 `Day ${day}`，不进入 Prisma。
+- API `PlanTask.materialId` 映射到 `StudyTask.materialId`。该资料必须属于当前 demo user；删除资料后，任务上的资料引用由数据库置空。
+- API `PlanTask.quizId` 已删除。任务和测验的权威关系是 `Quiz.studyTaskId -> StudyTask.id`。
+- API `PlanTask.skillId` 映射到 `StudyTask.knowledgeNodeId`，用于表达任务当前关联的知识点。
+- API `QuizItem.studyTaskId` 映射到 `Quiz.studyTaskId`。删除任务后，测验保留，`studyTaskId` 置空。
+- API `QuizItem.materialId` 不是 Quiz 自身字段，而是从 `Quiz.studyTask.materialId` 派生出来的兼容响应字段。
+- API `CreateQuizInput` 需要 `skillId` 或 `studyTaskId`。如果只传 `studyTaskId`，该任务必须已经有关联的 `skillId`。
+- API `SkillItem.prerequisites` 映射到 `KnowledgeNodePrerequisite` 显式中间表，联合主键 `nodeId + prerequisiteId` 防止重复依赖。
+- service 必须校验知识点不能依赖自己、不能重复依赖，并且前置知识点必须属于同一个 demo project。

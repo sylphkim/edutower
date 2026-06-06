@@ -236,7 +236,9 @@
           return p.status === "active";
         }) || plans[0];
       if (!active || !active.days || !active.days.length) return [];
-      return active.days[0].tasks || [];
+      return active.days.reduce(function (tasks, day) {
+        return tasks.concat(day.tasks || []);
+      }, []);
     },
   };
 })();

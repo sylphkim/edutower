@@ -1,4 +1,5 @@
-import { mockQuizItems } from "../mock/quiz";
+import { knowledgeNodesRepository } from "../repositories/knowledgeNodes.repository";
+import { quizzesRepository, type QuizWithQuestions } from "../repositories/quizzes.repository";
 import type {
   CreateQuizInput,
   QuizDifficulty,
@@ -8,6 +9,7 @@ import type {
   SubmitQuizResult
 } from "../types/quiz";
 import { AppError } from "../utils/errors";
+import { getDemoProjectId } from "./demoProject.service";
 
 const VALID_DIFFICULTIES: QuizDifficulty[] = ["pass", "high_score"];
 const MAX_QUESTION_COUNT = 20;
@@ -42,28 +44,12 @@ const MOCK_QUESTION_BANK: Omit<QuizQuestion, "id">[] = [
   }
 ];
 
-// 先用内存数组保存 quiz 记录，以后可以替换成数据库查询。
-const quizItems: QuizItem[] = mockQuizItems.map((item) => ({
-  ...item,
-  questions: item.questions.map((question) => ({ ...question }))
-}));
-let nextQuizNumber = quizItems.length + 1;
-
-function createQuizId(): string {
-  const id = `quiz-${String(nextQuizNumber).padStart(3, "0")}`;
-  nextQuizNumber += 1;
-  return id;
-}
-
-// 找不到 id 时直接抛错，避免调用方静默失败。
-function findIndexById(id: string): number {
-  const index = quizItems.findIndex((item) => item.id === id);
-
-  if (index === -1) {
+function ensureQuizExists(item: QuizWithQuestions | null): QuizWithQuestions {
+  if (!item) {
     throw new AppError("INVALID_REQUEST", "Quiz item not found.", 404);
   }
 
-  return index;
+  return item;
 }
 
 function ensureValidCreateInput(input: CreateQuizInput): void {
@@ -83,12 +69,16 @@ function ensureValidCreateInput(input: CreateQuizInput): void {
     throw new AppError("INVALID_REQUEST", "title must be a non-empty string.", 400);
   }
 
-  if (input.materialId !== undefined && typeof input.materialId !== "string") {
-    throw new AppError("INVALID_REQUEST", "materialId must be a string.", 400);
-  }
-
   if (input.skillId !== undefined && typeof input.skillId !== "string") {
     throw new AppError("INVALID_REQUEST", "skillId must be a string.", 400);
+  }
+
+  if (input.studyTaskId !== undefined && typeof input.studyTaskId !== "string") {
+    throw new AppError("INVALID_REQUEST", "studyTaskId must be a string.", 400);
+  }
+
+  if (!input.skillId && !input.studyTaskId) {
+    throw new AppError("INVALID_REQUEST", "skillId or studyTaskId is required.", 400);
   }
 
   if (
@@ -130,13 +120,12 @@ function ensureValidSubmitInput(input: SubmitQuizInput): void {
   }
 }
 
-function createMockQuestions(count: number): QuizQuestion[] {
+function createMockQuestions(count: number): Omit<QuizQuestion, "id">[] {
   return Array.from({ length: count }, (_, index) => {
     const baseQuestion = MOCK_QUESTION_BANK[index % MOCK_QUESTION_BANK.length];
 
     return {
       ...baseQuestion,
-      id: `q-${String(index + 1).padStart(3, "0")}`,
       options: baseQuestion.options ? [...baseQuestion.options] : undefined
     };
   });
@@ -146,47 +135,146 @@ function normalizeAnswer(answer: string): string {
   return answer.trim().toLowerCase();
 }
 
+function toApiQuiz(quiz: QuizWithQuestions): QuizItem {
+  return {
+    id: quiz.id,
+    title: quiz.title,
+    materialId: quiz.studyTask?.materialId ?? undefined,
+    skillId: quiz.knowledgeNodeId,
+    studyTaskId: quiz.studyTaskId ?? undefined,
+    difficulty: quiz.difficulty as QuizDifficulty,
+    questions: quiz.questions.map((question) => ({
+      id: question.id,
+      type: question.type,
+      prompt: question.prompt,
+      options: question.options.length
+        ? question.options.map((option) => option.text)
+        : undefined,
+      answer: question.answer,
+      explanation: question.explanation ?? undefined
+    })),
+    createdAt: quiz.createdAt.toISOString()
+  };
+}
+
+async function resolveQuizTarget(
+  input: CreateQuizInput,
+  projectId: string
+): Promise<{ knowledgeNodeId: string; studyTaskId?: string }> {
+  const studyTask = input.studyTaskId
+    ? await quizzesRepository.findStudyTaskForProject(input.studyTaskId, projectId)
+    : null;
+
+  if (input.studyTaskId && !studyTask) {
+    throw new AppError(
+      "INVALID_REQUEST",
+      "studyTaskId must reference a task in the same project.",
+      400
+    );
+  }
+
+  if (input.skillId) {
+    const skill = await knowledgeNodesRepository.findByIdForProject(input.skillId, projectId);
+
+    if (!skill) {
+      throw new AppError(
+        "INVALID_REQUEST",
+        "skillId must reference a skill in the same project.",
+        400
+      );
+    }
+  }
+
+  if (studyTask?.knowledgeNodeId && input.skillId && studyTask.knowledgeNodeId !== input.skillId) {
+    throw new AppError(
+      "INVALID_REQUEST",
+      "skillId must match the study task skill.",
+      400
+    );
+  }
+
+  const knowledgeNodeId = input.skillId ?? studyTask?.knowledgeNodeId;
+
+  if (!knowledgeNodeId) {
+    throw new AppError(
+      "INVALID_REQUEST",
+      "studyTaskId must reference a task with skillId.",
+      400
+    );
+  }
+
+  return {
+    knowledgeNodeId,
+    studyTaskId: studyTask?.id
+  };
+}
+
 export const quizService = {
-  list(): { items: QuizItem[] } {
+  async list(): Promise<{ items: QuizItem[] }> {
+    const projectId = await getDemoProjectId();
+    const items = await quizzesRepository.listByProject(projectId);
+
     return {
-      items: quizItems
+      items: items.map(toApiQuiz)
     };
   },
 
-  getById(id: string): QuizItem {
-    return quizItems[findIndexById(id)];
+  async getById(id: string): Promise<QuizItem> {
+    const projectId = await getDemoProjectId();
+    const item = ensureQuizExists(await quizzesRepository.findByIdForProject(id, projectId));
+
+    return toApiQuiz(item);
   },
 
-  create(input: CreateQuizInput): QuizItem {
+  async create(input: CreateQuizInput): Promise<QuizItem> {
     ensureValidCreateInput(input);
 
+    const projectId = await getDemoProjectId();
+    const target = await resolveQuizTarget(input, projectId);
     const questionCount = input.questionCount ?? 3;
-    const quiz: QuizItem = {
-      id: createQuizId(),
+    const questions = createMockQuestions(questionCount);
+    const quiz = await quizzesRepository.create({
+      projectId,
       title: input.title?.trim() || "Mock Quiz",
-      materialId: input.materialId,
-      skillId: input.skillId,
+      knowledgeNodeId: target.knowledgeNodeId,
+      studyTaskId: target.studyTaskId,
       difficulty: input.difficulty,
-      questions: createMockQuestions(questionCount),
-      createdAt: new Date().toISOString()
-    };
+      questions: questions.map((question, index) => ({
+        type: question.type,
+        prompt: question.prompt,
+        options: question.options,
+        answer: question.answer,
+        explanation: question.explanation,
+        order: index
+      }))
+    });
 
-    quizItems.push(quiz);
-    return quiz;
+    return toApiQuiz(quiz);
   },
 
-  submit(id: string, input: SubmitQuizInput): SubmitQuizResult {
+  async submit(id: string, input: SubmitQuizInput): Promise<SubmitQuizResult> {
     ensureValidSubmitInput(input);
 
-    const quiz = quizItems[findIndexById(id)];
+    const projectId = await getDemoProjectId();
+    const quiz = ensureQuizExists(await quizzesRepository.findByIdForProject(id, projectId));
     const answerMap = new Map(
       input.answers.map((answer) => [answer.questionId, normalizeAnswer(answer.answer)])
     );
     const wrongQuestions = quiz.questions.filter((question) => {
-      const submittedAnswer = answerMap.get(question.id);
+      const submittedAnswer = answerMap.get(question.id) ?? "";
 
       return submittedAnswer !== normalizeAnswer(question.answer);
     });
+
+    await Promise.all(
+      quiz.questions.map((question) => {
+        const userAnswer = input.answers.find((answer) => answer.questionId === question.id)?.answer ?? "";
+        const isCorrect = normalizeAnswer(userAnswer) === normalizeAnswer(question.answer);
+
+        return quizzesRepository.createAttempt(question.id, userAnswer, isCorrect);
+      })
+    );
+
     const total = quiz.questions.length;
     const correctCount = total - wrongQuestions.length;
     const score = total === 0 ? 0 : Math.round((correctCount / total) * 100);
@@ -196,14 +284,24 @@ export const quizService = {
       score,
       total,
       correctCount,
-      wrongQuestions
+      wrongQuestions: wrongQuestions.map((question) => ({
+        id: question.id,
+        type: question.type,
+        prompt: question.prompt,
+        options: question.options.length
+          ? question.options.map((option) => option.text)
+          : undefined,
+        answer: question.answer,
+        explanation: question.explanation ?? undefined
+      }))
     };
   },
 
-  remove(id: string): QuizItem {
-    const index = findIndexById(id);
-    const [removedItem] = quizItems.splice(index, 1);
+  async remove(id: string): Promise<QuizItem> {
+    const projectId = await getDemoProjectId();
+    const currentItem = ensureQuizExists(await quizzesRepository.findByIdForProject(id, projectId));
+    await quizzesRepository.deleteById(currentItem.id);
 
-    return removedItem;
+    return toApiQuiz(currentItem);
   }
 };

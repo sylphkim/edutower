@@ -38,6 +38,7 @@ model Material {
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
   projectLinks  ProjectMaterial[]
+  studyTasks    StudyTask[]
 
   @@index([userId])
 }
@@ -81,16 +82,16 @@ model ProjectMaterial {
 }
 
 model KnowledgeNode {
-  id                 String              @id @default(cuid())
+  id                 String                      @id @default(cuid())
   projectId          String
-  project            StudyProject        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project            StudyProject                @relation(fields: [projectId], references: [id], onDelete: Cascade)
   parentId           String?
-  parent             KnowledgeNode?      @relation("KnowledgeNodeChildren", fields: [parentId], references: [id], onDelete: SetNull)
-  children           KnowledgeNode[]     @relation("KnowledgeNodeChildren")
+  parent             KnowledgeNode?              @relation("KnowledgeNodeChildren", fields: [parentId], references: [id], onDelete: SetNull)
+  children           KnowledgeNode[]             @relation("KnowledgeNodeChildren")
   title              String
   description        String?
   /// Confirmed user-facing state. AI suggestions must be accepted before changing it.
-  status             KnowledgeNodeStatus @default(available)
+  status             KnowledgeNodeStatus         @default(available)
   /// User self-assessment signal; not authoritative by itself.
   selfMastery        Int?
   /// System-estimated signal; not authoritative until accepted.
@@ -98,17 +99,30 @@ model KnowledgeNode {
   /// Confidence score for systemMastery.
   confidence         Float?
   /// Confirmed progress value used by the existing skills API.
-  mastery            Int                 @default(0)
-  order              Int                 @default(0)
+  mastery            Int                         @default(0)
+  order              Int                         @default(0)
   studyTasks         StudyTask[]
   studySessions      StudySession[]
   quizzes            Quiz[]
+  prerequisiteLinks  KnowledgeNodePrerequisite[] @relation("KnowledgeNodePrerequisites")
+  dependentLinks     KnowledgeNodePrerequisite[] @relation("KnowledgeNodeDependents")
   wrongbookItems     WrongbookItem[]
   summarySuggestions SummarySuggestion[]
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
 
   @@index([projectId, parentId])
+}
+
+model KnowledgeNodePrerequisite {
+  nodeId         String
+  prerequisiteId String
+  node           KnowledgeNode @relation("KnowledgeNodePrerequisites", fields: [nodeId], references: [id], onDelete: Cascade)
+  prerequisite   KnowledgeNode @relation("KnowledgeNodeDependents", fields: [prerequisiteId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+
+  @@id([nodeId, prerequisiteId])
+  @@index([prerequisiteId])
 }
 
 model StudyTask {
@@ -117,6 +131,8 @@ model StudyTask {
   project            StudyProject        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   knowledgeNodeId    String?
   knowledgeNode      KnowledgeNode?      @relation(fields: [knowledgeNodeId], references: [id], onDelete: SetNull)
+  materialId         String?
+  material           Material?           @relation(fields: [materialId], references: [id], onDelete: SetNull)
   title              String
   type               StudyTaskType
   day                Int?
@@ -126,12 +142,14 @@ model StudyTask {
   status             StudyTaskStatus     @default(todo)
   completedAt        DateTime?
   studySessions      StudySession[]
+  quizzes            Quiz[]
   summarySuggestions SummarySuggestion[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 
   @@index([projectId])
   @@index([knowledgeNodeId])
+  @@index([materialId])
 }
 
 model Conversation {
@@ -192,6 +210,8 @@ model Quiz {
   knowledgeNode   KnowledgeNode  @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
   studySessionId  String?
   studySession    StudySession?  @relation(fields: [studySessionId], references: [id], onDelete: SetNull)
+  studyTaskId     String?
+  studyTask       StudyTask?     @relation(fields: [studyTaskId], references: [id], onDelete: SetNull)
   title           String
   difficulty      QuizDifficulty @default(pass)
   round           Int            @default(1)
@@ -201,6 +221,7 @@ model Quiz {
 
   @@index([knowledgeNodeId])
   @@index([studySessionId])
+  @@index([studyTaskId])
 }
 
 model QuizQuestion {

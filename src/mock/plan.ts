@@ -23,7 +23,7 @@ export const mockPlanItems: PlanItem[] = [
             id: "task-002",
             title: "Practice slope interpretation",
             type: "practice_quiz",
-            quizId: "quiz-001",
+            skillId: "skill-002",
             status: "todo"
           }
         ]

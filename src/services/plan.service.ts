@@ -81,6 +81,14 @@ function ensureValidDays(days: PlanDay[]): void {
         throw new AppError("INVALID_REQUEST", "task title must be a non-empty string.", 400);
       }
 
+      if (task.materialId !== undefined && typeof task.materialId !== "string") {
+        throw new AppError("INVALID_REQUEST", "task materialId must be a string.", 400);
+      }
+
+      if (task.skillId !== undefined && typeof task.skillId !== "string") {
+        throw new AppError("INVALID_REQUEST", "task skillId must be a string.", 400);
+      }
+
       if (!VALID_TASK_TYPES.includes(task.type)) {
         throw new AppError(
           "INVALID_REQUEST",
@@ -193,20 +201,31 @@ function toTaskRecords(days: PlanDay[]): CreateStudyTaskRecordInput[] {
       day: day.day,
       order: index,
       knowledgeNodeId: task.skillId,
+      materialId: task.materialId,
       status: task.status
     }))
   );
 }
 
-async function ensureMaterialsBelongToUser(materialIds: string[], userId: string): Promise<void> {
-  if (materialIds.length === 0) {
+async function ensureMaterialsBelongToUser(
+  materialIds: Array<string | undefined>,
+  userId: string
+): Promise<void> {
+  const uniqueMaterialIds = Array.from(
+    new Set(materialIds.filter((id): id is string => Boolean(id)))
+  );
+
+  if (uniqueMaterialIds.length === 0) {
     return;
   }
 
-  const existingIds = await projectsRepository.findExistingMaterialIdsForUser(materialIds, userId);
+  const existingIds = await projectsRepository.findExistingMaterialIdsForUser(
+    uniqueMaterialIds,
+    userId
+  );
   const existingIdSet = new Set(existingIds);
 
-  if (materialIds.some((id) => !existingIdSet.has(id))) {
+  if (uniqueMaterialIds.some((id) => !existingIdSet.has(id))) {
     throw new AppError("INVALID_REQUEST", "materialIds must reference existing user materials.", 400);
   }
 }
@@ -243,6 +262,7 @@ function toApiPlan(project: StudyProjectWithPlan): PlanItem {
       id: task.id,
       title: task.title,
       type: task.type as PlanTaskType,
+      materialId: task.materialId ?? undefined,
       skillId: task.knowledgeNodeId ?? undefined,
       status: task.status as PlanTaskStatus
     });
@@ -294,7 +314,10 @@ export const planService = {
     const userId = await getDemoUserId();
     const materialIds = input.materialIds ? [...input.materialIds] : [];
     const tasks = toTaskRecords(input.days ?? []);
-    await ensureMaterialsBelongToUser(materialIds, userId);
+    await ensureMaterialsBelongToUser(
+      [...materialIds, ...tasks.map((task) => task.materialId)],
+      userId
+    );
 
     if (tasks.some((task) => task.knowledgeNodeId)) {
       throw new AppError(
@@ -325,7 +348,15 @@ export const planService = {
     const materialIds = input.materialIds !== undefined ? [...input.materialIds] : undefined;
 
     if (materialIds) {
-      await ensureMaterialsBelongToUser(materialIds, userId);
+      await ensureMaterialsBelongToUser(
+        [...materialIds, ...(tasks ?? []).map((task) => task.materialId)],
+        userId
+      );
+    } else if (tasks) {
+      await ensureMaterialsBelongToUser(
+        tasks.map((task) => task.materialId),
+        userId
+      );
     }
 
     if (tasks) {

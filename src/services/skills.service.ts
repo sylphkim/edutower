@@ -1,8 +1,6 @@
 import { knowledgeNodesRepository } from "../repositories/knowledgeNodes.repository";
-import type {
-  KnowledgeNode,
-  KnowledgeNodeStatus
-} from "../generated/prisma/client";
+import type { KnowledgeNodeStatus } from "../generated/prisma/client";
+import type { KnowledgeNodeWithPrerequisites } from "../repositories/knowledgeNodes.repository";
 import type {
   CreateSkillInput,
   SkillItem,
@@ -15,7 +13,9 @@ import { getDemoProjectId } from "./demoProject.service";
 
 const VALID_STATUSES: SkillStatus[] = ["locked", "available", "in_progress", "mastered"];
 
-function ensureSkillExists(item: KnowledgeNode | null): KnowledgeNode {
+function ensureSkillExists(
+  item: KnowledgeNodeWithPrerequisites | null
+): KnowledgeNodeWithPrerequisites {
   if (!item) {
     throw new AppError("INVALID_REQUEST", "Skill item not found.", 404);
   }
@@ -152,17 +152,46 @@ async function ensureParentBelongsToProject(
   }
 }
 
+async function ensurePrerequisitesBelongToProject(
+  id: string | undefined,
+  prerequisiteIds: string[],
+  projectId: string
+): Promise<void> {
+  const uniquePrerequisiteIds = new Set(prerequisiteIds);
+
+  if (uniquePrerequisiteIds.size !== prerequisiteIds.length) {
+    throw new AppError("INVALID_REQUEST", "prerequisites cannot contain duplicates.", 400);
+  }
+
+  if (id && uniquePrerequisiteIds.has(id)) {
+    throw new AppError("INVALID_REQUEST", "prerequisites cannot include itself.", 400);
+  }
+
+  const count = await knowledgeNodesRepository.countByIdsForProject(
+    prerequisiteIds,
+    projectId
+  );
+
+  if (count !== prerequisiteIds.length) {
+    throw new AppError(
+      "INVALID_REQUEST",
+      "prerequisites must reference skills in the same project.",
+      400
+    );
+  }
+}
+
 function toKnowledgeNodeStatus(status: SkillStatus): KnowledgeNodeStatus {
   return status as KnowledgeNodeStatus;
 }
 
-function toApiSkill(item: KnowledgeNode): SkillItem {
+function toApiSkill(item: KnowledgeNodeWithPrerequisites): SkillItem {
   return {
     id: item.id,
     title: item.title,
     description: item.description ?? undefined,
     parentId: item.parentId ?? undefined,
-    prerequisites: [],
+    prerequisites: item.prerequisiteLinks.map((link) => link.prerequisiteId),
     status: item.status as SkillStatus,
     mastery: item.mastery,
     order: item.order,
@@ -231,6 +260,11 @@ export const skillsService = {
 
     const projectId = await getDemoProjectId();
     await ensureParentBelongsToProject(input.parentId, projectId);
+    await ensurePrerequisitesBelongToProject(
+      undefined,
+      input.prerequisites ?? [],
+      projectId
+    );
 
     const item = await knowledgeNodesRepository.create({
       projectId,
@@ -241,7 +275,8 @@ export const skillsService = {
       mastery: input.mastery ?? 0,
       order:
         input.order ??
-        (await knowledgeNodesRepository.countByProject(projectId)) + 1
+        (await knowledgeNodesRepository.countByProject(projectId)) + 1,
+      prerequisiteIds: input.prerequisites ?? []
     });
 
     return toApiSkill(item);
@@ -255,6 +290,9 @@ export const skillsService = {
       await knowledgeNodesRepository.findByIdForProject(id, projectId)
     );
     await ensureParentBelongsToProject(input.parentId ?? undefined, projectId);
+    if (input.prerequisites !== undefined) {
+      await ensurePrerequisitesBelongToProject(id, input.prerequisites, projectId);
+    }
 
     const updatedItem = await knowledgeNodesRepository.updateByIdForProject(id, projectId, {
       title: input.title !== undefined ? input.title.trim() : currentItem.title,
@@ -266,7 +304,8 @@ export const skillsService = {
           ? toKnowledgeNodeStatus(input.status)
           : currentItem.status,
       mastery: input.mastery ?? currentItem.mastery,
-      order: input.order ?? currentItem.order
+      order: input.order ?? currentItem.order,
+      prerequisiteIds: input.prerequisites
     });
 
     return toApiSkill(updatedItem);

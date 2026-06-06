@@ -151,3 +151,13 @@ Express 内部会根据 `session_id` 构建 demo chat context，并将该 contex
 - Materials 不做真实上传、解析、OCR 或 RAG。
 - Plan、Quiz、Memory 的生成类能力当前不调用真实 LLM。
 - FastAPI 仍作为 AI Engine 边界使用，不直接操作产品数据。
+
+## Plan / Quiz / Skills 字段关系
+
+- `PlanDay.title` 保留在 API 响应中，但由 service 根据 `day` 派生，不作为数据库字段。
+- `PlanTask.materialId` 是有效业务字段，API 继续读写，并持久化到 `StudyTask.materialId`。
+- `PlanTask.quizId` 已从计划 API 中删除；前端和 mock 不再携带该字段。
+- `Quiz.studyTaskId` 表达一次计划任务产生的多轮测验关系；一个 `StudyTask` 可以关联多个 `Quiz`。
+- `QuizItem.materialId` 只作为响应兼容字段返回，来源是关联计划任务的 `materialId`，创建测验时不再接收 `materialId`。
+- `POST /api/quiz` 创建测验时必须提供 `skillId` 或 `studyTaskId`。如果使用 `studyTaskId`，该任务必须属于当前 demo project，并且能确定对应知识点。
+- `SkillItem.prerequisites` 继续保留在技能 API 中，并由 `KnowledgeNodePrerequisite` 持久化。重复依赖、自依赖或跨项目依赖会返回 400。

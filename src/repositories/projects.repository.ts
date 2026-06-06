@@ -20,6 +20,7 @@ export interface CreateStudyTaskRecordInput {
   day?: number;
   order: number;
   knowledgeNodeId?: string;
+  materialId?: string;
   status: StudyTaskStatus;
 }
 
