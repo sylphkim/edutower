@@ -13,10 +13,28 @@ datasource db {
 }
 
 model User {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   displayName String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  materials   Material[]
+}
+
+model Material {
+  id            String              @id @default(cuid())
+  userId        String
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  category      MaterialCategory
+  sourceType    MaterialSourceType?
+  origin        MaterialOrigin      @default(manual)
+  status        MaterialStatus      @default(ready)
+  summary       String?
+  extractedText String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([userId])
 }
 
 enum MaterialSourceType {
@@ -29,6 +47,7 @@ enum MaterialSourceType {
 
 enum MaterialCategory {
   slides
+  photo
   board
   outline
   note
