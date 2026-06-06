@@ -13,31 +13,31 @@ datasource db {
 }
 
 enum MaterialSourceType {
-  PDF
-  DOC
-  IMAGE
-  TEXT
-  LINK
+  pdf
+  doc
+  image
+  text
+  link
 }
 
 enum MaterialCategory {
-  SLIDES
-  BOARD
-  OUTLINE
-  NOTE
-  EXAM
-  OTHER
+  slides
+  board
+  outline
+  note
+  exam
+  other
 }
 
 enum MaterialStatus {
-  PENDING
-  UPLOADED
-  INDEXED
+  pending
+  uploaded
+  indexed
 }
 
 enum ProjectStatus {
-  PLANNING
-  ACTIVE
-  COMPLETED
-  ARCHIVED
+  planning
+  active
+  completed
+  archived
 }

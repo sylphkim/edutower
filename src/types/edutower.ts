@@ -11,13 +11,37 @@ export interface StubPayload<T> {
   result: T;
 }
 
-export type MaterialSourceType = "pdf" | "doc" | "text" | "link";
+export type MaterialSourceType =
+  | "pdf"
+  | "doc"
+  | "image"
+  | "text"
+  | "link";
+
+export type MaterialCategory =
+  | "slides"
+  | "board"
+  | "outline"
+  | "note"
+  | "exam"
+  | "other";
+
+export type MaterialStatus =
+  | "pending"
+  | "uploaded"
+  | "indexed";
+
+export type ProjectStatus =
+  | "planning"
+  | "active"
+  | "completed"
+  | "archived";
 
 export interface Material {
   id: string;
   title: string;
   sourceType: MaterialSourceType;
-  status: "indexed" | "uploaded" | "pending";
+  status: MaterialStatus;
   uploadedAt: string;
 }
 
