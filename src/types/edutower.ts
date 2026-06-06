@@ -26,10 +26,16 @@ export type MaterialCategory =
   | "exam"
   | "other";
 
+export type MaterialOrigin =
+  | "uploaded"
+  | "manual"
+  | "mock";
+
 export type MaterialStatus =
   | "pending"
-  | "uploaded"
-  | "indexed";
+  | "processing"
+  | "ready"
+  | "failed";
 
 export type ProjectStatus =
   | "planning"

@@ -29,10 +29,17 @@ enum MaterialCategory {
   other
 }
 
+enum MaterialOrigin {
+  uploaded
+  manual
+  mock
+}
+
 enum MaterialStatus {
   pending
-  uploaded
-  indexed
+  processing
+  ready
+  failed
 }
 
 enum ProjectStatus {
