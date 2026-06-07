@@ -102,6 +102,7 @@ function toApiMaterial(item: Material): MaterialItem {
     type: item.category as MaterialType,
     source: item.origin as MaterialSource,
     status: item.status as MaterialStatus,
+    folderId: item.folderId,
     summary: item.summary ?? undefined,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString()

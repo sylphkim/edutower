@@ -9,9 +9,14 @@ export interface MaterialItem {
   type: MaterialType;
   source: MaterialSource;
   status: MaterialStatus;
+  folderId: string | null;
   summary?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MaterialListQuery {
+  folderId?: string | null;
 }
 
 // 创建时不传 id、状态和时间，由 service 统一补齐。
@@ -19,6 +24,7 @@ export interface CreateMaterialInput {
   title: string;
   type: MaterialType;
   source?: MaterialSource;
+  folderId?: string | null;
   summary?: string;
 }
 
@@ -27,5 +33,6 @@ export interface UpdateMaterialInput {
   title?: string;
   type?: MaterialType;
   status?: MaterialStatus;
+  folderId?: string | null;
   summary?: string;
 }

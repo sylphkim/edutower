@@ -7,6 +7,7 @@ export const mockMaterials: MaterialItem[] = [
     type: "note",
     source: "mock",
     status: "ready",
+    folderId: null,
     summary: "A short starter note for derivative basics.",
     createdAt: "2026-05-27T00:00:00.000Z",
     updatedAt: "2026-05-27T00:00:00.000Z"
