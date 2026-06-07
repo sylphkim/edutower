@@ -3,12 +3,15 @@ import { materialsService } from "../services/materials.service";
 import { sendSuccess } from "../utils/apiResponse";
 
 export async function listMaterials(
-  _req: Request,
+  req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    sendSuccess(res, await materialsService.list());
+    const folderId =
+      typeof req.query.folderId === "string" ? req.query.folderId : undefined;
+
+    sendSuccess(res, await materialsService.list({ folderId }));
   } catch (error) {
     next(error);
   }
