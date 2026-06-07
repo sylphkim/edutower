@@ -1,5 +1,6 @@
 export type MaterialType = "slides" | "photo" | "outline" | "note" | "other";
-export type MaterialSource = "uploaded" | "manual" | "mock";
+export type MaterialOrigin = "uploaded" | "manual" | "mock";
+export type MaterialSource = MaterialOrigin;
 export type MaterialStatus = "pending" | "processing" | "ready" | "failed";
 
 export interface MaterialItem {

@@ -1,0 +1,175 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String         @id @default(cuid())
+  displayName   String
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  materials     Material[]
+  studyProjects StudyProject[]
+}
+
+model Material {
+  id            String              @id @default(cuid())
+  userId        String
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  category      MaterialCategory
+  sourceType    MaterialSourceType?
+  origin        MaterialOrigin      @default(manual)
+  status        MaterialStatus      @default(ready)
+  summary       String?
+  extractedText String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  projectLinks  ProjectMaterial[]
+
+  @@index([userId])
+}
+
+model StudyProject {
+  id              String            @id @default(cuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String
+  subject         String
+  goal            String
+  targetScore     String?
+  startDate       DateTime?
+  deadline        DateTime?
+  dailyMinutes    Int?
+  status          ProjectStatus     @default(planning)
+  goalConfirmedAt DateTime?
+  planConfirmedAt DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  materialLinks   ProjectMaterial[]
+  knowledgeNodes  KnowledgeNode[]
+  studyTasks      StudyTask[]
+
+  @@index([userId])
+}
+
+model ProjectMaterial {
+  projectId  String
+  materialId String
+  project    StudyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  material   Material     @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  createdAt  DateTime     @default(now())
+
+  @@id([projectId, materialId])
+  @@index([materialId])
+}
+
+model KnowledgeNode {
+  id            String              @id @default(cuid())
+  projectId     String
+  project       StudyProject        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parentId      String?
+  parent        KnowledgeNode?      @relation("KnowledgeNodeChildren", fields: [parentId], references: [id], onDelete: SetNull)
+  children      KnowledgeNode[]     @relation("KnowledgeNodeChildren")
+  title         String
+  description   String?
+  status        KnowledgeNodeStatus @default(available)
+  selfMastery   Int?
+  systemMastery Int?
+  confidence    Float?
+  mastery       Int                 @default(0)
+  order         Int                 @default(0)
+  studyTasks    StudyTask[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([projectId, parentId])
+}
+
+model StudyTask {
+  id              String          @id @default(cuid())
+  projectId       String
+  project         StudyProject    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  knowledgeNodeId String?
+  knowledgeNode   KnowledgeNode?  @relation(fields: [knowledgeNodeId], references: [id], onDelete: SetNull)
+  title           String
+  type            StudyTaskType
+  day             Int?
+  order           Int             @default(0)
+  isRecommended   Boolean         @default(true)
+  isSelected      Boolean         @default(false)
+  status          StudyTaskStatus @default(todo)
+  completedAt     DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([projectId])
+  @@index([knowledgeNodeId])
+}
+
+enum MaterialSourceType {
+  pdf
+  doc
+  image
+  text
+  link
+}
+
+enum MaterialCategory {
+  slides
+  photo
+  board
+  outline
+  note
+  exam
+  other
+}
+
+enum MaterialOrigin {
+  uploaded
+  manual
+  mock
+}
+
+enum MaterialStatus {
+  pending
+  processing
+  ready
+  failed
+}
+
+enum ProjectStatus {
+  planning
+  active
+  completed
+  archived
+}
+
+enum KnowledgeNodeStatus {
+  locked
+  available
+  in_progress
+  mastered
+}
+
+enum StudyTaskType {
+  read_material
+  practice_quiz
+  review_wrongbook
+  master_skill
+}
+
+enum StudyTaskStatus {
+  todo
+  in_progress
+  done
+}

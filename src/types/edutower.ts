@@ -1,3 +1,7 @@
+import type { MaterialStatus } from "./materials";
+
+export type { MaterialOrigin, MaterialStatus } from "./materials";
+
 export type ModuleStatus = "stub" | "mock" | "ready";
 
 export interface StubMeta {
@@ -11,13 +15,32 @@ export interface StubPayload<T> {
   result: T;
 }
 
-export type MaterialSourceType = "pdf" | "doc" | "text" | "link";
+export type MaterialSourceType =
+  | "pdf"
+  | "doc"
+  | "image"
+  | "text"
+  | "link";
+
+export type MaterialCategory =
+  | "slides"
+  | "board"
+  | "outline"
+  | "note"
+  | "exam"
+  | "other";
+
+export type ProjectStatus =
+  | "planning"
+  | "active"
+  | "completed"
+  | "archived";
 
 export interface Material {
   id: string;
   title: string;
   sourceType: MaterialSourceType;
-  status: "indexed" | "uploaded" | "pending";
+  status: MaterialStatus;
   uploadedAt: string;
 }
 
