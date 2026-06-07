@@ -6,12 +6,17 @@ import type {
   MaterialStatus
 } from "../generated/prisma/client";
 
+export interface ListMaterialsByUserOptions {
+  folderId?: string | null;
+}
+
 export interface CreateMaterialRecordInput {
   userId: string;
   title: string;
   category: MaterialCategory;
   origin: MaterialOrigin;
   status: MaterialStatus;
+  folderId?: string | null;
   summary?: string;
 }
 
@@ -19,14 +24,21 @@ export interface UpdateMaterialRecordInput {
   title?: string;
   category?: MaterialCategory;
   status?: MaterialStatus;
+  folderId?: string | null;
   summary?: string;
 }
 
 export const materialsRepository = {
-  listByUser(userId: string): Promise<Material[]> {
+  listByUser(
+    userId: string,
+    options: ListMaterialsByUserOptions = {}
+  ): Promise<Material[]> {
+    const { folderId } = options;
+
     return prisma.material.findMany({
       where: {
-        userId
+        userId,
+        ...(folderId !== undefined ? { folderId } : {})
       },
       orderBy: [
         {
@@ -56,6 +68,7 @@ export const materialsRepository = {
         category: input.category,
         origin: input.origin,
         status: input.status,
+        folderId: input.folderId ?? null,
         summary: input.summary
       }
     });
@@ -66,12 +79,17 @@ export const materialsRepository = {
     userId: string,
     input: UpdateMaterialRecordInput
   ): Promise<Material> {
+    const { folderId, ...data } = input;
+
     return prisma.material.update({
       where: {
         id,
         userId
       },
-      data: input
+      data: {
+        ...data,
+        ...(folderId !== undefined ? { folderId } : {})
+      }
     });
   },
 
