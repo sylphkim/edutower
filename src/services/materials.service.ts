@@ -44,6 +44,14 @@ function ensureValidFolderId(value: unknown, fieldName: string): void {
   }
 }
 
+function normalizeListFolderId(folderId: string | null | undefined): string | null | undefined {
+  if (folderId === "unclassified") {
+    return null;
+  }
+
+  return folderId;
+}
+
 async function ensureFolderBelongsToUser(
   folderId: string,
   userId: string
@@ -162,7 +170,8 @@ export const materialsService = {
     ensureValidFolderId(query.folderId, "folderId");
 
     const userId = await getDemoUserId();
-    const folderId = await resolveFolderIdForUser(query.folderId, userId);
+    const listFolderId = normalizeListFolderId(query.folderId);
+    const folderId = await resolveFolderIdForUser(listFolderId, userId);
     const items = await materialsRepository.listByUser(userId, {
       folderId
     });

@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import { materialsService } from "../services/materials.service";
 import { sendSuccess } from "../utils/apiResponse";
+import { AppError } from "../utils/errors";
 
 export async function listMaterials(
   req: Request,
@@ -8,8 +9,17 @@ export async function listMaterials(
   next: NextFunction
 ): Promise<void> {
   try {
-    const folderId =
-      typeof req.query.folderId === "string" ? req.query.folderId : undefined;
+    const { folderId: rawFolderId } = req.query;
+
+    if (rawFolderId !== undefined && typeof rawFolderId !== "string") {
+      throw new AppError(
+        "INVALID_REQUEST",
+        "folderId query parameter must be a string.",
+        400
+      );
+    }
+
+    const folderId = rawFolderId;
 
     sendSuccess(res, await materialsService.list({ folderId }));
   } catch (error) {
