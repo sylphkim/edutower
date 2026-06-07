@@ -1,4 +1,5 @@
 import { materialsRepository } from "../repositories/materials.repository";
+import { materialFoldersRepository } from "../repositories/materialFolders.repository";
 import type {
   Material,
   MaterialCategory,
@@ -7,6 +8,7 @@ import type {
 } from "../generated/prisma/client";
 import type {
   CreateMaterialInput,
+  MaterialListQuery,
   MaterialItem,
   MaterialSource,
   MaterialStatus,
@@ -26,6 +28,48 @@ function ensureMaterialExists(item: Material | null): Material {
   }
 
   return item;
+}
+
+function ensureValidFolderId(value: unknown, fieldName: string): void {
+  if (value === undefined || value === null) {
+    return;
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    throw new AppError(
+      "INVALID_REQUEST",
+      `${fieldName} must be a non-empty string or null.`,
+      400
+    );
+  }
+}
+
+async function ensureFolderBelongsToUser(
+  folderId: string,
+  userId: string
+): Promise<void> {
+  const folder = await materialFoldersRepository.findById(folderId);
+
+  if (!folder || folder.userId !== userId) {
+    throw new AppError(
+      "INVALID_REQUEST",
+      "folderId must reference an existing material folder.",
+      400
+    );
+  }
+}
+
+async function resolveFolderIdForUser(
+  folderId: string | null | undefined,
+  userId: string
+): Promise<string | null | undefined> {
+  if (folderId === undefined || folderId === null) {
+    return folderId;
+  }
+
+  await ensureFolderBelongsToUser(folderId, userId);
+
+  return folderId;
 }
 
 function ensureValidCreateInput(input: CreateMaterialInput): void {
@@ -52,6 +96,8 @@ function ensureValidCreateInput(input: CreateMaterialInput): void {
   if (input.summary !== undefined && typeof input.summary !== "string") {
     throw new AppError("INVALID_REQUEST", "summary must be a string.", 400);
   }
+
+  ensureValidFolderId(input.folderId, "folderId");
 }
 
 function ensureValidUpdateInput(input: UpdateMaterialInput): void {
@@ -81,6 +127,8 @@ function ensureValidUpdateInput(input: UpdateMaterialInput): void {
   if (input.summary !== undefined && typeof input.summary !== "string") {
     throw new AppError("INVALID_REQUEST", "summary must be a string.", 400);
   }
+
+  ensureValidFolderId(input.folderId, "folderId");
 }
 
 function toMaterialCategory(type: MaterialType): MaterialCategory {
@@ -110,9 +158,14 @@ function toApiMaterial(item: Material): MaterialItem {
 }
 
 export const materialsService = {
-  async list(): Promise<{ items: MaterialItem[] }> {
+  async list(query: MaterialListQuery = {}): Promise<{ items: MaterialItem[] }> {
+    ensureValidFolderId(query.folderId, "folderId");
+
     const userId = await getDemoUserId();
-    const items = await materialsRepository.listByUser(userId);
+    const folderId = await resolveFolderIdForUser(query.folderId, userId);
+    const items = await materialsRepository.listByUser(userId, {
+      folderId
+    });
 
     return {
       items: items.map(toApiMaterial)
@@ -130,12 +183,14 @@ export const materialsService = {
     ensureValidCreateInput(input);
 
     const userId = await getDemoUserId();
+    const folderId = await resolveFolderIdForUser(input.folderId, userId);
     const item = await materialsRepository.create({
       userId,
       title: input.title.trim(),
       category: toMaterialCategory(input.type),
       origin: toMaterialOrigin(input.source ?? "manual"),
       status: toMaterialStatus("ready"),
+      folderId: folderId ?? null,
       summary: input.summary
     });
 
@@ -149,6 +204,7 @@ export const materialsService = {
     const currentItem = ensureMaterialExists(
       await materialsRepository.findByIdForUser(id, userId)
     );
+    const folderId = await resolveFolderIdForUser(input.folderId, userId);
 
     const updatedItem = await materialsRepository.updateByIdForUser(id, userId, {
       title: input.title !== undefined ? input.title.trim() : currentItem.title,
@@ -158,6 +214,7 @@ export const materialsService = {
         input.status !== undefined
           ? toMaterialStatus(input.status)
           : currentItem.status,
+      ...(folderId !== undefined ? { folderId } : {}),
       summary: input.summary ?? currentItem.summary ?? undefined
     });
 
