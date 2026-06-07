@@ -33,11 +33,28 @@ EduTower 当前对外暴露 Express 后端 API。Express 是面向产品和前�
 - `sendError` 和全局错误处理中间件负责失败响应。
 - service 中抛出的 `AppError` 会由 `app.ts` 中的全局错误处理中间件转换成统一失败响应。
 
+例如 `GET /api/health` 的健康检查响应：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "status": "ok",
+    "database": "not_configured"
+  }
+}
+```
+
+- `status`：`"ok"` 或 `"degraded"`（数据库异常时降级）。
+- `database`：`"ok"`、`"not_configured"`、`"error"`。当前阶段未配置 `DATABASE_URL` 时返回 `"not_configured"`。
+
 ## 稳定接口列表
 
 | Method | Path | Status | Purpose |
 | --- | --- | --- | --- |
 | GET | `/api/health` | ready | 服务健康检查 |
+
+接入真实数据库后，`database` 根据连接情况返回 `"ok"` 或 `"error"`。|
 | POST | `/api/ai/chat` | ready | 面向产品的聊天接口，内部调用 FastAPI AI Engine `/chat` |
 | POST | `/chat` | ready | 兼容旧静态前端的聊天接口，返回 `{ reply }` |
 | POST | `/api/llm/chat` | ready | 用于测试模型供应商的底层通用聊天接口 |
