@@ -50,7 +50,7 @@
     });
   }
 
-  function renderKnowledgeGraph() {
+  async function renderKnowledgeGraph() {
     if (!graphMountEl) return;
 
     if (!window.EduTowerGraphData || !window.EduTowerKnowledgeGraph || typeof d3 === "undefined") {
@@ -60,6 +60,21 @@
     }
 
     var graph = window.EduTowerGraphData.buildFullGraph();
+
+    if (window.EduTowerApi && typeof window.EduTowerGraphData.buildGraphFromSkillTree === "function") {
+      try {
+        var data = await window.EduTowerApi.get("/api/skills/tree");
+        var items = data && Array.isArray(data.items) ? data.items : [];
+        if (items.length) {
+          graph = window.EduTowerGraphData.buildGraphFromSkillTree(items, {
+            title: "我的技能图谱",
+            subtitle: "来自技能树的先修关系与掌握度",
+          });
+        }
+      } catch (_err) {
+        /* 回退到演示数据 */
+      }
+    }
 
     if (graphSubtitleEl) {
       graphSubtitleEl.textContent =

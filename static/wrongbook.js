@@ -18,6 +18,8 @@
   var showCreateSubject = false;
   var showCreateCategory = false;
   var isBusy = false;
+  var pendingDelete = null;
+  var statusBanner = { type: "", message: "" };
 
   var CATEGORY_FILTER_ALL = "all";
   var CATEGORY_FILTER_ALL_LABEL = "全部错因";
@@ -88,22 +90,37 @@
     if (target.matches("[data-action='delete-subject']")) {
       event.preventDefault();
       event.stopPropagation();
-      deleteSubject(
-        target.getAttribute("data-id") || "",
-        target.getAttribute("data-label") || "该分类",
-        parseInt(target.getAttribute("data-count") || "0", 10)
-      );
+      pendingDelete = {
+        kind: "subject",
+        id: target.getAttribute("data-id") || "",
+        label: target.getAttribute("data-label") || "该分类",
+        count: parseInt(target.getAttribute("data-count") || "0", 10),
+      };
+      render();
       return;
     }
 
     if (target.matches("[data-action='delete-category']")) {
       event.preventDefault();
       event.stopPropagation();
-      deleteCategory(
-        target.getAttribute("data-id") || "",
-        target.getAttribute("data-label") || "该错因",
-        parseInt(target.getAttribute("data-count") || "0", 10)
-      );
+      pendingDelete = {
+        kind: "category",
+        id: target.getAttribute("data-id") || "",
+        label: target.getAttribute("data-label") || "该错因",
+        count: parseInt(target.getAttribute("data-count") || "0", 10),
+      };
+      render();
+      return;
+    }
+
+    if (action === "confirm-pending-delete") {
+      confirmPendingDelete();
+      return;
+    }
+
+    if (action === "cancel-pending-delete") {
+      pendingDelete = null;
+      render();
       return;
     }
 
@@ -120,7 +137,13 @@
     if (action === "review") {
       markReviewed(id);
     } else if (action === "delete") {
-      removeItem(id, target.getAttribute("data-title") || "该错题");
+      pendingDelete = {
+        kind: "item",
+        id: id,
+        label: target.getAttribute("data-title") || "该错题",
+        count: 0,
+      };
+      render();
     }
   }
 
@@ -236,26 +259,54 @@
     return itemsInCategory(categoryId, null).length;
   }
 
-  function confirmDeleteTaxonomy(label, itemCount, kind) {
-    if (!window.confirm("确定删除" + kind + "「" + label + "」吗？")) {
-      return false;
+  function renderStatusBanner() {
+    if (!statusBanner.message) return "";
+    return (
+      '<div class="module-banner module-banner--' +
+      api.escapeAttr(statusBanner.type || "info") +
+      '">' +
+      api.escapeHtml(statusBanner.message) +
+      "</div>"
+    );
+  }
+
+  function renderPendingDeleteConfirm() {
+    if (!pendingDelete) return "";
+
+    var detail =
+      pendingDelete.count > 0
+        ? "（含 " + pendingDelete.count + " 道错题，删除后将归入「未分类」）"
+        : "";
+
+    return (
+      '<div class="module-inline-confirm wrongbook-inline-confirm">' +
+      "<p>确定删除「" +
+      api.escapeHtml(pendingDelete.label) +
+      "」吗？" +
+      api.escapeHtml(detail) +
+      "</p>" +
+      '<div class="module-inline-confirm__actions">' +
+      '<button type="button" class="btn btn--primary btn--compact" data-action="confirm-pending-delete">确认删除</button>' +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="cancel-pending-delete">取消</button></div></div>'
+    );
+  }
+
+  async function confirmPendingDelete() {
+    if (!pendingDelete || isBusy) return;
+
+    if (pendingDelete.kind === "subject") {
+      await deleteSubject(pendingDelete.id, pendingDelete.label, pendingDelete.count);
+      return;
     }
 
-    if (itemCount > 0) {
-      var detail =
-        kind === "学科/主题"
-          ? "该分类下还有 " +
-            itemCount +
-            " 道错题，删除后这些题目将归入「未分类」学科。"
-          : "该错因下还有 " +
-            itemCount +
-            " 道错题，删除后这些题目的错因将归入「未分类」。";
-      if (!window.confirm(detail + "\n\n确定继续删除吗？")) {
-        return false;
-      }
+    if (pendingDelete.kind === "category") {
+      await deleteCategory(pendingDelete.id, pendingDelete.label, pendingDelete.count);
+      return;
     }
 
-    return true;
+    if (pendingDelete.kind === "item") {
+      await removeItem(pendingDelete.id);
+    }
   }
 
   function renderPolicyNote() {
@@ -386,6 +437,8 @@
     var groups = partitionByOrigin(subjects);
 
     rootEl.innerHTML =
+      renderStatusBanner() +
+      renderPendingDeleteConfirm() +
       renderPolicyNote() +
       '<p class="module-intro">先选择学科或主题，进入后再按错因筛选与整理。</p>' +
       renderSubjectSection("系统预置", groups.builtIn, "暂无系统分类") +
@@ -494,6 +547,8 @@
       .join("");
 
     rootEl.innerHTML =
+      renderStatusBanner() +
+      renderPendingDeleteConfirm() +
       '<nav class="wrongbook-breadcrumb">' +
       '<button type="button" class="btn-link" data-action="back-subjects">← 全部分类</button>' +
       '<span class="wrongbook-breadcrumb__sep">/</span>' +
@@ -660,7 +715,8 @@
     var hint = hintInput ? hintInput.value.trim() : "";
 
     if (!label) {
-      window.alert("请填写分类名称。");
+      statusBanner = { type: "error", message: "请填写分类名称。" };
+      render();
       return;
     }
 
@@ -677,7 +733,8 @@
       }
       await refresh();
     } catch (err) {
-      window.alert("创建失败：" + api.networkError(err));
+      statusBanner = { type: "error", message: "创建失败：" + api.networkError(err) };
+      render();
     } finally {
       isBusy = false;
     }
@@ -690,7 +747,8 @@
     var label = labelInput ? labelInput.value.trim() : "";
 
     if (!label) {
-      window.alert("请填写错因名称。");
+      statusBanner = { type: "error", message: "请填写错因名称。" };
+      render();
       return;
     }
 
@@ -703,7 +761,8 @@
       }
       await refresh();
     } catch (err) {
-      window.alert("创建失败：" + api.networkError(err));
+      statusBanner = { type: "error", message: "创建失败：" + api.networkError(err) };
+      render();
     } finally {
       isBusy = false;
     }
@@ -711,7 +770,6 @@
 
   async function deleteSubject(id, label, itemCount) {
     if (isBusy || !id) return;
-    if (!confirmDeleteTaxonomy(label, itemCount, "学科/主题")) return;
 
     isBusy = true;
     try {
@@ -720,9 +778,12 @@
         activeSubject = null;
         filterCategory = CATEGORY_FILTER_ALL;
       }
+      pendingDelete = null;
+      statusBanner = { type: "success", message: "已删除分类：" + label };
       await refresh();
     } catch (err) {
-      window.alert("删除失败：" + api.networkError(err));
+      statusBanner = { type: "error", message: "删除失败：" + api.networkError(err) };
+      render();
     } finally {
       isBusy = false;
     }
@@ -730,7 +791,6 @@
 
   async function deleteCategory(id, label, itemCount) {
     if (isBusy || !id) return;
-    if (!confirmDeleteTaxonomy(label, itemCount, "错因")) return;
 
     isBusy = true;
     try {
@@ -738,9 +798,12 @@
       if (filterCategory === id) {
         filterCategory = CATEGORY_FILTER_ALL;
       }
+      pendingDelete = null;
+      statusBanner = { type: "success", message: "已删除错因：" + label };
       await refresh();
     } catch (err) {
-      window.alert("删除失败：" + api.networkError(err));
+      statusBanner = { type: "error", message: "删除失败：" + api.networkError(err) };
+      render();
     } finally {
       isBusy = false;
     }
@@ -754,7 +817,8 @@
       await api.patch("/api/wrongbook/" + encodeURIComponent(id), patch);
       await refresh();
     } catch (err) {
-      window.alert("保存失败：" + api.networkError(err));
+      statusBanner = { type: "error", message: "保存失败：" + api.networkError(err) };
+      render();
     } finally {
       isBusy = false;
     }
@@ -775,22 +839,25 @@
       });
       await refresh();
     } catch (err) {
-      window.alert("更新失败：" + api.networkError(err));
+      statusBanner = { type: "error", message: "更新失败：" + api.networkError(err) };
+      render();
     } finally {
       isBusy = false;
     }
   }
 
-  async function removeItem(id, title) {
-    if (isBusy) return;
-    if (!window.confirm("确定删除「" + title + "」吗？")) return;
+  async function removeItem(id) {
+    if (isBusy || !id) return;
 
     isBusy = true;
     try {
       await api.delete("/api/wrongbook/" + encodeURIComponent(id));
+      pendingDelete = null;
+      statusBanner = { type: "success", message: "错题已删除。" };
       await refresh();
     } catch (err) {
-      window.alert("删除失败：" + api.networkError(err));
+      statusBanner = { type: "error", message: "删除失败：" + api.networkError(err) };
+      render();
     } finally {
       isBusy = false;
     }

@@ -1,4 +1,4 @@
-import { mockMaterials } from "../mock/materials";
+﻿import { mockMaterials } from "../mock/materials";
 import type {
   CreateMaterialInput,
   MaterialItem,
@@ -13,7 +13,6 @@ const VALID_TYPES: MaterialType[] = ["slides", "photo", "outline", "note", "othe
 const VALID_SOURCES: MaterialSource[] = ["uploaded", "manual", "mock"];
 const VALID_STATUSES: MaterialStatus[] = ["pending", "processing", "ready", "failed"];
 
-// 先用内存数组保存资料 metadata，以后可以替换成数据库查询。
 const materialItems: MaterialItem[] = mockMaterials.map((item) => ({ ...item }));
 let nextMaterialNumber = materialItems.length + 1;
 
@@ -23,7 +22,6 @@ function createMaterialId(): string {
   return id;
 }
 
-// 找不到 id 时直接抛错，避免调用方静默失败。
 function findIndexById(id: string): number {
   const index = materialItems.findIndex((item) => item.id === id);
 
