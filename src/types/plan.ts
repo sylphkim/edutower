@@ -8,7 +8,6 @@ export interface PlanTask {
   type: PlanTaskType;
   materialId?: string;
   skillId?: string;
-  quizId?: string;
   status: PlanTaskStatus;
 }
 

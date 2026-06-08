@@ -48,12 +48,14 @@ function averageMastery(values: number[]): number {
   return Math.round((total / values.length) * 100);
 }
 
-function countReviewedWrongbookItems(): number {
-  return wrongbookService.list().items.filter((item) => item.reviewCount > 0).length;
+async function countReviewedWrongbookItems(): Promise<number> {
+  const payload = await wrongbookService.list();
+
+  return payload.items.filter((item) => item.reviewCount > 0).length;
 }
 
 export const agentPanelService = {
-  buildPanel({ sessionId }: BuildAgentPanelParams): AgentPanelPayload {
+  async buildPanel({ sessionId }: BuildAgentPanelParams): Promise<AgentPanelPayload> {
     const context = chatContextService.buildContext({ sessionId });
     const { subject, topic } = parseSubjectLine(context.subject.name);
     const primaryWeakPoint = context.weakPoints[0];
@@ -61,7 +63,7 @@ export const agentPanelService = {
 
     const knowledgePointCount = context.knowledgePoints.length;
     const practiceQuestions = Math.max(1, context.weakPoints.length * 4);
-    const errorCorrections = countReviewedWrongbookItems();
+    const errorCorrections = await countReviewedWrongbookItems();
     const percent = averageMastery(context.knowledgePoints.map((item) => item.mastery));
 
     return {

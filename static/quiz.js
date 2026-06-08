@@ -9,6 +9,8 @@
 
   var api = window.EduTowerApi;
   var quizzes = [];
+  var skills = [];
+  var planTasks = [];
   var activeQuiz = null;
   var answers = {};
   var isBusy = false;
@@ -66,12 +68,32 @@
     try {
       var data = await api.get("/api/quiz");
       quizzes = data && Array.isArray(data.items) ? data.items : [];
+      await loadTargetOptions();
       renderList();
     } catch (err) {
       rootEl.innerHTML =
         '<p class="module-empty module-empty--error">加载失败：' +
         api.escapeHtml(api.networkError(err)) +
         "</p>";
+    }
+  }
+
+  async function loadTargetOptions() {
+    try {
+      var skillData = await api.get("/api/skills");
+      skills = skillData && Array.isArray(skillData.items) ? skillData.items : [];
+    } catch (_err) {
+      skills = [];
+    }
+
+    if (window.EduTowerPlan && typeof window.EduTowerPlan.getActivePlanTasks === "function") {
+      planTasks = window.EduTowerPlan
+        .getActivePlanTasks()
+        .filter(function (task) {
+          return task && task.skillId;
+        });
+    } else {
+      planTasks = [];
     }
   }
 
@@ -86,11 +108,36 @@
     );
   }
 
-  function renderList() {
-    activeQuiz = null;
-    answers = {};
+  function renderCreateForm() {
+    var skillOptions = skills
+      .map(function (skill) {
+        return (
+          '<option value="' +
+          api.escapeAttr(skill.id) +
+          '">' +
+          api.escapeHtml(skill.title) +
+          "</option>"
+        );
+      })
+      .join("");
 
-    var createForm =
+    var taskOptions = planTasks
+      .map(function (task) {
+        return (
+          '<option value="' +
+          api.escapeAttr(task.id) +
+          '" data-skill-id="' +
+          api.escapeAttr(task.skillId) +
+          '">' +
+          api.escapeHtml(task.title) +
+          "</option>"
+        );
+      })
+      .join("");
+
+    var hasTarget = skills.length > 0 || planTasks.length > 0;
+
+    return (
       '<section class="quiz-create">' +
       '<h3 class="module-subtitle">生成新练习</h3>' +
       '<div class="quiz-create__row">' +
@@ -98,8 +145,29 @@
       '<option value="pass">及格练（3 题）</option>' +
       '<option value="high_score">高分练（5 题）</option>' +
       "</select>" +
-      '<button type="button" class="btn btn--primary btn--compact" data-action="create-quiz">生成练习</button>' +
-      "</div></section>";
+      '<select id="quizSkillTarget" class="form-input form-input--compact">' +
+      '<option value="">按技能生成</option>' +
+      skillOptions +
+      "</select>" +
+      '<select id="quizTaskTarget" class="form-input form-input--compact">' +
+      '<option value="">按计划任务生成</option>' +
+      taskOptions +
+      "</select>" +
+      '<button type="button" class="btn btn--primary btn--compact" data-action="create-quiz"' +
+      (hasTarget ? "" : " disabled") +
+      ">生成练习</button></div>" +
+      (hasTarget
+        ? ""
+        : '<p class="module-empty">请先创建技能，或创建带技能的计划任务。</p>') +
+      "</section>"
+    );
+  }
+
+  function renderList() {
+    activeQuiz = null;
+    answers = {};
+
+    var createForm = renderCreateForm();
 
     if (!quizzes.length) {
       rootEl.innerHTML =
@@ -326,18 +394,37 @@
 
   async function createQuiz() {
     if (isBusy) return;
+
     var select = document.getElementById("quizDifficulty");
     var difficulty = select ? select.value : "pass";
     var count = difficulty === "high_score" ? 5 : 3;
+    var skillSelect = document.getElementById("quizSkillTarget");
+    var taskSelect = document.getElementById("quizTaskTarget");
+    var payload = {
+      title: difficulty === "high_score" ? "高分强化练习" : "基础巩固练习",
+      difficulty: difficulty,
+      questionCount: count,
+    };
+
+    if (taskSelect && taskSelect.value) {
+      payload.studyTaskId = taskSelect.value;
+      var taskOption = taskSelect.options[taskSelect.selectedIndex];
+      var taskSkillId = taskOption ? taskOption.getAttribute("data-skill-id") : "";
+      if (taskSkillId) {
+        payload.skillId = taskSkillId;
+      }
+    } else if (skillSelect && skillSelect.value) {
+      payload.skillId = skillSelect.value;
+    } else {
+      banner = { type: "error", message: "请先选择一个技能或带技能的计划任务。" };
+      renderList();
+      return;
+    }
 
     isBusy = true;
     banner = { type: "", message: "" };
     try {
-      await api.post("/api/quiz", {
-        title: difficulty === "high_score" ? "高分强化练习" : "基础巩固练习",
-        difficulty: difficulty,
-        questionCount: count,
-      });
+      await api.post("/api/quiz", payload);
       await refresh();
     } catch (err) {
       banner = { type: "error", message: "生成失败：" + api.networkError(err) };

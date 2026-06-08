@@ -15,6 +15,7 @@ export interface QuizItem {
   title: string;
   materialId?: string;
   skillId?: string;
+  studyTaskId?: string;
   difficulty: QuizDifficulty;
   questions: QuizQuestion[];
   createdAt: string;
@@ -23,8 +24,8 @@ export interface QuizItem {
 // 当前先用请求参数生成 mock quiz，以后可替换成 LLM 调用。
 export interface CreateQuizInput {
   title?: string;
-  materialId?: string;
   skillId?: string;
+  studyTaskId?: string;
   difficulty: QuizDifficulty;
   questionCount?: number;
 }

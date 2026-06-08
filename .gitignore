@@ -7,3 +7,9 @@ __pycache__
 *.pyc
 .DS_Store
 *.log
+*.db
+prisma/dev.db
+uploads/materials/*
+!uploads/materials/.gitkeep
+*.memory-card.json
+/src/generated/prisma
