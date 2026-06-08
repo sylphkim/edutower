@@ -9,5 +9,7 @@ __pycache__
 *.log
 *.db
 prisma/dev.db
-
+uploads/materials/*
+!uploads/materials/.gitkeep
+*.memory-card.json
 /src/generated/prisma
