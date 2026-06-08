@@ -198,7 +198,7 @@ async function cleanupUploadedFile(storagePath: string, cause: unknown): Promise
   try {
     await unlink(storagePath);
   } catch (error) {
-    logger.warn("Failed to clean up uploaded material file after database error.", {
+    logger.warn("Failed to clean up uploaded material file after upload error.", {
       storagePath,
       cleanupError: error,
       originalError: cause
@@ -268,11 +268,10 @@ export const materialsService = {
   },
 
   async createUploaded(input: CreateUploadedMaterialInput): Promise<MaterialItem> {
-    const userId = await getDemoUserId();
-    const folderId = await resolveFolderIdForUser(input.folderId, userId);
-    const extension = getUploadedMaterialExtension(input);
-
     try {
+      const userId = await getDemoUserId();
+      const folderId = await resolveFolderIdForUser(input.folderId, userId);
+      const extension = getUploadedMaterialExtension(input);
       const item = await materialsRepository.create({
         userId,
         title: getUploadedMaterialTitle(input.originalFileName),
