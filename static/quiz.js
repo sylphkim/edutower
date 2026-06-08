@@ -14,6 +14,8 @@
   var activeQuiz = null;
   var answers = {};
   var isBusy = false;
+  var pendingDeleteQuizId = null;
+  var banner = { type: "", message: "" };
 
   var DIFFICULTY_LABEL = {
     pass: "及格练",
@@ -42,7 +44,13 @@
       } else if (action === "create-quiz") {
         createQuiz();
       } else if (action === "delete-quiz") {
-        deleteQuiz(target.getAttribute("data-id"), target.getAttribute("data-title") || "该测验");
+        pendingDeleteQuizId = target.getAttribute("data-id");
+        renderList();
+      } else if (action === "confirm-delete-quiz") {
+        deleteQuiz(target.getAttribute("data-id"));
+      } else if (action === "cancel-delete-quiz") {
+        pendingDeleteQuizId = null;
+        renderList();
       }
     });
 
@@ -89,21 +97,18 @@
     }
   }
 
-  function renderList() {
-    activeQuiz = null;
-    answers = {};
+  function renderBanner() {
+    if (!banner.message) return "";
+    return (
+      '<div class="module-banner module-banner--' +
+      api.escapeAttr(banner.type || "info") +
+      '">' +
+      api.escapeHtml(banner.message) +
+      "</div>"
+    );
+  }
 
-    var createForm =
-      '<section class="quiz-create">' +
-      '<h3 class="module-subtitle">生成新练习</h3>' +
-      '<div class="quiz-create__row">' +
-      '<select id="quizDifficulty" class="form-input form-input--compact">' +
-      '<option value="pass">及格练（3 题）</option>' +
-      '<option value="high_score">高分练（5 题）</option>' +
-      "</select>" +
-      '<button type="button" class="btn btn--primary btn--compact" data-action="create-quiz">生成练习</button>' +
-      "</div></section>";
-
+  function renderCreateForm() {
     var skillOptions = skills
       .map(function (skill) {
         return (
@@ -115,6 +120,7 @@
         );
       })
       .join("");
+
     var taskOptions = planTasks
       .map(function (task) {
         return (
@@ -128,9 +134,10 @@
         );
       })
       .join("");
+
     var hasTarget = skills.length > 0 || planTasks.length > 0;
 
-    createForm =
+    return (
       '<section class="quiz-create">' +
       '<h3 class="module-subtitle">生成新练习</h3>' +
       '<div class="quiz-create__row">' +
@@ -148,21 +155,42 @@
       "</select>" +
       '<button type="button" class="btn btn--primary btn--compact" data-action="create-quiz"' +
       (hasTarget ? "" : " disabled") +
-      ">生成练习</button>" +
-      "</div>" +
+      ">生成练习</button></div>" +
       (hasTarget
         ? ""
         : '<p class="module-empty">请先创建技能，或创建带技能的计划任务。</p>') +
-      "</section>";
+      "</section>"
+    );
+  }
+
+  function renderList() {
+    activeQuiz = null;
+    answers = {};
+
+    var createForm = renderCreateForm();
 
     if (!quizzes.length) {
       rootEl.innerHTML =
-        createForm + '<p class="module-empty">暂无练习，点击上方按钮生成一套。</p>';
+        renderBanner() + createForm + '<p class="module-empty">暂无练习，点击上方按钮生成一套。</p>';
       return;
     }
 
     var list = quizzes
       .map(function (quiz) {
+        if (pendingDeleteQuizId === quiz.id) {
+          return (
+            '<li class="quiz-list-item quiz-list-item--confirm">' +
+            '<p class="module-inline-confirm__text">确定删除「' +
+            api.escapeHtml(quiz.title) +
+            "」吗？</p>" +
+            '<div class="module-inline-confirm__actions">' +
+            '<button type="button" class="btn btn--primary btn--compact" data-action="confirm-delete-quiz" data-id="' +
+            api.escapeAttr(quiz.id) +
+            '">确认删除</button>' +
+            '<button type="button" class="btn btn--ghost btn--compact" data-action="cancel-delete-quiz">取消</button></div></li>'
+          );
+        }
+
         return (
           '<li class="quiz-list-item">' +
           '<div class="quiz-list-item__body">' +
@@ -190,6 +218,7 @@
       .join("");
 
     rootEl.innerHTML =
+      renderBanner() +
       createForm +
       '<ul class="quiz-list">' +
       list +
@@ -205,7 +234,8 @@
       answers = {};
       renderQuizTaking();
     } catch (err) {
-      window.alert("加载练习失败：" + api.networkError(err));
+      banner = { type: "error", message: "加载练习失败：" + api.networkError(err) };
+      renderList();
     } finally {
       isBusy = false;
     }
@@ -260,6 +290,7 @@
       .join("");
 
     rootEl.innerHTML =
+      renderBanner() +
       '<header class="quiz-taking__header">' +
       "<div>" +
       '<h2 class="module-page-title">' +
@@ -297,7 +328,8 @@
       await syncWrongbook(result, payload.answers);
       renderResult(result);
     } catch (err) {
-      window.alert("提交失败：" + api.networkError(err));
+      banner = { type: "error", message: "提交失败：" + api.networkError(err) };
+      renderQuizTaking();
     } finally {
       isBusy = false;
     }
@@ -362,6 +394,7 @@
 
   async function createQuiz() {
     if (isBusy) return;
+
     var select = document.getElementById("quizDifficulty");
     var difficulty = select ? select.value : "pass";
     var count = difficulty === "high_score" ? 5 : 3;
@@ -383,31 +416,36 @@
     } else if (skillSelect && skillSelect.value) {
       payload.skillId = skillSelect.value;
     } else {
-      window.alert("请先选择一个技能或带技能的计划任务。");
+      banner = { type: "error", message: "请先选择一个技能或带技能的计划任务。" };
+      renderList();
       return;
     }
 
     isBusy = true;
+    banner = { type: "", message: "" };
     try {
       await api.post("/api/quiz", payload);
       await refresh();
     } catch (err) {
-      window.alert("生成失败：" + api.networkError(err));
+      banner = { type: "error", message: "生成失败：" + api.networkError(err) };
+      renderList();
     } finally {
       isBusy = false;
     }
   }
 
-  async function deleteQuiz(id, title) {
+  async function deleteQuiz(id) {
     if (isBusy || !id) return;
-    if (!window.confirm("确定删除「" + title + "」吗？")) return;
 
     isBusy = true;
     try {
       await api.delete("/api/quiz/" + encodeURIComponent(id));
+      pendingDeleteQuizId = null;
+      banner = { type: "success", message: "练习已删除。" };
       await refresh();
     } catch (err) {
-      window.alert("删除失败：" + api.networkError(err));
+      banner = { type: "error", message: "删除失败：" + api.networkError(err) };
+      renderList();
     } finally {
       isBusy = false;
     }

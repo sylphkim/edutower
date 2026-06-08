@@ -96,7 +96,13 @@
       return;
     }
 
-    var graph = window.EduTowerGraphData.buildDemoGraph();
+    var graph =
+      treeData.length && typeof window.EduTowerGraphData.buildGraphFromSkillTree === "function"
+        ? window.EduTowerGraphData.buildGraphFromSkillTree(treeData, {
+            title: "技能知识图谱",
+            subtitle: "来自当前技能树的先修关系与掌握度",
+          })
+        : window.EduTowerGraphData.buildDemoGraph();
 
     rootEl.innerHTML =
       renderToolbar("graph") +

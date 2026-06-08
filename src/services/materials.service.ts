@@ -1,4 +1,5 @@
-import { unlink } from "node:fs/promises";
+import { createReadStream, type ReadStream } from "node:fs";
+import { access, unlink } from "node:fs/promises";
 import path from "node:path";
 import { materialsRepository } from "../repositories/materials.repository";
 import { materialFoldersRepository } from "../repositories/materialFolders.repository";
@@ -381,5 +382,31 @@ export const materialsService = {
     const removedItem = await materialsRepository.deleteById(currentItem.id);
 
     return toApiMaterial(removedItem);
+  },
+
+  async getDownloadPayload(id: string): Promise<{
+    stream: ReadStream;
+    downloadName: string;
+    mimeType: string;
+  }> {
+    const userId = await getDemoUserId();
+    const item = ensureMaterialExists(await materialsRepository.findByIdForUser(id, userId));
+    const filePath = resolveStoredMaterialFilePath(item);
+
+    if (!filePath) {
+      throw new AppError("INVALID_REQUEST", "This material has no downloadable file.", 400);
+    }
+
+    try {
+      await access(filePath);
+    } catch {
+      throw new AppError("INVALID_REQUEST", "Material file is missing on disk.", 404);
+    }
+
+    return {
+      stream: createReadStream(filePath),
+      downloadName: item.originalFileName?.trim() || item.title,
+      mimeType: item.mimeType?.trim() || "application/octet-stream"
+    };
   }
 };

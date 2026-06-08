@@ -125,3 +125,28 @@ export async function deleteMaterial(
     next(error);
   }
 }
+
+export async function downloadMaterial(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const { stream, downloadName, mimeType } = await materialsService.getDownloadPayload(id);
+
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename*=UTF-8''${encodeURIComponent(downloadName)}`
+    );
+
+    stream.on("error", (error) => {
+      next(error);
+    });
+
+    stream.pipe(res);
+  } catch (error) {
+    next(error);
+  }
+}
