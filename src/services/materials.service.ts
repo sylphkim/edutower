@@ -26,6 +26,7 @@ import { getDemoUserId } from "./demoUser.service";
 const VALID_TYPES: MaterialType[] = ["slides", "photo", "outline", "note", "other"];
 const VALID_SOURCES: MaterialSource[] = ["uploaded", "manual", "mock"];
 const VALID_STATUSES: MaterialStatus[] = ["pending", "processing", "ready", "failed"];
+const MATERIAL_UPLOAD_ROOT = path.resolve(process.cwd(), "uploads", "materials");
 
 function ensureMaterialExists(item: Material | null): Material {
   if (!item) {
@@ -206,6 +207,56 @@ async function cleanupUploadedFile(storagePath: string, cause: unknown): Promise
   }
 }
 
+function isFileNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT"
+  );
+}
+
+function resolveStoredMaterialFilePath(item: Material): string | null {
+  if (!item.storagePath?.trim() || !item.storedFileName?.trim()) {
+    return null;
+  }
+
+  const filePath = path.resolve(process.cwd(), item.storagePath);
+  const pathWithinUploadRoot = path.relative(MATERIAL_UPLOAD_ROOT, filePath);
+
+  if (
+    !pathWithinUploadRoot ||
+    pathWithinUploadRoot.startsWith("..") ||
+    path.isAbsolute(pathWithinUploadRoot)
+  ) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Stored material file path is invalid.",
+      500
+    );
+  }
+
+  return filePath;
+}
+
+async function deleteStoredMaterialFileIfNeeded(item: Material): Promise<void> {
+  const filePath = resolveStoredMaterialFilePath(item);
+
+  if (!filePath) {
+    return;
+  }
+
+  try {
+    await unlink(filePath);
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return;
+    }
+
+    throw new AppError("INTERNAL_ERROR", "Failed to delete material file.", 500, error);
+  }
+}
+
 function toApiMaterial(item: Material): MaterialItem {
   return {
     id: item.id,
@@ -324,6 +375,9 @@ export const materialsService = {
     const currentItem = ensureMaterialExists(
       await materialsRepository.findByIdForUser(id, userId)
     );
+
+    await deleteStoredMaterialFileIfNeeded(currentItem);
+
     const removedItem = await materialsRepository.deleteById(currentItem.id);
 
     return toApiMaterial(removedItem);
