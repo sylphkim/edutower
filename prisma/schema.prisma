@@ -13,33 +13,56 @@ datasource db {
 }
 
 model User {
-  id             String          @id @default(cuid())
-  displayName    String
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  materials      Material[]
-  studyProjects  StudyProject[]
-  conversations  Conversation[]
-  wrongbookItems WrongbookItem[]
-  dailySummaries DailySummary[]
+  id              String           @id @default(cuid())
+  displayName     String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  materials       Material[]
+  materialFolders MaterialFolder[]
+  studyProjects   StudyProject[]
+  conversations   Conversation[]
+  wrongbookItems  WrongbookItem[]
+  dailySummaries  DailySummary[]
 }
 
 model Material {
-  id            String              @id @default(cuid())
-  userId        String
-  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title         String
-  category      MaterialCategory
-  sourceType    MaterialSourceType?
-  origin        MaterialOrigin      @default(manual)
-  status        MaterialStatus      @default(ready)
-  summary       String?
-  extractedText String?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  projectLinks  ProjectMaterial[]
-  studyTasks    StudyTask[]
+  id               String              @id @default(cuid())
+  userId           String
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folderId         String?
+  folder           MaterialFolder?     @relation(fields: [folderId], references: [id], onDelete: Restrict)
+  title            String
+  category         MaterialCategory
+  sourceType       MaterialSourceType?
+  origin           MaterialOrigin      @default(manual)
+  status           MaterialStatus      @default(ready)
+  originalFileName String?
+  storedFileName   String?             @unique
+  mimeType         String?
+  fileSize         Int?
+  storagePath      String?
+  summary          String?
+  extractedText    String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  projectLinks     ProjectMaterial[]
+  studyTasks       StudyTask[]
 
+  @@index([userId])
+  @@index([userId, folderId])
+}
+
+model MaterialFolder {
+  id             String     @id @default(cuid())
+  userId         String
+  name           String
+  normalizedName String
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  materials      Material[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@unique([userId, normalizedName])
   @@index([userId])
 }
 

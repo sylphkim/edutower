@@ -1,14 +1,42 @@
+import path from "node:path";
 import { NextFunction, Request, Response } from "express";
 import { materialsService } from "../services/materials.service";
 import { sendSuccess } from "../utils/apiResponse";
+import { AppError } from "../utils/errors";
+
+function readUploadFolderId(value: unknown): string | null | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmedValue = value.trim();
+
+  return trimmedValue ? trimmedValue : null;
+}
+
+function toProjectStoragePath(filePath: string): string {
+  return path.relative(process.cwd(), filePath).split(path.sep).join("/");
+}
 
 export async function listMaterials(
-  _req: Request,
+  req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    sendSuccess(res, await materialsService.list());
+    const { folderId: rawFolderId } = req.query;
+
+    if (rawFolderId !== undefined && typeof rawFolderId !== "string") {
+      throw new AppError(
+        "INVALID_REQUEST",
+        "folderId query parameter must be a string.",
+        400
+      );
+    }
+
+    const folderId = rawFolderId;
+
+    sendSuccess(res, await materialsService.list({ folderId }));
   } catch (error) {
     next(error);
   }
@@ -36,6 +64,31 @@ export async function createMaterial(
 ): Promise<void> {
   try {
     const result = await materialsService.create(req.body);
+
+    sendSuccess(res, result, 201);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function uploadMaterial(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    if (!req.file) {
+      throw new AppError("INVALID_REQUEST", "Material file is required.", 400);
+    }
+
+    const result = await materialsService.createUploaded({
+      folderId: readUploadFolderId(req.body?.folderId),
+      originalFileName: req.file.originalname,
+      storedFileName: req.file.filename,
+      mimeType: req.file.mimetype,
+      fileSize: req.file.size,
+      storagePath: toProjectStoragePath(req.file.path)
+    });
 
     sendSuccess(res, result, 201);
   } catch (error) {

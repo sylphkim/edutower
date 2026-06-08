@@ -3,8 +3,13 @@ import type {
   Material,
   MaterialCategory,
   MaterialOrigin,
+  MaterialSourceType,
   MaterialStatus
 } from "../generated/prisma/client";
+
+export interface ListMaterialsByUserOptions {
+  folderId?: string | null;
+}
 
 export interface CreateMaterialRecordInput {
   userId: string;
@@ -12,6 +17,13 @@ export interface CreateMaterialRecordInput {
   category: MaterialCategory;
   origin: MaterialOrigin;
   status: MaterialStatus;
+  folderId?: string | null;
+  sourceType?: MaterialSourceType | null;
+  originalFileName?: string | null;
+  storedFileName?: string | null;
+  mimeType?: string | null;
+  fileSize?: number | null;
+  storagePath?: string | null;
   summary?: string;
 }
 
@@ -19,14 +31,21 @@ export interface UpdateMaterialRecordInput {
   title?: string;
   category?: MaterialCategory;
   status?: MaterialStatus;
+  folderId?: string | null;
   summary?: string;
 }
 
 export const materialsRepository = {
-  listByUser(userId: string): Promise<Material[]> {
+  listByUser(
+    userId: string,
+    options: ListMaterialsByUserOptions = {}
+  ): Promise<Material[]> {
+    const { folderId } = options;
+
     return prisma.material.findMany({
       where: {
-        userId
+        userId,
+        ...(folderId !== undefined ? { folderId } : {})
       },
       orderBy: [
         {
@@ -56,6 +75,13 @@ export const materialsRepository = {
         category: input.category,
         origin: input.origin,
         status: input.status,
+        folderId: input.folderId ?? null,
+        sourceType: input.sourceType,
+        originalFileName: input.originalFileName,
+        storedFileName: input.storedFileName,
+        mimeType: input.mimeType,
+        fileSize: input.fileSize,
+        storagePath: input.storagePath,
         summary: input.summary
       }
     });
@@ -66,12 +92,17 @@ export const materialsRepository = {
     userId: string,
     input: UpdateMaterialRecordInput
   ): Promise<Material> {
+    const { folderId, ...data } = input;
+
     return prisma.material.update({
       where: {
         id,
         userId
       },
-      data: input
+      data: {
+        ...data,
+        ...(folderId !== undefined ? { folderId } : {})
+      }
     });
   },
 

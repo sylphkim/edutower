@@ -4,14 +4,17 @@ import {
   deleteMaterial,
   getMaterial,
   listMaterials,
+  uploadMaterial,
   updateMaterial
 } from "../controllers/materials.controller";
+import { materialUploadMiddleware } from "../middlewares/materialUpload.middleware";
 
 const router = Router();
 
 router.get("/", listMaterials);
-router.get("/:id", getMaterial);
 router.post("/", createMaterial);
+router.post("/upload", materialUploadMiddleware, uploadMaterial);
+router.get("/:id", getMaterial);
 router.patch("/:id", updateMaterial);
 router.delete("/:id", deleteMaterial);
 
