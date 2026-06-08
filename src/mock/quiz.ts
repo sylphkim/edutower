@@ -36,6 +36,7 @@ export const mockQuizItems: QuizItem[] = [
     id: "quiz-001",
     title: "Derivative Basics Check",
     materialId: "mat-001",
+    skillId: "skill-002",
     difficulty: "pass",
     questions: [
       {

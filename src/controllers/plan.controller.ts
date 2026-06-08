@@ -1,34 +1,74 @@
-import { Request, Response } from "express";
+import { NextFunction, Request, Response } from "express";
 import { planService } from "../services/plan.service";
 import { sendSuccess } from "../utils/apiResponse";
 
-export function listPlans(_req: Request, res: Response): void {
-  sendSuccess(res, planService.list());
+export async function listPlans(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    sendSuccess(res, await planService.list());
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function getPlan(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = planService.getById(id);
+export async function getPlan(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await planService.getById(id);
 
-  sendSuccess(res, result);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function createPlan(req: Request, res: Response): void {
-  const result = planService.create(req.body);
+export async function createPlan(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await planService.create(req.body);
 
-  sendSuccess(res, result, 201);
+    sendSuccess(res, result, 201);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function updatePlan(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = planService.update(id, req.body);
+export async function updatePlan(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await planService.update(id, req.body);
 
-  sendSuccess(res, result);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function deletePlan(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = planService.remove(id);
+export async function deletePlan(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await planService.remove(id);
 
-  sendSuccess(res, result);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
 }
