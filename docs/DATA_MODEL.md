@@ -1,124 +1,358 @@
 # EduTower Data Model
 
-本文记录 Prisma 数据模型的第一版边界，用于迁移前和后续 service 接入数据库时对齐语义。
+本文档记录当前 Prisma 数据模型和 API 映射关系。当前数据库使用 Prisma + SQLite；`DATABASE_URL` 默认指向本地 `dev.db`。
 
-## 核心模型关系
+当前阶段使用 Demo 用户和 Demo project 作为开发上下文。这只用于本地开发和模块串联，不等于真实登录鉴权，也不代表多用户权限已经完成。
 
-- `User` 拥有 `Material`、`StudyProject`、`Conversation`、`WrongbookItem` 和 `DailySummary`。
-- `StudyProject` 是长期学习项目，一个项目拥有资料关联、知识树、学习任务、学习会话、错题和每日总结。
-- `ProjectMaterial` 是 `StudyProject` 与 `Material` 的多对多关联表。同一项目不能重复引用同一资料。
-- `KnowledgeNode` 是项目内知识点，必须属于一个项目，并通过 `parentId` 形成父子树。
-- `StudyTask` 是项目内学习任务，必须属于项目，可选关联当前知识点。
-- `Conversation` 保存自由答疑、建项对话和项目学习对话；自由答疑可以没有项目。
-- `Message` 必须属于一个 `Conversation`，只保存 `user` 和 `assistant` 两类消息。
-- `StudySession` 表示一次项目学习过程，必须属于项目，可选关联知识点、任务和对话。
-- `Quiz` 必须关联一个 `KnowledgeNode`，一次 quiz 只针对当前知识点；多轮通过 `Quiz.round` 表示。
-- `QuizQuestion` 只支持 `single_choice` 和 `short_answer`。选择题选项用 `QuizOption` 拆表保存，避免 JSON 大字段。
-- `QuizAttempt` 保存用户答案、是否答对和作答时间，不再重复保存 round。
-- `WrongbookItem` 保存错题快照。订正状态由 `status` 表示，手动软删除由 `deletedAt` 表示。
-- `DailySummary` 保存 AI 草稿和用户确认后的今日内容。一个 `StudySession` 最多对应一份 `DailySummary`。
-- `SummarySuggestion` 保存 AI 提出的状态、薄弱点和复习建议，等待用户逐项接受、修改或拒绝。
+## 模型总览
 
-## 用户确认优先
+核心所有权关系：
 
-- AI 可以写入 `SummarySuggestion`，提出 `proposedStatus`、`proposedMastery` 或文本建议。
-- AI 建议不是正式状态更新。只有用户接受或修改后，service 才能更新 `KnowledgeNode.status`、`KnowledgeNode.mastery` 或相关任务状态。
-- `KnowledgeNode.mastery` 是确认后的对外进度值，兼容现有 skills API 的 `mastery`。
-- `KnowledgeNode.status` 是确认后的离散状态，兼容现有 skills API 的 `status`。
-- `KnowledgeNode.selfMastery` 是用户自评信号，不是权威值。
-- `KnowledgeNode.systemMastery` 是系统判断信号，不是权威值。
-- `KnowledgeNode.confidence` 只表示系统判断的置信度，不单独决定状态。
+```text
+User
+├─ MaterialFolder
+├─ Material
+├─ StudyProject
+├─ Conversation
+├─ WrongbookItem
+└─ DailySummary
+```
 
-## Service 必须校验的规则
+学习项目关系：
 
-Prisma 关系能保证基本外键，但以下跨项目、跨用户规则必须由 service 或 repository 校验：
+```text
+StudyProject
+├─ ProjectMaterial -> Material
+├─ KnowledgeNode
+│  └─ KnowledgeNodePrerequisite
+├─ StudyTask
+├─ StudySession
+├─ Quiz
+├─ WrongbookItem
+└─ DailySummary
+```
 
-- `ProjectMaterial.projectId` 对应项目的 `userId` 必须与 `Material.userId` 一致。
-- `StudyTask.knowledgeNodeId` 如果存在，节点必须属于同一个 `StudyProject`。
-- `StudySession.knowledgeNodeId` 和 `StudySession.studyTaskId` 如果存在，必须都属于该 session 的项目。
-- `Conversation.projectId` 如果存在，项目必须属于同一个用户。
-- `StudySession.conversationId` 如果存在，对话必须属于同一个用户，并且项目语义一致。
-- `Quiz.studySessionId` 如果存在，session 项目必须与 quiz 的 `KnowledgeNode.projectId` 一致。
-- `WrongbookItem.projectId`、`knowledgeNodeId`、`quizQuestionId`、`quizAttemptId` 同时存在时，必须指向同一学习链路。
-- `DailySummary.userId`、`projectId`、`studySessionId` 同时存在时，必须属于同一个用户和项目。
-- `SummarySuggestion.knowledgeNodeId` 或 `studyTaskId` 如果存在，必须与所属 `DailySummary` 的项目一致。
-- `KnowledgeNode.selfMastery`、`systemMastery`、`mastery`、`confidence` 的数值范围应由 service 校验。
-- `WrongbookItem.deletedAt != null` 的记录默认不应出现在普通错题列表中。
+测验与错题关系：
 
-## 删除策略
+```text
+Quiz
+├─ QuizQuestion
+│  ├─ QuizOption
+│  └─ QuizAttempt
+└─ WrongbookItem
+```
 
-- 删除 `User` 会级联删除该用户的项目、资料、对话、错题和每日总结。
-- 删除 `StudyProject` 会级联删除项目内 `ProjectMaterial`、`KnowledgeNode`、`StudyTask` 和 `StudySession`。
-- 删除 `StudyProject` 时，历史型 `Conversation`、`WrongbookItem`、`DailySummary` 的项目引用置空，保留历史内容。
-- 删除 `KnowledgeNode` 或 `StudyTask` 时，`StudySession`、`WrongbookItem`、`SummarySuggestion` 的对应引用置空，保留学习历史。
-- 删除 `Conversation` 会级联删除 `Message`。
-- 删除 `Quiz` 会级联删除题目、选项和作答记录。
-- 删除 `DailySummary` 会级联删除其 `SummarySuggestion`。
+## 用户与资料库
 
-## 与现有 API 的主要映射
+### User
 
-### Materials
+`User` 是顶层所有者。当前代码通过 Demo 用户工作，后续真实用户系统会替换这层上下文。
 
-- API `MaterialItem.type` 映射到 Prisma `Material.category`。
-- API `MaterialItem.source` 映射到 Prisma `Material.origin`。
-- API `MaterialItem.status` 映射到 Prisma `Material.status`。
-- API `createdAt` 和 `updatedAt` 是字符串；Prisma 中是 `DateTime`，返回 API 前需要转 ISO 字符串。
+主要关系：
 
-### Plan
+- `User 1 -> N MaterialFolder`
+- `User 1 -> N Material`
+- `User 1 -> N StudyProject`
+- `User 1 -> N Conversation`
+- `User 1 -> N WrongbookItem`
+- `User 1 -> N DailySummary`
 
-- API `PlanItem` 是学习计划视图，不等同于 `StudyProject`。
-- API `PlanItem.status = draft` 可映射到 `ProjectStatus.planning`。
-- API `PlanItem.materialIds` 映射到 `ProjectMaterial`。
-- API `PlanDay.day` 映射到 `StudyTask.day`。
-- API `PlanTask.type` 映射到 `StudyTask.type`。
-- API `PlanTask.status` 映射到 `StudyTask.status`。
-- API `PlanTask.skillId` 后续应映射到 `KnowledgeNode.id`。
+删除 `User` 时，Prisma 会级联删除其资料、文件夹、项目、对话、错题和每日总结记录。
 
-### Skills
+### MaterialFolder
 
-- API `SkillItem` 对应 Prisma `KnowledgeNode`。
-- API `parentId` 映射到 `KnowledgeNode.parentId`。
-- API `status` 映射到 `KnowledgeNode.status`。
-- API `mastery` 映射到 `KnowledgeNode.mastery`。
-- API `order` 映射到 `KnowledgeNode.order`。
-- API `prerequisites` 映射到 `KnowledgeNodePrerequisite` 显式关系表，不塞入 JSON 字符串。
+`MaterialFolder` 表示资料文件夹。
+
+关键字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 文件夹 ID |
+| `userId` | 所属用户 |
+| `name` | 展示名称 |
+| `normalizedName` | 规范化名称，用于同用户下查重 |
+| `createdAt`, `updatedAt` | 时间戳 |
+
+约束：
+
+- `@@unique([userId, normalizedName])` 保证同一用户下逻辑同名文件夹唯一。
+- `@@index([userId])` 支持按用户列出文件夹。
+- 删除用户时文件夹级联删除。
+- 删除非空文件夹由 `Material.folder` 的 `onDelete: Restrict` 和 service 计数判断共同保护。
+
+### Material
+
+`Material` 表示资料。文本、链接、上传文件都属于同一个模型，只是上传文件会多出文件元数据。
+
+关键字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `userId` | 所属用户 |
+| `folderId` | 可空；`null` 表示未分类 |
+| `title` | 展示标题 |
+| `category` | 资料分类，对应 API 的 `type` |
+| `sourceType` | 文件/来源类型：`pdf/doc/image/text/link` |
+| `origin` | 来源：`uploaded/manual/mock` |
+| `status` | 状态：`pending/processing/ready/failed` |
+| `originalFileName` | 客户端原始文件名，可空 |
+| `storedFileName` | 服务端生成文件名，可空，非空唯一 |
+| `mimeType` | MIME 类型，可空 |
+| `fileSize` | 文件大小，可空 |
+| `storagePath` | 项目相对路径，可空 |
+| `summary` | 摘要，可空 |
+| `extractedText` | 后续文件解析文本，可空 |
+
+索引与约束：
+
+- `storedFileName String? @unique`：允许多条空值记录；非空存储文件名唯一。
+- `@@index([userId])`：按用户查询资料。
+- `@@index([userId, folderId])`：按用户和文件夹筛选资料。
+- `folderId = null` 表示未分类。
+
+文件一致性：
+
+- `storagePath` 保存项目相对路径，不保存开发机绝对路径。
+- 磁盘文件删除不是 Prisma 级联能力。
+- 上传失败清理、删除资料时同步删除磁盘文件，都由 service 负责。
+- 删除路径必须限制在 `uploads/materials/` 内。
+
+## 学习项目与计划
+
+### StudyProject
+
+`StudyProject` 是长期学习项目，也是当前 Plan API 的核心持久化模型。
+
+关键字段：
+
+- `title`：计划标题。
+- `subject`：学科或主题。
+- `goal`：学习目标。
+- `targetScore`、`startDate`、`deadline`、`dailyMinutes`：后续计划能力字段。
+- `status`：`planning/active/completed/archived`。
+
+Plan API 映射：
+
+- `PlanItem` 是 `StudyProject` 的 API 视图。
+- `PlanItem.status = draft` 映射到 `ProjectStatus.planning`。
+- `PlanItem.materialIds` 通过 `ProjectMaterial` 表达。
+- `PlanDay` 和 `PlanTask` 主要由 `StudyTask.day`、`StudyTask.type`、`StudyTask.status` 组成。
+
+### ProjectMaterial
+
+`ProjectMaterial` 是 `StudyProject` 与 `Material` 的多对多关系表。
+
+约束：
+
+- `@@id([projectId, materialId])` 防止同一项目重复引用同一资料。
+- 删除项目会级联删除项目资料关联。
+- 删除资料会级联删除项目资料关联。
+
+### StudyTask
+
+`StudyTask` 表示项目中的学习任务。
+
+关键关系：
+
+- 必须属于一个 `StudyProject`。
+- 可选关联一个 `KnowledgeNode`。
+- 可选关联一个 `Material`。
+- 可被 `Quiz`、`StudySession`、`SummarySuggestion` 引用。
+
+API 映射：
+
+- `PlanTask.materialId -> StudyTask.materialId`
+- `PlanTask.skillId -> StudyTask.knowledgeNodeId`
+- `PlanTask.type -> StudyTask.type`
+- `PlanTask.status -> StudyTask.status`
+- `PlanDay.day -> StudyTask.day`
+
+删除 `Material` 或 `KnowledgeNode` 时，任务上的对应引用会置空，保留任务历史。
+
+## 技能与知识点
+
+### KnowledgeNode
+
+`KnowledgeNode` 是项目内知识点，对应 Skills API 的 `SkillItem`。
+
+关键字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `projectId` | 所属项目 |
+| `parentId` | 父节点，可空，用于知识树 |
+| `title` | 知识点标题 |
+| `description` | 描述 |
+| `status` | 确认后的用户可见状态 |
+| `selfMastery` | 用户自评信号 |
+| `systemMastery` | 系统判断信号 |
+| `confidence` | 系统判断置信度 |
+| `mastery` | 确认后的对外掌握度 |
+| `order` | 排序 |
+
+用户确认优先：
+
+- AI 可以提出状态和掌握度建议。
+- AI 建议不直接覆盖 `status` 或 `mastery`。
+- 只有用户接受或修改后，service 才能更新正式状态。
+- `selfMastery`、`systemMastery`、`confidence` 只是信号，不是权威状态。
+
+### KnowledgeNodePrerequisite
+
+`KnowledgeNodePrerequisite` 表示知识点前置依赖。
+
+约束：
+
+- `@@id([nodeId, prerequisiteId])` 防止重复依赖。
+- service 必须禁止自依赖。
+- service 必须确保依赖双方属于同一项目。
+
+## 测验与错题
 
 ### Quiz
 
-- API `QuizItem.difficulty` 映射到 `Quiz.difficulty`。
-- API `QuizItem.skillId` 后续应映射到 `KnowledgeNode.id`。
-- API `QuizQuestion.prompt`、`answer`、`explanation` 分别映射到 Prisma 同名字段。
-- API `QuizQuestion.options` 映射到 `QuizOption` 多条记录。
-- API submit 结果应写入 `QuizAttempt`，答错时可创建或更新 `WrongbookItem`。
+`Quiz` 表示一次测验。
 
-### Wrongbook
+关键关系：
 
-- API `WrongbookItem.question` 映射到 Prisma 的题目快照字段。
-- API `wrongAnswer` 映射到 `WrongbookItem.wrongAnswer`。
-- API `reviewCount` 和 `lastReviewedAt` 映射到同名字段。
-- 订正状态映射到 `WrongbookItem.status`。
-- 手动删除映射到 `WrongbookItem.deletedAt`。
-- API `subject` 和 `category` 当前作为 `WrongbookItem.subject`、`WrongbookItem.category` 字符串字段持久化。
-- 内置 taxonomy 仍来自服务端常量；本版不新增 taxonomy 模型。
-- Quiz 提交时，整次提交的 `QuizAttempt` 写入和错题创建/订正在同一个 Prisma transaction 中完成。
-- 同一用户同一道 `QuizQuestion` 只保留一条未删除错题。重复答错会更新这条记录；答对一次会将其标记为 `corrected`，但不会自动更新 `KnowledgeNode.mastery` 或 `status`。
+- 必须关联一个 `KnowledgeNode`。
+- 可选关联 `StudySession`。
+- 可选关联 `StudyTask`。
+- 包含多个 `QuizQuestion`。
 
-### Memory 和 Daily Summary
+API 映射：
 
-- API `MemoryItem.type = daily_summary` 的记录可由 `DailySummary` 生成。
-- API `DailySummaryInput.summary` 映射到 `DailySummary.aiDraft` 或用户确认后的 `confirmedContent`。
-- API `weaknesses` 和 `nextSuggestions` 不应作为 JSON 大字段直接保存；需要进入 `DailySummary.weaknesses` 文本摘要或拆为 `SummarySuggestion`。
+- `QuizItem.skillId -> Quiz.knowledgeNodeId`
+- `QuizItem.studyTaskId -> Quiz.studyTaskId`
+- `QuizItem.difficulty -> Quiz.difficulty`
+- `QuizItem.materialId` 不是 Quiz 自身字段，而是从关联任务的 `materialId` 派生。
 
-## Plan / Quiz / Skills 关系整理
+当前 Quiz 题目生成仍是 mock 规则，但 Quiz、Question、Option、Attempt 已可持久化。
 
-以下关系说明覆盖上文历史描述中的旧占位说明：
+### QuizQuestion / QuizOption / QuizAttempt
 
-- `PlanDay.title` 是 API 展示字段，由 `plan.service.ts` 根据 `day` 派生为 `Day ${day}`，不进入 Prisma。
-- API `PlanTask.materialId` 映射到 `StudyTask.materialId`。该资料必须属于当前 demo user；删除资料后，任务上的资料引用由数据库置空。
-- API `PlanTask.quizId` 已删除。任务和测验的权威关系是 `Quiz.studyTaskId -> StudyTask.id`。
-- API `PlanTask.skillId` 映射到 `StudyTask.knowledgeNodeId`，用于表达任务当前关联的知识点。
-- API `QuizItem.studyTaskId` 映射到 `Quiz.studyTaskId`。删除任务后，测验保留，`studyTaskId` 置空。
-- API `QuizItem.materialId` 不是 Quiz 自身字段，而是从 `Quiz.studyTask.materialId` 派生出来的兼容响应字段。
-- API `CreateQuizInput` 需要 `skillId` 或 `studyTaskId`。如果只传 `studyTaskId`，该任务必须已经有关联的 `skillId`。
-- API `SkillItem.prerequisites` 映射到 `KnowledgeNodePrerequisite` 显式中间表，联合主键 `nodeId + prerequisiteId` 防止重复依赖。
-- service 必须校验知识点不能依赖自己、不能重复依赖，并且前置知识点必须属于同一个 demo project。
+`QuizQuestion` 保存题干、答案、解析和题型。
+
+- `single_choice` 题目的选项拆到 `QuizOption`。
+- `short_answer` 不需要选项。
+- `QuizAttempt` 保存用户答案、是否正确和答题时间。
+
+提交测验时：
+
+- 每道题写入 `QuizAttempt`。
+- 答错题可创建或更新 `WrongbookItem`。
+- 当前实现不会自动修改 `KnowledgeNode.mastery` 或 `status`。
+
+### WrongbookItem
+
+`WrongbookItem` 表示错题快照。
+
+关键字段：
+
+- `userId`：所属用户。
+- `projectId`、`knowledgeNodeId`：可选学习上下文。
+- `quizQuestionId`、`quizAttemptId`：可选测验来源。
+- `questionType`、`questionPrompt`、`correctAnswer`、`explanation`：题目快照。
+- `wrongAnswer`：错误答案。
+- `subject`、`category`：当前作为字符串分类字段。
+- `status`：`uncorrected/corrected`。
+- `deletedAt`：手动软删除标记。
+
+规则：
+
+- 普通错题列表默认不返回 `deletedAt != null` 的记录。
+- 同一用户对同一 `QuizQuestion` 重复答错时，应更新现有未删除错题，不新增重复错题。
+- taxonomy 当前来自服务端常量，不是独立 Prisma 模型。
+
+## 对话、学习会话与每日总结
+
+### Conversation / Message
+
+`Conversation` 保存自由答疑、建项对话和项目学习对话。
+
+- 必须属于一个 `User`。
+- 可选关联 `StudyProject`。
+- `Message` 必须属于一个 `Conversation`。
+- 删除 `Conversation` 会级联删除 `Message`。
+
+当前 `POST /api/ai/chat` 的 chat context 仍主要来自 demo mock，不等于完整 Conversation 持久化链路已经接入。
+
+### StudySession
+
+`StudySession` 表示一次项目学习过程。
+
+- 必须属于一个 `StudyProject`。
+- 可选关联 `KnowledgeNode`、`StudyTask`、`Conversation`。
+- 可关联多个 `Quiz`。
+- 最多关联一个 `DailySummary`。
+
+### DailySummary / SummarySuggestion
+
+`DailySummary` 保存每日总结草稿和用户确认后的内容。
+
+`SummarySuggestion` 保存 AI 提出的状态、薄弱点或复习建议，等待用户接受、修改或拒绝。
+
+当前 Memory API 仍使用内存 mock；`DailySummary` 和 `SummarySuggestion` 是后续真实长期记忆和学习闭环的数据基础。
+
+## API 到 Prisma 映射
+
+| API | Prisma |
+| --- | --- |
+| `MaterialItem.type` | `Material.category` |
+| `MaterialItem.source` | `Material.origin` |
+| `MaterialItem.status` | `Material.status` |
+| `MaterialItem.folderId` | `Material.folderId` |
+| `MaterialItem.sourceType` | `Material.sourceType` |
+| `MaterialItem.originalFileName` | `Material.originalFileName` |
+| `MaterialItem.storedFileName` | `Material.storedFileName` |
+| `MaterialItem.storagePath` | `Material.storagePath` |
+| `MaterialFolderItem` | `MaterialFolder` |
+| `PlanItem` | `StudyProject` API view |
+| `PlanItem.materialIds` | `ProjectMaterial` |
+| `PlanTask` | `StudyTask` |
+| `SkillItem` | `KnowledgeNode` |
+| `SkillItem.prerequisites` | `KnowledgeNodePrerequisite` |
+| `QuizItem` | `Quiz` |
+| `QuizQuestion` | `QuizQuestion` + `QuizOption` |
+| `SubmitQuizInput` | `QuizAttempt` |
+| `WrongbookItem` | `WrongbookItem` |
+| `MemoryItem` | 当前不落 Prisma，仍是内存 mock |
+
+时间字段在 Prisma 中是 `DateTime`，返回 API 前统一转为 ISO 字符串。
+
+## Service 必须校验的规则
+
+Prisma 可以保证基础外键，但以下业务规则必须由 service 或 repository 查询辅助完成：
+
+- 文件夹、资料、计划、技能、测验、错题必须校验 Demo 用户或 Demo project 归属。
+- 跨用户文件夹不能被 Material 使用。
+- 非空文件夹不能删除。
+- `Material.folderId` 为字符串时，文件夹必须存在且属于当前用户。
+- `ProjectMaterial.projectId` 对应项目的 `userId` 必须与 `Material.userId` 一致。
+- `StudyTask.knowledgeNodeId` 如果存在，节点必须属于同一项目。
+- `Quiz.studyTaskId` 如果存在，任务必须属于同一项目并能确定知识点。
+- `WrongbookItem` 的项目、知识点、题目、答题记录如果同时存在，必须指向同一学习链路。
+- 上传文件的删除路径只能来自数据库记录，且必须限制在 `uploads/materials/`。
+- `KnowledgeNode.selfMastery`、`systemMastery`、`mastery`、`confidence` 的数值范围应由 service 校验。
+- AI 建议不能直接覆盖用户确认后的知识点状态和掌握度。
+
+## 删除策略
+
+Prisma schema 中的主要删除规则：
+
+- 删除 `User` 会级联删除其 `MaterialFolder`、`Material`、`StudyProject`、`Conversation`、`WrongbookItem`、`DailySummary`。
+- 删除 `MaterialFolder` 时，如果仍有 `Material` 指向它，`onDelete: Restrict` 会阻止删除。
+- 删除 `StudyProject` 会级联删除 `ProjectMaterial`、`KnowledgeNode`、`StudyTask`、`StudySession`。
+- 删除 `StudyProject` 时，历史型 `Conversation`、`WrongbookItem`、`DailySummary` 的项目引用置空。
+- 删除 `KnowledgeNode` 或 `StudyTask` 时，相关历史引用置空，保留学习历史。
+- 删除 `Conversation` 会级联删除 `Message`。
+- 删除 `Quiz` 会级联删除 `QuizQuestion`、`QuizOption`、`QuizAttempt`。
+- 删除 `DailySummary` 会级联删除 `SummarySuggestion`。
+
+文件删除规则：
+
+- Prisma 不删除磁盘文件。
+- 删除上传资料时，service 必须先删除磁盘文件，再删除数据库记录。
+- 磁盘文件已经不存在时，可以继续删除数据库记录。
+- 磁盘删除发生其他错误时，必须保留数据库记录。
+- 文本、链接或旧资料没有文件元数据时，只删除数据库记录。
