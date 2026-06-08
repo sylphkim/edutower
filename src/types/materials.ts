@@ -1,6 +1,7 @@
 export type MaterialType = "slides" | "photo" | "outline" | "note" | "other";
 export type MaterialOrigin = "uploaded" | "manual" | "mock";
 export type MaterialSource = MaterialOrigin;
+export type MaterialSourceType = "pdf" | "doc" | "image" | "text" | "link";
 export type MaterialStatus = "pending" | "processing" | "ready" | "failed";
 
 export interface MaterialItem {
@@ -10,6 +11,12 @@ export interface MaterialItem {
   source: MaterialSource;
   status: MaterialStatus;
   folderId: string | null;
+  sourceType: MaterialSourceType | null;
+  originalFileName: string | null;
+  storedFileName: string | null;
+  mimeType: string | null;
+  fileSize: number | null;
+  storagePath: string | null;
   summary?: string;
   createdAt: string;
   updatedAt: string;
@@ -19,7 +26,6 @@ export interface MaterialListQuery {
   folderId?: string | null;
 }
 
-// 创建时不传 id、状态和时间，由 service 统一补齐。
 export interface CreateMaterialInput {
   title: string;
   type: MaterialType;
@@ -28,7 +34,15 @@ export interface CreateMaterialInput {
   summary?: string;
 }
 
-// PATCH 只传需要修改的字段。
+export interface CreateUploadedMaterialInput {
+  folderId?: string | null;
+  originalFileName: string;
+  storedFileName: string;
+  mimeType: string;
+  fileSize: number;
+  storagePath: string;
+}
+
 export interface UpdateMaterialInput {
   title?: string;
   type?: MaterialType;

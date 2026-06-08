@@ -3,6 +3,7 @@ import type {
   Material,
   MaterialCategory,
   MaterialOrigin,
+  MaterialSourceType,
   MaterialStatus
 } from "../generated/prisma/client";
 
@@ -17,6 +18,12 @@ export interface CreateMaterialRecordInput {
   origin: MaterialOrigin;
   status: MaterialStatus;
   folderId?: string | null;
+  sourceType?: MaterialSourceType | null;
+  originalFileName?: string | null;
+  storedFileName?: string | null;
+  mimeType?: string | null;
+  fileSize?: number | null;
+  storagePath?: string | null;
   summary?: string;
 }
 
@@ -69,6 +76,12 @@ export const materialsRepository = {
         origin: input.origin,
         status: input.status,
         folderId: input.folderId ?? null,
+        sourceType: input.sourceType,
+        originalFileName: input.originalFileName,
+        storedFileName: input.storedFileName,
+        mimeType: input.mimeType,
+        fileSize: input.fileSize,
+        storagePath: input.storagePath,
         summary: input.summary
       }
     });

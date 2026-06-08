@@ -8,6 +8,12 @@ export const mockMaterials: MaterialItem[] = [
     source: "mock",
     status: "ready",
     folderId: null,
+    sourceType: null,
+    originalFileName: null,
+    storedFileName: null,
+    mimeType: null,
+    fileSize: null,
+    storagePath: null,
     summary: "A short starter note for derivative basics.",
     createdAt: "2026-05-27T00:00:00.000Z",
     updatedAt: "2026-05-27T00:00:00.000Z"

@@ -159,6 +159,12 @@ function toApiMaterial(item: Material): MaterialItem {
     source: item.origin as MaterialSource,
     status: item.status as MaterialStatus,
     folderId: item.folderId,
+    sourceType: item.sourceType,
+    originalFileName: item.originalFileName,
+    storedFileName: item.storedFileName,
+    mimeType: item.mimeType,
+    fileSize: item.fileSize,
+    storagePath: item.storagePath,
     summary: item.summary ?? undefined,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString()
