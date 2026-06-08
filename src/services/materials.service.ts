@@ -1,3 +1,5 @@
+import { unlink } from "node:fs/promises";
+import path from "node:path";
 import { materialsRepository } from "../repositories/materials.repository";
 import { materialFoldersRepository } from "../repositories/materialFolders.repository";
 import type {
@@ -8,14 +10,17 @@ import type {
 } from "../generated/prisma/client";
 import type {
   CreateMaterialInput,
+  CreateUploadedMaterialInput,
   MaterialListQuery,
   MaterialItem,
   MaterialSource,
+  MaterialSourceType,
   MaterialStatus,
   MaterialType,
   UpdateMaterialInput
 } from "../types/materials";
 import { AppError } from "../utils/errors";
+import { logger } from "../utils/logger";
 import { getDemoUserId } from "./demoUser.service";
 
 const VALID_TYPES: MaterialType[] = ["slides", "photo", "outline", "note", "other"];
@@ -151,6 +156,56 @@ function toMaterialStatus(status: MaterialStatus): PrismaMaterialStatus {
   return status as PrismaMaterialStatus;
 }
 
+function getUploadedMaterialExtension(input: CreateUploadedMaterialInput): string {
+  return path.extname(input.originalFileName).toLowerCase();
+}
+
+function getUploadedMaterialTitle(originalFileName: string): string {
+  const extension = path.extname(originalFileName);
+
+  if (!extension) {
+    return originalFileName;
+  }
+
+  return originalFileName.slice(0, -extension.length);
+}
+
+function inferUploadedMaterialCategory(extension: string): MaterialCategory {
+  if (extension === ".pdf") {
+    return "slides";
+  }
+
+  if (extension === ".doc" || extension === ".docx") {
+    return "note";
+  }
+
+  return "photo";
+}
+
+function inferUploadedMaterialSourceType(extension: string): MaterialSourceType {
+  if (extension === ".pdf") {
+    return "pdf";
+  }
+
+  if (extension === ".doc" || extension === ".docx") {
+    return "doc";
+  }
+
+  return "image";
+}
+
+async function cleanupUploadedFile(storagePath: string, cause: unknown): Promise<void> {
+  try {
+    await unlink(storagePath);
+  } catch (error) {
+    logger.warn("Failed to clean up uploaded material file after database error.", {
+      storagePath,
+      cleanupError: error,
+      originalError: cause
+    });
+  }
+}
+
 function toApiMaterial(item: Material): MaterialItem {
   return {
     id: item.id,
@@ -210,6 +265,35 @@ export const materialsService = {
     });
 
     return toApiMaterial(item);
+  },
+
+  async createUploaded(input: CreateUploadedMaterialInput): Promise<MaterialItem> {
+    const userId = await getDemoUserId();
+    const folderId = await resolveFolderIdForUser(input.folderId, userId);
+    const extension = getUploadedMaterialExtension(input);
+
+    try {
+      const item = await materialsRepository.create({
+        userId,
+        title: getUploadedMaterialTitle(input.originalFileName),
+        category: inferUploadedMaterialCategory(extension),
+        origin: "uploaded",
+        status: "ready",
+        folderId: folderId ?? null,
+        sourceType: inferUploadedMaterialSourceType(extension),
+        originalFileName: input.originalFileName,
+        storedFileName: input.storedFileName,
+        mimeType: input.mimeType,
+        fileSize: input.fileSize,
+        storagePath: input.storagePath,
+        summary: undefined
+      });
+
+      return toApiMaterial(item);
+    } catch (error) {
+      await cleanupUploadedFile(input.storagePath, error);
+      throw error;
+    }
   },
 
   async update(id: string, input: UpdateMaterialInput): Promise<MaterialItem> {
