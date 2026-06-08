@@ -169,57 +169,6 @@
 
     var createForm = renderCreateForm();
 
-    var skillOptions = skills
-      .map(function (skill) {
-        return (
-          '<option value="' +
-          api.escapeAttr(skill.id) +
-          '">' +
-          api.escapeHtml(skill.title) +
-          "</option>"
-        );
-      })
-      .join("");
-    var taskOptions = planTasks
-      .map(function (task) {
-        return (
-          '<option value="' +
-          api.escapeAttr(task.id) +
-          '" data-skill-id="' +
-          api.escapeAttr(task.skillId) +
-          '">' +
-          api.escapeHtml(task.title) +
-          "</option>"
-        );
-      })
-      .join("");
-    var hasTarget = skills.length > 0 || planTasks.length > 0;
-
-    createForm =
-      '<section class="quiz-create">' +
-      '<h3 class="module-subtitle">生成新练习</h3>' +
-      '<div class="quiz-create__row">' +
-      '<select id="quizDifficulty" class="form-input form-input--compact">' +
-      '<option value="pass">及格练（3 题）</option>' +
-      '<option value="high_score">高分练（5 题）</option>' +
-      "</select>" +
-      '<select id="quizSkillTarget" class="form-input form-input--compact">' +
-      '<option value="">按技能生成</option>' +
-      skillOptions +
-      "</select>" +
-      '<select id="quizTaskTarget" class="form-input form-input--compact">' +
-      '<option value="">按计划任务生成</option>' +
-      taskOptions +
-      "</select>" +
-      '<button type="button" class="btn btn--primary btn--compact" data-action="create-quiz"' +
-      (hasTarget ? "" : " disabled") +
-      ">生成练习</button>" +
-      "</div>" +
-      (hasTarget
-        ? ""
-        : '<p class="module-empty">请先创建技能，或创建带技能的计划任务。</p>') +
-      "</section>";
-
     if (!quizzes.length) {
       rootEl.innerHTML =
         renderBanner() + createForm + '<p class="module-empty">暂无练习，点击上方按钮生成一套。</p>';
