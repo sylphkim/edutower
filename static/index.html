@@ -299,7 +299,7 @@
           <header class="module-header">
             <div class="module-header__titles">
               <h1 class="module-header__title">练习测验</h1>
-              <p class="module-header__subtitle">生成 mock 练习、答题提交、查看得分</p>
+              <p class="module-header__subtitle">生成练习、答题提交、查看得分（题目规则由后端生成）</p>
             </div>
           </header>
           <div class="module-body" id="quizRoot"></div>
@@ -340,11 +340,27 @@
           </header>
 
           <div class="materials-body">
-            <p class="materials-intro">
-              录入笔记、链接或文档资料，供 AI 助教在复习时引用。当前后端为演示接口，提交后会进入待索引队列。
-            </p>
+            <nav class="materials-subnav" aria-label="资料区视图">
+              <button type="button" class="materials-subnav__item materials-subnav__item--active" data-materials-view="entry">
+                录入资料
+              </button>
+              <button type="button" class="materials-subnav__item" data-materials-view="folders">
+                文件夹管理
+              </button>
+              <button type="button" class="materials-subnav__item is-hidden" id="materialsMoveNav" data-materials-view="move">
+                移动资料
+              </button>
+              <button type="button" class="materials-subnav__item is-hidden" id="materialsEditNav" data-materials-view="edit">
+                编辑资料
+              </button>
+            </nav>
 
             <div id="materialsStatus" class="materials-status" role="status" aria-live="polite" hidden></div>
+
+            <div id="materialsViewEntry" class="materials-view">
+            <p class="materials-intro">
+              录入笔记、链接或文档资料。文本与链接即时入库；PDF、Word、图片会保存到本地资料库并写入数据库。
+            </p>
 
             <form id="materialForm" class="material-form" novalidate>
               <div class="form-row">
@@ -367,7 +383,15 @@
                   <button type="button" class="source-type-tab" data-source-type="link" role="tab" aria-selected="false">网页链接</button>
                   <button type="button" class="source-type-tab" data-source-type="pdf" role="tab" aria-selected="false">PDF 文档</button>
                   <button type="button" class="source-type-tab" data-source-type="doc" role="tab" aria-selected="false">Word 文档</button>
+                  <button type="button" class="source-type-tab" data-source-type="image" role="tab" aria-selected="false">图片</button>
                 </div>
+              </div>
+
+              <div class="form-row">
+                <label class="form-label" for="materialFolderSelect">保存到文件夹（可选）</label>
+                <select id="materialFolderSelect" class="form-input" name="folderId">
+                  <option value="">未分类</option>
+                </select>
               </div>
 
               <div class="form-row">
@@ -408,7 +432,7 @@
                 <label class="form-label" for="materialPdf">选择 PDF 文件</label>
                 <div class="file-drop">
                   <input id="materialPdf" name="pdfFile" type="file" accept=".pdf,application/pdf" />
-                  <p class="file-drop__hint">支持 PDF，演示阶段仅记录文件名，实际上传能力待后端接入。</p>
+                  <p class="file-drop__hint">支持 PDF，单文件最大 20 MB，上传后保存到本地资料库。</p>
                 </div>
               </div>
 
@@ -416,7 +440,15 @@
                 <label class="form-label" for="materialDoc">选择 Word 文件</label>
                 <div class="file-drop">
                   <input id="materialDoc" name="docFile" type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
-                  <p class="file-drop__hint">支持 .doc / .docx，演示阶段仅记录文件名。</p>
+                  <p class="file-drop__hint">支持 .doc / .docx，单文件最大 20 MB，上传后保存到本地资料库。</p>
+                </div>
+              </div>
+
+              <div class="form-row form-row--source is-hidden" data-source-panel="image">
+                <label class="form-label" for="materialImage">选择图片文件</label>
+                <div class="file-drop">
+                  <input id="materialImage" name="imageFile" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" />
+                  <p class="file-drop__hint">支持 JPG / PNG，单文件最大 20 MB，上传后保存到本地资料库。</p>
                 </div>
               </div>
 
@@ -428,6 +460,106 @@
                 </button>
               </div>
             </form>
+            </div>
+
+            <div id="materialsViewFolders" class="materials-view is-hidden" aria-hidden="true">
+              <div class="materials-mini-page">
+                <header class="materials-mini-page__header">
+                  <h2 class="materials-mini-page__title">文件夹管理</h2>
+                  <p class="materials-mini-page__desc">创建文件夹、重命名或删除空文件夹。资料可在右侧列表中移动到指定文件夹。</p>
+                </header>
+
+                <form id="materialFolderCreateForm" class="materials-mini-form" novalidate>
+                  <label class="form-label" for="materialFolderCreateInput">新建文件夹</label>
+                  <div class="materials-mini-form__row">
+                    <input
+                      id="materialFolderCreateInput"
+                      class="form-input"
+                      type="text"
+                      maxlength="60"
+                      placeholder="例如：数学复习"
+                      autocomplete="off"
+                    />
+                    <button type="submit" class="btn btn--primary" id="materialFolderCreateSubmit">创建</button>
+                  </div>
+                  <p id="materialFolderCreateError" class="materials-mini-form__error" role="alert" hidden></p>
+                </form>
+
+                <div class="materials-mini-section">
+                  <h3 class="materials-mini-section__title">已有文件夹</h3>
+                  <ul id="materialFolderManageList" class="materials-folder-manage-list" aria-label="文件夹列表"></ul>
+                  <p id="materialFolderManageEmpty" class="materials-mini-empty">还没有文件夹，可在上方创建。</p>
+                </div>
+              </div>
+            </div>
+
+            <div id="materialsViewMove" class="materials-view is-hidden" aria-hidden="true">
+              <div class="materials-mini-page">
+                <header class="materials-mini-page__header">
+                  <h2 class="materials-mini-page__title">移动资料</h2>
+                  <p class="materials-mini-page__desc">
+                    将资料移动到目标文件夹。当前资料：<strong id="materialMoveTargetTitle">—</strong>
+                  </p>
+                </header>
+
+                <form id="materialMoveForm" class="materials-mini-form" novalidate>
+                  <fieldset class="materials-move-options" id="materialMoveOptions">
+                    <legend class="form-label">选择目标文件夹</legend>
+                  </fieldset>
+                  <p id="materialMoveError" class="materials-mini-form__error" role="alert" hidden></p>
+                  <div class="materials-mini-form__actions">
+                    <button type="button" class="btn btn--ghost" id="materialMoveCancelBtn">取消</button>
+                    <button type="submit" class="btn btn--primary" id="materialMoveSubmitBtn">确认移动</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+
+            <div id="materialsViewEdit" class="materials-view is-hidden" aria-hidden="true">
+              <div class="materials-mini-page">
+                <header class="materials-mini-page__header">
+                  <h2 class="materials-mini-page__title">编辑资料</h2>
+                  <p class="materials-mini-page__desc" id="materialEditMeta">—</p>
+                </header>
+
+                <form id="materialEditForm" class="materials-mini-form" novalidate>
+                  <div class="form-row">
+                    <label class="form-label" for="materialEditTitle">资料标题</label>
+                    <input
+                      id="materialEditTitle"
+                      class="form-input"
+                      type="text"
+                      maxlength="120"
+                      required
+                    />
+                  </div>
+
+                  <div class="form-row">
+                    <label class="form-label" for="materialEditFolderSelect">所属文件夹</label>
+                    <select id="materialEditFolderSelect" class="form-input">
+                      <option value="">未分类</option>
+                    </select>
+                  </div>
+
+                  <div class="form-row">
+                    <label class="form-label" for="materialEditSummary">摘要 / 内容预览</label>
+                    <textarea
+                      id="materialEditSummary"
+                      class="form-textarea materials-edit-summary"
+                      rows="8"
+                      placeholder="文本笔记、链接地址或文件说明"
+                    ></textarea>
+                  </div>
+
+                  <p id="materialEditError" class="materials-mini-form__error" role="alert" hidden></p>
+
+                  <div class="materials-mini-form__actions">
+                    <button type="button" class="btn btn--ghost" id="materialEditCancelBtn">取消</button>
+                    <button type="submit" class="btn btn--primary" id="materialEditSubmitBtn">保存修改</button>
+                  </div>
+                </form>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -460,12 +592,20 @@
 
         <!-- 资料列表面板 30% -->
         <aside class="materials-panel view-side-panel is-hidden" id="materialsPanel" data-view-side="materials" aria-hidden="true">
+          <div class="panel-card panel-card--folders">
+            <h2 class="panel-title panel-title--compact">筛选</h2>
+            <div id="materialFolderFilters" class="materials-folder-filters" role="tablist" aria-label="资料文件夹筛选"></div>
+            <p class="materials-panel__hint materials-panel__hint--compact">
+              文件夹的创建与管理请切换到左侧「文件夹管理」。
+            </p>
+          </div>
+
           <div class="panel-card panel-card--materials">
             <h2 class="panel-title">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
               已录入资料
             </h2>
-            <p class="materials-panel__hint">包含本地录入与后端 mock 索引片段</p>
+            <p class="materials-panel__hint" id="materialsListHint">显示全部资料，支持下载已上传文件</p>
             <ul id="materialsList" class="materials-list"></ul>
             <p id="materialsListEmpty" class="materials-list__empty">暂无资料，请在左侧表单提交第一条。</p>
           </div>

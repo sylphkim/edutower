@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { NextFunction, Request, Response } from "express";
 import { agentPanelService } from "../services/agentPanel.service";
 import { sendSuccess } from "../utils/apiResponse";
 
@@ -10,9 +10,17 @@ function readSessionId(req: Request): string {
   return sessionId || "default";
 }
 
-export function getAgentPanel(req: Request, res: Response): void {
-  const sessionId = readSessionId(req);
-  const result = agentPanelService.buildPanel({ sessionId });
+export async function getAgentPanel(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const sessionId = readSessionId(req);
+    const result = await agentPanelService.buildPanel({ sessionId });
 
-  sendSuccess(res, result);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
 }

@@ -1,34 +1,74 @@
-import { Request, Response } from "express";
+import { NextFunction, Request, Response } from "express";
 import { quizService } from "../services/quiz.service";
 import { sendSuccess } from "../utils/apiResponse";
 
-export function listQuizzes(_req: Request, res: Response): void {
-  sendSuccess(res, quizService.list());
+export async function listQuizzes(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    sendSuccess(res, await quizService.list());
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function getQuiz(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = quizService.getById(id);
+export async function getQuiz(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await quizService.getById(id);
 
-  sendSuccess(res, result);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function createQuiz(req: Request, res: Response): void {
-  const result = quizService.create(req.body);
+export async function createQuiz(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const result = await quizService.create(req.body);
 
-  sendSuccess(res, result, 201);
+    sendSuccess(res, result, 201);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function submitQuiz(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = quizService.submit(id, req.body);
+export async function submitQuiz(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await quizService.submit(id, req.body);
 
-  sendSuccess(res, result);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function deleteQuiz(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = quizService.remove(id);
+export async function deleteQuiz(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await quizService.remove(id);
 
-  sendSuccess(res, result);
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
 }

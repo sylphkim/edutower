@@ -1,5 +1,7 @@
 import type { QuizQuestion } from "./edutower";
 
+export type WrongbookStatus = "uncorrected" | "corrected";
+
 export interface WrongbookTaxonomyEntry {
   id: string;
   label: string;
@@ -11,8 +13,10 @@ export interface WrongbookItem {
   id: string;
   question: QuizQuestion;
   wrongAnswer: string;
+  status?: WrongbookStatus;
   reviewCount: number;
   lastReviewedAt?: string;
+  correctedAt?: string;
   /** 学科 / 主题 id */
   subject: string;
   /** 错因 id */

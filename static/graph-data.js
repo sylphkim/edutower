@@ -177,6 +177,7 @@
     meta = meta || {};
     var sourcePoints = Array.isArray(points) ? points : ALL_KNOWLEDGE_POINTS;
     var degreeMap = {};
+    var subjectLabelMap = meta.subjectLabels || SUBJECT_LABELS;
 
     sourcePoints.forEach(function (point) {
       degreeMap[point.id] = 0;
@@ -210,19 +211,79 @@
         weight: Math.max(1, degree + 1),
         degree: degree,
         group: point.subjectId || "general",
-        subjectLabel: SUBJECT_LABELS[point.subjectId] || "综合",
+        subjectLabel: subjectLabelMap[point.subjectId] || "综合",
       };
     });
+
+    var subjectEntries = meta.subjects;
+    if (!subjectEntries) {
+      subjectEntries = Object.keys(subjectLabelMap).map(function (id) {
+        return { id: id, label: subjectLabelMap[id] };
+      });
+    }
 
     return {
       title: meta.title || "知识全景",
       subtitle: meta.subtitle || "全部考点先修关系与掌握度",
       nodes: nodes,
       links: links,
-      subjects: Object.keys(SUBJECT_LABELS).map(function (id) {
-        return { id: id, label: SUBJECT_LABELS[id] };
-      }),
+      subjects: subjectEntries,
     };
+  }
+
+  function normalizeMastery(value) {
+    var num = Number(value);
+    if (Number.isNaN(num)) return 0;
+    if (num > 1) return Math.min(1, num / 100);
+    return Math.min(1, Math.max(0, num));
+  }
+
+  function buildGraphFromSkillTree(treeItems, meta) {
+    meta = meta || {};
+    var subjectLabels = {};
+    var points = [];
+
+    function walk(node, rootId, rootLabel) {
+      if (!node || !node.id) return;
+
+      var groupId = rootId || node.id;
+      var groupLabel = rootLabel || node.title || "技能";
+      if (!subjectLabels[groupId]) {
+        subjectLabels[groupId] = groupLabel;
+      }
+
+      points.push({
+        id: node.id,
+        subjectId: groupId,
+        title: node.title || node.id,
+        description: node.description || "",
+        mastery: normalizeMastery(node.mastery),
+        prerequisiteIds: Array.isArray(node.prerequisites) ? node.prerequisites.slice() : [],
+      });
+
+      (node.children || []).forEach(function (child) {
+        walk(child, groupId, groupLabel);
+      });
+    }
+
+    (Array.isArray(treeItems) ? treeItems : []).forEach(function (root) {
+      walk(root, root.id, root.title);
+    });
+
+    if (!points.length) {
+      return buildKnowledgeGraph(ALL_KNOWLEDGE_POINTS, meta);
+    }
+
+    return buildKnowledgeGraph(points, {
+      title: meta.title || "技能知识图谱",
+      subtitle:
+        meta.subtitle ||
+        "来自技能树的先修关系与掌握度 · 共 " + points.length + " 个节点",
+      subjectLabels: subjectLabels,
+      subjects: Object.keys(subjectLabels).map(function (id) {
+        return { id: id, label: subjectLabels[id] };
+      }),
+    });
   }
 
   window.EduTowerGraphData = {
@@ -233,6 +294,7 @@
       return QUADRATIC_POINTS.slice();
     },
     buildKnowledgeGraph: buildKnowledgeGraph,
+    buildGraphFromSkillTree: buildGraphFromSkillTree,
     buildDemoGraph: function () {
       return buildKnowledgeGraph(QUADRATIC_POINTS, {
         title: "高中数学 · 二次函数",
