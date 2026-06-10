@@ -67,9 +67,9 @@ model MaterialFolder {
 }
 
 model StudyProject {
-  id              String            @id @default(cuid())
+  id              String                @id @default(cuid())
   userId          String
-  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   title           String
   subject         String
   goal            String
@@ -77,11 +77,11 @@ model StudyProject {
   startDate       DateTime?
   deadline        DateTime?
   dailyMinutes    Int?
-  status          ProjectStatus     @default(planning)
+  status          ProjectStatus         @default(planning)
   goalConfirmedAt DateTime?
   planConfirmedAt DateTime?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
   materialLinks   ProjectMaterial[]
   knowledgeNodes  KnowledgeNode[]
   studyTasks      StudyTask[]
@@ -89,6 +89,10 @@ model StudyProject {
   studySessions   StudySession[]
   wrongbookItems  WrongbookItem[]
   dailySummaries  DailySummary[]
+  planVersions    StudyPlanVersion[]
+  dailyTaskSheets DailyTaskSheet[]
+  weakPoints      WeakPoint[]
+  stateEvents     KnowledgeStateEvent[]
 
   @@index([userId])
 }
@@ -134,6 +138,9 @@ model KnowledgeNode {
   dependentLinks     KnowledgeNodePrerequisite[] @relation("KnowledgeNodeDependents")
   wrongbookItems     WrongbookItem[]
   summarySuggestions SummarySuggestion[]
+  phaseLinks         PlanPhaseKnowledgeNode[]
+  weakPoints         WeakPoint[]
+  stateEvents        KnowledgeStateEvent[]
   archivedAt         DateTime?
   createdAt          DateTime                    @default(now())
   updatedAt          DateTime                    @updatedAt
@@ -161,6 +168,13 @@ model StudyTask {
   knowledgeNode      KnowledgeNode?      @relation(fields: [knowledgeNodeId], references: [id], onDelete: SetNull)
   materialId         String?
   material           Material?           @relation(fields: [materialId], references: [id], onDelete: SetNull)
+  dailyTaskSheetId   String?
+  dailyTaskSheet     DailyTaskSheet?     @relation(fields: [dailyTaskSheetId], references: [id], onDelete: SetNull)
+  planPhaseId        String?
+  planPhase          PlanPhase?          @relation(fields: [planPhaseId], references: [id], onDelete: SetNull)
+  carriedFromTaskId  String?
+  carriedFromTask    StudyTask?          @relation("StudyTaskCarryForward", fields: [carriedFromTaskId], references: [id], onDelete: SetNull)
+  carriedTasks       StudyTask[]         @relation("StudyTaskCarryForward")
   title              String
   type               StudyTaskType
   day                Int?
@@ -168,6 +182,10 @@ model StudyTask {
   isRecommended      Boolean             @default(true)
   isSelected         Boolean             @default(false)
   status             StudyTaskStatus     @default(todo)
+  estimatedMinutes   Int?
+  sourceType         StudyTaskSource?
+  selectionReason    String?
+  generationBatch    Int?
   completedAt        DateTime?
   studySessions      StudySession[]
   quizzes            Quiz[]
@@ -178,6 +196,91 @@ model StudyTask {
   @@index([projectId])
   @@index([knowledgeNodeId])
   @@index([materialId])
+  @@index([dailyTaskSheetId, order])
+  @@index([planPhaseId])
+  @@index([carriedFromTaskId])
+}
+
+model StudyPlanVersion {
+  id              String                 @id @default(cuid())
+  projectId       String
+  project         StudyProject           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version         Int
+  status          StudyPlanVersionStatus @default(draft)
+  inputSnapshot   String                 @default("{}")
+  confirmedAt     DateTime?
+  supersededAt    DateTime?
+  phases          PlanPhase[]
+  dailyTaskSheets DailyTaskSheet[]
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  @@unique([projectId, version])
+  @@index([projectId, status])
+}
+
+model PlanPhase {
+  id                 String                   @id @default(cuid())
+  planVersionId      String
+  planVersion        StudyPlanVersion         @relation(fields: [planVersionId], references: [id], onDelete: Cascade)
+  title              String
+  goal               String
+  description        String?
+  completionCriteria String?
+  order              Int
+  knowledgeNodeLinks PlanPhaseKnowledgeNode[]
+  studyTasks         StudyTask[]
+  dailyTaskSheets    DailyTaskSheet[]
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@unique([planVersionId, order])
+  @@index([planVersionId])
+}
+
+model PlanPhaseKnowledgeNode {
+  planPhaseId     String
+  planPhase       PlanPhase     @relation(fields: [planPhaseId], references: [id], onDelete: Cascade)
+  knowledgeNodeId String
+  knowledgeNode   KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Restrict)
+  order           Int           @default(0)
+  createdAt       DateTime      @default(now())
+
+  @@id([planPhaseId, knowledgeNodeId])
+  @@index([knowledgeNodeId])
+  @@index([planPhaseId, order])
+}
+
+model DailyTaskSheet {
+  id               String                     @id @default(cuid())
+  projectId        String
+  project          StudyProject               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  planVersionId    String?
+  planVersion      StudyPlanVersion?          @relation(fields: [planVersionId], references: [id], onDelete: SetNull)
+  currentPhaseId   String?
+  currentPhase     PlanPhase?                 @relation(fields: [currentPhaseId], references: [id], onDelete: SetNull)
+  localDate        String
+  timezone         String                     @default("Asia/Shanghai")
+  availableMinutes Int
+  inputSnapshot    String                     @default("{}")
+  generationCount  Int                        @default(1)
+  status           DailyTaskSheetStatus       @default(generating)
+  generatedAt      DateTime?
+  closesAt         DateTime
+  endedAt          DateTime?
+  closeReason      DailyTaskSheetCloseReason?
+  tasks            StudyTask[]
+  dailySummary     DailySummary?
+  weakPoints       WeakPoint[]
+  stateEvents      KnowledgeStateEvent[]
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+
+  @@unique([projectId, localDate])
+  @@index([projectId, status])
+  @@index([closesAt, status])
+  @@index([planVersionId])
+  @@index([currentPhaseId])
 }
 
 model Conversation {
@@ -332,47 +435,100 @@ model WrongbookItem {
 }
 
 model DailySummary {
-  id               String              @id @default(cuid())
-  userId           String
-  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  projectId        String?
-  project          StudyProject?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  studySessionId   String?             @unique
-  studySession     StudySession?       @relation(fields: [studySessionId], references: [id], onDelete: SetNull)
-  summaryDate      DateTime            @default(now())
-  aiDraft          String
-  confirmedContent String?
-  weaknesses       String?
-  status           DailySummaryStatus  @default(draft)
-  confirmedAt      DateTime?
-  suggestions      SummarySuggestion[]
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
+  id                 String                          @id @default(cuid())
+  userId             String
+  user               User                            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId          String?
+  project            StudyProject?                   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  studySessionId     String?                         @unique
+  studySession       StudySession?                   @relation(fields: [studySessionId], references: [id], onDelete: SetNull)
+  dailyTaskSheetId   String?                         @unique
+  dailyTaskSheet     DailyTaskSheet?                 @relation(fields: [dailyTaskSheetId], references: [id], onDelete: SetNull)
+  summaryDate        DateTime                        @default(now())
+  aiDraft            String
+  confirmedContent   String?
+  weaknesses         String?
+  status             DailySummaryStatus              @default(draft)
+  confirmationSource DailySummaryConfirmationSource?
+  confirmedAt        DateTime?
+  suggestions        SummarySuggestion[]
+  createdAt          DateTime                        @default(now())
+  updatedAt          DateTime                        @updatedAt
 
   @@index([userId, summaryDate])
   @@index([projectId])
 }
 
 model SummarySuggestion {
-  id              String                  @id @default(cuid())
-  summaryId       String
-  summary         DailySummary            @relation(fields: [summaryId], references: [id], onDelete: Cascade)
-  knowledgeNodeId String?
-  knowledgeNode   KnowledgeNode?          @relation(fields: [knowledgeNodeId], references: [id], onDelete: SetNull)
-  studyTaskId     String?
-  studyTask       StudyTask?              @relation(fields: [studyTaskId], references: [id], onDelete: SetNull)
-  type            SummarySuggestionType
-  content         String
+  id                    String                           @id @default(cuid())
+  summaryId             String
+  summary               DailySummary                     @relation(fields: [summaryId], references: [id], onDelete: Cascade)
+  knowledgeNodeId       String?
+  knowledgeNode         KnowledgeNode?                   @relation(fields: [knowledgeNodeId], references: [id], onDelete: SetNull)
+  studyTaskId           String?
+  studyTask             StudyTask?                       @relation(fields: [studyTaskId], references: [id], onDelete: SetNull)
+  type                  SummarySuggestionType
+  content               String
   proposedLearningState KnowledgeNodeLearningState?
-  proposedMastery Int?
-  modifiedContent String?
-  status          SummarySuggestionStatus @default(pending)
-  decidedAt       DateTime?
-  createdAt       DateTime                @default(now())
-  updatedAt       DateTime                @updatedAt
+  proposedMastery       Int?
+  modifiedContent       String?
+  status                SummarySuggestionStatus          @default(pending)
+  decisionSource        SummarySuggestionDecisionSource?
+  decidedAt             DateTime?
+  stateEvents           KnowledgeStateEvent[]
+  createdAt             DateTime                         @default(now())
+  updatedAt             DateTime                         @updatedAt
 
   @@index([summaryId, status])
   @@index([knowledgeNodeId])
+}
+
+model WeakPoint {
+  id                 String                      @id @default(cuid())
+  projectId          String
+  project            StudyProject                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  knowledgeNodeId    String
+  knowledgeNode      KnowledgeNode               @relation(fields: [knowledgeNodeId], references: [id], onDelete: Restrict)
+  dailyTaskSheetId   String?
+  dailyTaskSheet     DailyTaskSheet?             @relation(fields: [dailyTaskSheetId], references: [id], onDelete: SetNull)
+  title              String
+  description        String?
+  severity           WeakPointSeverity
+  status             WeakPointStatus             @default(active)
+  evidenceSnapshot   String                      @default("{}")
+  confirmationSource WeakPointConfirmationSource
+  confirmedAt        DateTime?
+  resolvedAt         DateTime?
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+
+  @@index([projectId, status])
+  @@index([knowledgeNodeId, status])
+  @@index([dailyTaskSheetId])
+}
+
+model KnowledgeStateEvent {
+  id                    String                      @id @default(cuid())
+  projectId             String
+  project               StudyProject                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  knowledgeNodeId       String
+  knowledgeNode         KnowledgeNode               @relation(fields: [knowledgeNodeId], references: [id], onDelete: Restrict)
+  dailyTaskSheetId      String?
+  dailyTaskSheet        DailyTaskSheet?             @relation(fields: [dailyTaskSheetId], references: [id], onDelete: SetNull)
+  summarySuggestionId   String?
+  summarySuggestion     SummarySuggestion?          @relation(fields: [summarySuggestionId], references: [id], onDelete: SetNull)
+  previousLearningState KnowledgeNodeLearningState?
+  newLearningState      KnowledgeNodeLearningState?
+  previousMastery       Int?
+  newMastery            Int?
+  source                KnowledgeStateEventSource
+  evidenceSnapshot      String                      @default("{}")
+  createdAt             DateTime                    @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([knowledgeNodeId, createdAt])
+  @@index([dailyTaskSheetId])
+  @@index([summarySuggestionId])
 }
 
 model Memory {
@@ -444,6 +600,17 @@ enum StudyTaskStatus {
   todo
   in_progress
   done
+  cancelled
+}
+
+enum StudyTaskSource {
+  plan
+  carry_over
+  daily_summary
+  quiz
+  wrongbook
+  weak_point
+  user_requested
 }
 
 enum ConversationType {
@@ -479,7 +646,35 @@ enum WrongbookStatus {
 
 enum DailySummaryStatus {
   draft
+  awaiting_confirmation
   confirmed
+}
+
+enum StudyPlanVersionStatus {
+  draft
+  confirmed
+  superseded
+}
+
+enum DailyTaskSheetStatus {
+  generating
+  active
+  awaiting_confirmation
+  completed
+  forced_closed
+  generation_failed
+}
+
+enum DailyTaskSheetCloseReason {
+  all_tasks_done
+  user
+  midnight
+}
+
+enum DailySummaryConfirmationSource {
+  user
+  system
+  system_forced
 }
 
 enum SummarySuggestionType {
@@ -493,4 +688,33 @@ enum SummarySuggestionStatus {
   accepted
   modified
   rejected
+}
+
+enum SummarySuggestionDecisionSource {
+  user
+  system_forced
+}
+
+enum WeakPointSeverity {
+  low
+  medium
+  high
+}
+
+enum WeakPointStatus {
+  active
+  resolved
+  dismissed
+}
+
+enum WeakPointConfirmationSource {
+  user
+  system
+  system_forced
+}
+
+enum KnowledgeStateEventSource {
+  user_confirmation
+  system_forced
+  manual
 }
