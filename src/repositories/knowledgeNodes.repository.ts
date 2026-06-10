@@ -1,7 +1,7 @@
 import { prisma } from "../lib/prisma";
 import type {
   KnowledgeNode,
-  KnowledgeNodeStatus
+  KnowledgeNodeLearningState
 } from "../generated/prisma/client";
 import type {
   KnowledgeNodeGetPayload,
@@ -13,7 +13,7 @@ export interface CreateKnowledgeNodeRecordInput {
   title: string;
   description?: string;
   parentId?: string;
-  status: KnowledgeNodeStatus;
+  learningState: KnowledgeNodeLearningState;
   mastery: number;
   order: number;
   prerequisiteIds: string[];
@@ -23,7 +23,7 @@ export interface UpdateKnowledgeNodeRecordInput {
   title?: string;
   description?: string;
   parentId?: string | null;
-  status?: KnowledgeNodeStatus;
+  learningState?: KnowledgeNodeLearningState;
   mastery?: number;
   order?: number;
   prerequisiteIds?: string[];
@@ -102,7 +102,7 @@ export const knowledgeNodesRepository = {
           title: input.title,
           description: input.description,
           parentId: input.parentId,
-          status: input.status,
+          learningState: input.learningState,
           mastery: input.mastery,
           order: input.order
         }
@@ -141,7 +141,7 @@ export const knowledgeNodesRepository = {
           title: input.title,
           description: input.description,
           parentId: input.parentId,
-          status: input.status,
+          learningState: input.learningState,
           mastery: input.mastery,
           order: input.order
         }

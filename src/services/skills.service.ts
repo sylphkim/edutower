@@ -1,17 +1,17 @@
 import { knowledgeNodesRepository } from "../repositories/knowledgeNodes.repository";
-import type { KnowledgeNodeStatus } from "../generated/prisma/client";
+import type { KnowledgeNodeLearningState } from "../generated/prisma/client";
 import type { KnowledgeNodeWithPrerequisites } from "../repositories/knowledgeNodes.repository";
 import type {
   CreateSkillInput,
   SkillItem,
-  SkillStatus,
+  SkillLearningState,
   SkillTreeItem,
   UpdateSkillInput
 } from "../types/skills";
 import { AppError } from "../utils/errors";
 import { getDemoProjectId } from "./demoProject.service";
 
-const VALID_STATUSES: SkillStatus[] = ["locked", "available", "in_progress", "mastered"];
+const VALID_LEARNING_STATES: SkillLearningState[] = ["not_started", "learning", "mastered"];
 
 function ensureSkillExists(
   item: KnowledgeNodeWithPrerequisites | null
@@ -60,10 +60,10 @@ function ensureValidCreateInput(input: CreateSkillInput): void {
     ensureValidPrerequisites(input.prerequisites);
   }
 
-  if (input.status !== undefined && !VALID_STATUSES.includes(input.status)) {
+  if (input.learningState !== undefined && !VALID_LEARNING_STATES.includes(input.learningState)) {
     throw new AppError(
       "INVALID_REQUEST",
-      `status must be one of: ${VALID_STATUSES.join(", ")}.`,
+      `learningState must be one of: ${VALID_LEARNING_STATES.join(", ")}.`,
       400
     );
   }
@@ -113,10 +113,13 @@ function ensureValidUpdateInput(id: string, input: UpdateSkillInput): void {
     }
   }
 
-  if (input.status !== undefined && !VALID_STATUSES.includes(input.status)) {
+  if (
+    input.learningState !== undefined &&
+    !VALID_LEARNING_STATES.includes(input.learningState)
+  ) {
     throw new AppError(
       "INVALID_REQUEST",
-      `status must be one of: ${VALID_STATUSES.join(", ")}.`,
+      `learningState must be one of: ${VALID_LEARNING_STATES.join(", ")}.`,
       400
     );
   }
@@ -181,8 +184,10 @@ async function ensurePrerequisitesBelongToProject(
   }
 }
 
-function toKnowledgeNodeStatus(status: SkillStatus): KnowledgeNodeStatus {
-  return status as KnowledgeNodeStatus;
+function toKnowledgeNodeLearningState(
+  learningState: SkillLearningState
+): KnowledgeNodeLearningState {
+  return learningState as KnowledgeNodeLearningState;
 }
 
 function toApiSkill(item: KnowledgeNodeWithPrerequisites): SkillItem {
@@ -192,9 +197,12 @@ function toApiSkill(item: KnowledgeNodeWithPrerequisites): SkillItem {
     description: item.description ?? undefined,
     parentId: item.parentId ?? undefined,
     prerequisites: item.prerequisiteLinks.map((link) => link.prerequisiteId),
-    status: item.status as SkillStatus,
+    learningState: item.learningState as SkillLearningState,
+    isUnlocked: item.isUnlocked,
+    unlockedAt: item.unlockedAt?.toISOString(),
     mastery: item.mastery,
     order: item.order,
+    archivedAt: item.archivedAt?.toISOString(),
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString()
   };
@@ -271,7 +279,7 @@ export const skillsService = {
       title: input.title.trim(),
       description: input.description,
       parentId: input.parentId,
-      status: toKnowledgeNodeStatus(input.status ?? "available"),
+      learningState: toKnowledgeNodeLearningState(input.learningState ?? "not_started"),
       mastery: input.mastery ?? 0,
       order:
         input.order ??
@@ -299,10 +307,10 @@ export const skillsService = {
       description: input.description ?? currentItem.description ?? undefined,
       parentId:
         input.parentId !== undefined ? input.parentId ?? null : currentItem.parentId,
-      status:
-        input.status !== undefined
-          ? toKnowledgeNodeStatus(input.status)
-          : currentItem.status,
+      learningState:
+        input.learningState !== undefined
+          ? toKnowledgeNodeLearningState(input.learningState)
+          : currentItem.learningState,
       mastery: input.mastery ?? currentItem.mastery,
       order: input.order ?? currentItem.order,
       prerequisiteIds: input.prerequisites
