@@ -3,16 +3,35 @@ import { demoMaterials } from "../mock/demoMaterials";
 import { demoSessionHistory } from "../mock/demoSessionHistory";
 import { demoSubject } from "../mock/demoSubject";
 import { demoWeakPoints } from "../mock/demoWeakPoints";
-import type { ChatContext } from "../types/chatContext";
+import { memoryService } from "./memory.service";
+import type { ChatContext, ChatMemory } from "../types/chatContext";
 
 export interface BuildChatContextParams {
   sessionId: string;
 }
 
 export const chatContextService = {
-  buildContext({ sessionId }: BuildChatContextParams): ChatContext {
-    // Demo 阶段暂时忽略真实用户系统；后续可根据 sessionId 查询数据库里的用户资料、历史记录和长期记忆。
+  async buildContext({ sessionId }: BuildChatContextParams): Promise<ChatContext> {
     void sessionId;
+
+    // 从 Memory 表读取长期记忆
+    const { items: allMemories } = await memoryService.list();
+
+    // 按 importance 降序 -> createdAt 降序排序，取前 20 条
+    const importanceRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
+    const topMemories = allMemories
+      .sort((a, b) => {
+        const rankDiff = (importanceRank[b.importance] ?? 0) - (importanceRank[a.importance] ?? 0);
+        if (rankDiff !== 0) return rankDiff;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      })
+      .slice(0, 20);
+
+    const memories: ChatMemory[] = topMemories.map((m) => ({
+      type: m.type,
+      title: m.title,
+      content: m.content
+    }));
 
     return {
       subject: demoSubject,
@@ -20,7 +39,8 @@ export const chatContextService = {
       knowledgePoints: demoKnowledgePoints,
       weakPoints: demoWeakPoints,
       sessionHistory: demoSessionHistory,
-      generatedAt: new Date().toISOString()
+      generatedAt: new Date().toISOString(),
+      memories,
     };
   }
 };
