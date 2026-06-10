@@ -113,8 +113,11 @@ model KnowledgeNode {
   children           KnowledgeNode[]             @relation("KnowledgeNodeChildren")
   title              String
   description        String?
-  /// Confirmed user-facing state. AI suggestions must be accepted before changing it.
-  status             KnowledgeNodeStatus         @default(available)
+  /// Confirmed learning progress. Unlock eligibility is tracked separately.
+  learningState      KnowledgeNodeLearningState  @default(not_started)
+  /// Once true, unlock eligibility is never automatically revoked.
+  isUnlocked         Boolean                     @default(false)
+  unlockedAt         DateTime?
   /// User self-assessment signal; not authoritative by itself.
   selfMastery        Int?
   /// System-estimated signal; not authoritative until accepted.
@@ -358,7 +361,7 @@ model SummarySuggestion {
   studyTask       StudyTask?              @relation(fields: [studyTaskId], references: [id], onDelete: SetNull)
   type            SummarySuggestionType
   content         String
-  proposedStatus  KnowledgeNodeStatus?
+  proposedLearningState KnowledgeNodeLearningState?
   proposedMastery Int?
   modifiedContent String?
   status          SummarySuggestionStatus @default(pending)
@@ -408,10 +411,9 @@ enum ProjectStatus {
   archived
 }
 
-enum KnowledgeNodeStatus {
-  locked
-  available
-  in_progress
+enum KnowledgeNodeLearningState {
+  not_started
+  learning
   mastered
 }
 
