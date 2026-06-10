@@ -440,7 +440,7 @@
       renderStatusBanner() +
       renderPendingDeleteConfirm() +
       renderPolicyNote() +
-      '<p class="module-intro">先选择学科或主题，进入后再按错因筛选与整理。</p>' +
+      '<p class="module-intro">先选择学科或主题，进入后再按错因筛选与整理。自定义分类会保存到服务器，重启后仍可用。</p>' +
       renderSubjectSection("系统预置", groups.builtIn, "暂无系统分类") +
       renderSubjectSection(
         "我的分类",

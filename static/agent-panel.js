@@ -28,6 +28,7 @@
   bindEvents();
   renderChecklist();
   refreshFromBackend();
+  maybeAutoImportFromPlan();
 
   function getSessionId() {
     return sessionStorage.getItem(SESSION_KEY) || "default";
@@ -185,13 +186,75 @@
     }
   }
 
+  function mapChecklistStatusToPlanStatus(status) {
+    if (status === "done") return "done";
+    if (status === "active") return "in_progress";
+    return "todo";
+  }
+
+  async function syncChecklistToPlan(items) {
+    if (!window.EduTowerPlan || typeof window.EduTowerPlan.updateTaskStatusByTitle !== "function") {
+      return;
+    }
+
+    var updates = items.filter(function (item) {
+      return item.title;
+    });
+
+    for (var i = 0; i < updates.length; i += 1) {
+      await window.EduTowerPlan.updateTaskStatusByTitle(
+        updates[i].title,
+        mapChecklistStatusToPlanStatus(updates[i].status)
+      );
+    }
+  }
+
   function applyChecklistForm() {
     checklist = collectChecklistFromEditor().filter(function (item) {
       return item.title;
     });
     saveChecklist();
     renderChecklist();
-    showChecklistStatus("清单已保存");
+    syncChecklistToPlan(checklist);
+    showChecklistStatus("清单已保存，并已尝试同步到学习计划");
+  }
+
+  async function maybeAutoImportFromPlan() {
+    if (checklist.length) return;
+
+    if (!window.EduTowerApi) return;
+
+    try {
+      var data = await window.EduTowerApi.get("/api/plan");
+      var plans = data && Array.isArray(data.items) ? data.items : [];
+      var active =
+        plans.find(function (p) {
+          return p.status === "active";
+        }) || plans[0];
+
+      if (!active || !active.days || !active.days.length) return;
+
+      var tasks = [];
+      active.days.forEach(function (day) {
+        (day.tasks || []).forEach(function (task) {
+          var status =
+            task.status === "done" ? "done" : task.status === "in_progress" ? "active" : "pending";
+          tasks.push({
+            title: task.title,
+            timeRange: "",
+            status: status,
+          });
+        });
+      });
+
+      if (!tasks.length) return;
+
+      checklist = tasks.map(normalizeChecklistItem);
+      saveChecklist();
+      renderChecklist();
+    } catch (_err) {
+      /* ignore */
+    }
   }
 
   function collectChecklistFromEditor() {
@@ -353,7 +416,7 @@
     }
 
     checklistEl.innerHTML = checklist
-      .map(function (item) {
+      .map(function (item, index) {
         var cls = "checklist-item";
         if (item.status === "done") cls += " checklist-item--done";
         if (item.status === "active") cls += " checklist-item--active";
@@ -371,11 +434,13 @@
         return (
           '<li class="' +
           cls +
-          '"><span class="' +
+          '"><button type="button" class="checklist-item__toggle" data-action="toggle-checklist-item" data-index="' +
+          index +
+          '" aria-label="切换完成状态"><span class="' +
           iconCls +
           '" aria-hidden="true">' +
           iconContent +
-          '</span><div class="checklist-body"><span class="checklist-title">' +
+          "</span></button><div class=\"checklist-body\"><span class=\"checklist-title\">" +
           escapeHtml(item.title) +
           '</span><span class="checklist-time">' +
           escapeHtml(item.timeRange || "未设置时间") +
@@ -383,6 +448,24 @@
         );
       })
       .join("");
+
+    checklistEl.querySelectorAll("[data-action='toggle-checklist-item']").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var idx = parseInt(btn.getAttribute("data-index") || "-1", 10);
+        if (idx < 0 || !checklist[idx]) return;
+
+        var next =
+          checklist[idx].status === "pending"
+            ? "active"
+            : checklist[idx].status === "active"
+              ? "done"
+              : "pending";
+        checklist[idx].status = next;
+        saveChecklist();
+        renderChecklist();
+        syncChecklistToPlan([checklist[idx]]);
+      });
+    });
   }
 
   async function importFromPlan() {

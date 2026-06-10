@@ -71,8 +71,29 @@
         if (window.EduTowerMaterials) window.EduTowerMaterials.refresh();
       },
     },
+    help: {
+      breadcrumb: "使用帮助",
+      panelId: "view-help",
+      sideId: null,
+    },
+    about: {
+      breadcrumb: "关于 EduTower",
+      panelId: "view-about",
+      sideId: null,
+    },
+    privacy: {
+      breadcrumb: "隐私说明",
+      panelId: "view-privacy",
+      sideId: null,
+    },
+    terms: {
+      breadcrumb: "服务条款",
+      panelId: "view-terms",
+      sideId: null,
+    },
   };
 
+  var INFO_VIEWS = new Set(["help", "about", "privacy", "terms"]);
   var navItems = document.querySelectorAll(".sidebar-nav .nav-item[data-view]");
   var breadcrumbEl = document.getElementById("viewBreadcrumb");
   var currentView = "home";
@@ -108,8 +129,22 @@
       side.setAttribute("aria-hidden", showSide ? "false" : "true");
     });
 
-    if (breadcrumbEl && viewName !== "home") {
-      breadcrumbEl.textContent = config.breadcrumb;
+    if (breadcrumbEl) {
+      breadcrumbEl.textContent = viewName === "home" ? "学习首页" : config.breadcrumb;
+    }
+
+    if (INFO_VIEWS.has(viewName)) {
+      try {
+        history.replaceState(null, "", "#" + viewName);
+      } catch (_err) {
+        /* ignore */
+      }
+    } else if (location.hash && INFO_VIEWS.has(location.hash.replace(/^#/, ""))) {
+      try {
+        history.replaceState(null, "", location.pathname);
+      } catch (_err2) {
+        /* ignore */
+      }
     }
 
     if (typeof config.refresh === "function") {
@@ -139,6 +174,27 @@
       switchView(item.getAttribute("data-view") || "home");
     });
   });
+
+  document.querySelectorAll("[data-footer-view]").forEach(function (link) {
+    link.addEventListener("click", function (event) {
+      event.preventDefault();
+      switchView(link.getAttribute("data-footer-view") || "help");
+    });
+  });
+
+  document.querySelectorAll("[data-go-view]").forEach(function (el) {
+    el.addEventListener("click", function (event) {
+      var view = el.getAttribute("data-go-view");
+      if (!view) return;
+      if (el.tagName === "A") event.preventDefault();
+      switchView(view);
+    });
+  });
+
+  var hashView = (location.hash || "").replace(/^#/, "");
+  if (hashView && VIEW_CONFIG[hashView]) {
+    switchView(hashView);
+  }
 
   window.EduTowerShell = {
     switchView: switchView,

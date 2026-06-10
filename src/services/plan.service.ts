@@ -230,20 +230,17 @@ async function ensureMaterialsBelongToUser(
   }
 }
 
-async function ensureTaskSkillsBelongToProject(
-  tasks: CreateStudyTaskRecordInput[],
-  projectId: string
-): Promise<void> {
+async function ensureTaskSkillsExist(tasks: CreateStudyTaskRecordInput[]): Promise<void> {
   const skillIds = Array.from(
     new Set(tasks.map((task) => task.knowledgeNodeId).filter((id): id is string => Boolean(id)))
   );
 
-  const count = await knowledgeNodesRepository.countByIdsForProject(skillIds, projectId);
+  const count = await knowledgeNodesRepository.countByIds(skillIds);
 
   if (count !== skillIds.length) {
     throw new AppError(
       "INVALID_REQUEST",
-      "task skillId must reference a skill in the same project.",
+      "task skillId must reference an existing skill.",
       400
     );
   }
@@ -320,11 +317,7 @@ export const planService = {
     );
 
     if (tasks.some((task) => task.knowledgeNodeId)) {
-      throw new AppError(
-        "INVALID_REQUEST",
-        "task skillId must reference a skill in the same project.",
-        400
-      );
+      await ensureTaskSkillsExist(tasks);
     }
 
     const item = await projectsRepository.createPlan({
@@ -360,7 +353,7 @@ export const planService = {
     }
 
     if (tasks) {
-      await ensureTaskSkillsBelongToProject(tasks, currentItem.id);
+      await ensureTaskSkillsExist(tasks);
     }
 
     const updatedItem = await projectsRepository.updatePlan(id, {

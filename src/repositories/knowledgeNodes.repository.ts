@@ -71,6 +71,20 @@ export const knowledgeNodesRepository = {
     });
   },
 
+  async countByIds(ids: string[]): Promise<number> {
+    if (ids.length === 0) {
+      return 0;
+    }
+
+    return prisma.knowledgeNode.count({
+      where: {
+        id: {
+          in: ids
+        }
+      }
+    });
+  },
+
   async countByIdsForProject(ids: string[], projectId: string): Promise<number> {
     if (ids.length === 0) {
       return 0;
