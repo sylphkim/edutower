@@ -134,10 +134,12 @@ model KnowledgeNode {
   dependentLinks     KnowledgeNodePrerequisite[] @relation("KnowledgeNodeDependents")
   wrongbookItems     WrongbookItem[]
   summarySuggestions SummarySuggestion[]
+  archivedAt         DateTime?
   createdAt          DateTime                    @default(now())
   updatedAt          DateTime                    @updatedAt
 
   @@index([projectId, parentId])
+  @@index([projectId, archivedAt])
 }
 
 model KnowledgeNodePrerequisite {
