@@ -173,39 +173,46 @@ API 映射：
 
 ### KnowledgeNode
 
-`KnowledgeNode` 是项目内知识点，对应 Skills API 的 `SkillItem`。
+`KnowledgeNode` 是项目内知识点，对应 Skills API 的 `SkillItem`。技能树真实属于 `StudyProject`，底层依赖结构是允许多个前置节点的 DAG；展示层级由 `parentId/order` 单独表达，不能替代业务依赖。
 
 关键字段：
 
 | 字段 | 说明 |
 | --- | --- |
 | `projectId` | 所属项目 |
-| `parentId` | 父节点，可空，用于知识树 |
+| `parentId` | 展示父节点，可空，只用于树形布局 |
 | `title` | 知识点标题 |
 | `description` | 描述 |
-| `status` | 确认后的用户可见状态 |
+| `learningState` | 用户学习状态：`not_started`、`learning`、`mastered` |
+| `isUnlocked` | 解锁资格；由系统控制，一旦取得不自动收回 |
+| `unlockedAt` | 取得解锁资格的时间 |
+| `archivedAt` | 非空表示节点已归档下线，默认 tree 查询不返回 |
 | `selfMastery` | 用户自评信号 |
 | `systemMastery` | 系统判断信号 |
 | `confidence` | 系统判断置信度 |
 | `mastery` | 确认后的对外掌握度 |
 | `order` | 排序 |
 
-用户确认优先：
+状态与解锁规则：
 
-- AI 可以提出状态和掌握度建议。
-- AI 建议不直接覆盖 `status` 或 `mastery`。
-- 只有用户接受或修改后，service 才能更新正式状态。
-- `selfMastery`、`systemMastery`、`confidence` 只是信号，不是权威状态。
+- `learningState` 和 `isUnlocked` 是两个独立事实。
+- `PATCH /api/skills/:id` 只允许改 `learningState`。
+- 当一个节点实际变成 `mastered` 后，后端检查它的直接后续节点；若某个后续节点的所有直接前置都已 `mastered`，则写入 `isUnlocked=true` 和 `unlockedAt`。
+- 上游节点从 `mastered` 回退成 `learning` 时，不回收后续节点的 `isUnlocked`。
+- 前置风险不持久化到表中，由 `GET /api/skills/tree` 根据当前可见 DAG 实时派生。
+- `selfMastery`、`systemMastery`、`confidence` 只是信号，不是当前 Skills PATCH 的权威状态。
 
 ### KnowledgeNodePrerequisite
 
-`KnowledgeNodePrerequisite` 表示知识点前置依赖。
+`KnowledgeNodePrerequisite` 表示知识点前置依赖。`nodeId` 是被依赖约束的节点，`prerequisiteId` 是它的直接前置节点。
 
 约束：
 
 - `@@id([nodeId, prerequisiteId])` 防止重复依赖。
 - service 必须禁止自依赖。
 - service 必须确保依赖双方属于同一项目。
+- `GET /api/skills/tree` 会对本次可见依赖图做环检测；发现环时返回 409，避免整链风险检查无法可靠结束。
+- 归档节点是否参与依赖返回和风险计算，取决于 tree 查询的 `includeArchived` 参数。
 
 ## 测验与错题
 
@@ -241,7 +248,7 @@ API 映射：
 
 - 每道题写入 `QuizAttempt`。
 - 答错题可创建或更新 `WrongbookItem`。
-- 当前实现不会自动修改 `KnowledgeNode.mastery` 或 `status`。
+- 当前实现不会自动修改 `KnowledgeNode.mastery` 或 `learningState`。
 
 ### WrongbookItem
 
@@ -311,7 +318,14 @@ API 映射：
 | `PlanItem.materialIds` | `ProjectMaterial` |
 | `PlanTask` | `StudyTask` |
 | `SkillItem` | `KnowledgeNode` |
+| `SkillItem.learningState` | `KnowledgeNode.learningState` |
+| `SkillItem.isUnlocked` | `KnowledgeNode.isUnlocked` |
+| `SkillItem.unlockedAt` | `KnowledgeNode.unlockedAt` |
+| `SkillItem.archivedAt` | `KnowledgeNode.archivedAt` |
 | `SkillItem.prerequisites` | `KnowledgeNodePrerequisite` |
+| `SkillTreeResponse.dependencyEdges` | `KnowledgeNodePrerequisite` |
+| `SkillTreeItem.prerequisiteRisk` | 由可见依赖图实时派生，不落库 |
+| `SkillTreeItem.riskPrerequisiteIds` | 由可见依赖图实时派生，不落库 |
 | `QuizItem` | `Quiz` |
 | `QuizQuestion` | `QuizQuestion` + `QuizOption` |
 | `SubmitQuizInput` | `QuizAttempt` |
@@ -330,6 +344,10 @@ Prisma 可以保证基础外键，但以下业务规则必须由 service 或 rep
 - `Material.folderId` 为字符串时，文件夹必须存在且属于当前用户。
 - `ProjectMaterial.projectId` 对应项目的 `userId` 必须与 `Material.userId` 一致。
 - `StudyTask.knowledgeNodeId` 如果存在，节点必须属于同一项目。
+- `KnowledgeNode.parentId` 只用于展示布局，不能代替 `KnowledgeNodePrerequisite` 业务依赖。
+- `KnowledgeNodePrerequisite` 两端必须属于同一项目，且不能自依赖。
+- `PATCH /api/skills/:id` 只能修改 `learningState`，不能由客户端直接修改解锁、布局、依赖或风险字段。
+- `GET /api/skills/tree` 必须在本次可见依赖图上检测环，发现环时拒绝返回 tree。
 - `Quiz.studyTaskId` 如果存在，任务必须属于同一项目并能确定知识点。
 - `WrongbookItem` 的项目、知识点、题目、答题记录如果同时存在，必须指向同一学习链路。
 - 上传文件的删除路径只能来自数据库记录，且必须限制在 `uploads/materials/`。

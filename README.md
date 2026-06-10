@@ -28,6 +28,10 @@ Frontend / static
 - 删除上传资料时先删磁盘文件，再删数据库记录。
 - 删除文本或链接资料时只删数据库记录。
 - AI 聊天接口由 Express 转发到 FastAPI AI Engine。
+- 技能树已接 SQLite：节点、DAG 前置依赖、学习状态、解锁资格和归档字段都持久化。
+- `GET /api/skills/tree` 返回项目内稳定技能结构、依赖边、学习状态、解锁状态和前置风险。
+- `PATCH /api/skills/:id` 已收窄为学习状态修改入口，后端负责自动解锁直接后续节点。
+- 已提供二次函数 demo 技能树 seed，可用于本地联调和规则验证。
 
 仍未完成或后续继续做：
 
@@ -35,6 +39,7 @@ Frontend / static
 - 文件解析、OCR、RAG、向量数据库。
 - 上传文件的静态访问或下载接口。
 - 真实学习计划、测验、每日总结的 AI 生成闭环。
+- 技能节点删除策略还未切换为“有历史学习记录则归档”；数据模型已有 `archivedAt`，tree 查询默认隐藏归档节点。
 - 完整自动化测试套件。
 
 ## 安装依赖
@@ -162,6 +167,24 @@ http://127.0.0.1:8000
 
 Express 会通过 `AI_ENGINE_BASE_URL` 调用 AI Engine 的 `/chat`。
 
+## 初始化技能树 Seed
+
+本地联调技能树前，先确保 Prisma migration 已应用并生成 client：
+
+```powershell
+npx.cmd prisma validate
+npx.cmd prisma generate
+npx.cmd prisma migrate dev
+```
+
+写入可测试的 demo 技能树：
+
+```powershell
+npm.cmd run seed:skills
+```
+
+seed 会在 `demo-project` 下写入 10 个“高中数学二次函数”技能节点和 12 条前置依赖边。它体现“展示为树、依赖为 DAG”的结构：`parentId/order` 只负责展示布局，真实业务依赖来自 `KnowledgeNodePrerequisite`。
+
 ## 主要接口
 
 统一响应格式：
@@ -189,6 +212,21 @@ Express 会通过 `AI_ENGINE_BASE_URL` 调用 AI Engine 的 `/chat`。
 | Quiz | `GET /api/quiz`, `POST /api/quiz`, `POST /api/quiz/:id/submit`, `DELETE /api/quiz/:id` |
 | Wrongbook | `GET /api/wrongbook`, `POST /api/wrongbook`, `PATCH /api/wrongbook/:id`, `DELETE /api/wrongbook/:id` |
 | Memory | `GET /api/memory`, `POST /api/memory`, `POST /api/memory/daily-summary` |
+
+技能树对接重点：
+
+```text
+GET /api/skills/tree?projectId=demo-project
+GET /api/skills/tree?projectId=demo-project&includeArchived=true
+PATCH /api/skills/:id?projectId=demo-project
+```
+
+- `GET /api/skills/tree` 返回 `items` 和 `dependencyEdges`。`items` 是展示树，`dependencyEdges` 是真实 DAG 依赖边。
+- `PATCH /api/skills/:id` 请求体只允许 `{ "learningState": "not_started" | "learning" | "mastered" }`。
+- 客户端不能直接修改 `isUnlocked`、`prerequisites`、`parentId`、`prerequisiteRisk` 或 `riskPrerequisiteIds`。
+- 节点变成 `mastered` 后，后端会在同一业务操作中自动解锁满足条件的直接后续节点。
+- 上游从 `mastered` 回退成 `learning` 后，后续节点不会重新锁定；`GET tree` 会通过 `prerequisiteRisk` 和 `riskPrerequisiteIds` 提示风险。
+- 详细契约见 `docs/API_CONTRACT.md`，技能树专项说明见 `docs/SKILL_TREE.md`。
 
 资料列表支持：
 
