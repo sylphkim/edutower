@@ -244,19 +244,108 @@ function buildTree(items: SkillTreeItem[]): SkillTreeItem[] {
   return roots;
 }
 
+function buildVisiblePrerequisiteMap(
+  items: KnowledgeNodeWithPrerequisites[],
+  visibleItemMap: Map<string, KnowledgeNodeWithPrerequisites>
+): Map<string, string[]> {
+  return new Map(
+    items.map((item) => [
+      item.id,
+      item.prerequisiteLinks
+        .map((link) => link.prerequisiteId)
+        .filter((prerequisiteId) => visibleItemMap.has(prerequisiteId))
+        .sort((left, right) => left.localeCompare(right))
+    ])
+  );
+}
+
+function assertAcyclicDependencyGraph(
+  prerequisiteMap: Map<string, string[]>
+): void {
+  const visitState = new Map<string, "visiting" | "visited">();
+
+  const visit = (id: string): void => {
+    const currentState = visitState.get(id);
+
+    if (currentState === "visiting") {
+      throw new AppError(
+        "INVALID_REQUEST",
+        "Skill dependency graph contains a cycle.",
+        409
+      );
+    }
+
+    if (currentState === "visited") {
+      return;
+    }
+
+    visitState.set(id, "visiting");
+    for (const prerequisiteId of prerequisiteMap.get(id) ?? []) {
+      visit(prerequisiteId);
+    }
+    visitState.set(id, "visited");
+  };
+
+  for (const id of prerequisiteMap.keys()) {
+    visit(id);
+  }
+}
+
+function buildPrerequisiteRiskMap(
+  items: KnowledgeNodeWithPrerequisites[],
+  visibleItemMap: Map<string, KnowledgeNodeWithPrerequisites>,
+  prerequisiteMap: Map<string, string[]>
+): Map<string, string[]> {
+  const riskMemo = new Map<string, string[]>();
+
+  const collectRiskPrerequisiteIds = (id: string): string[] => {
+    const memoizedRiskIds = riskMemo.get(id);
+
+    if (memoizedRiskIds) {
+      return memoizedRiskIds;
+    }
+
+    const riskPrerequisiteIds = new Set<string>();
+
+    for (const prerequisiteId of prerequisiteMap.get(id) ?? []) {
+      const prerequisite = visibleItemMap.get(prerequisiteId);
+
+      if (!prerequisite) {
+        continue;
+      }
+
+      if (prerequisite.learningState !== "mastered") {
+        riskPrerequisiteIds.add(prerequisiteId);
+      }
+
+      for (const upstreamRiskId of collectRiskPrerequisiteIds(prerequisiteId)) {
+        riskPrerequisiteIds.add(upstreamRiskId);
+      }
+    }
+
+    const sortedRiskPrerequisiteIds = [...riskPrerequisiteIds].sort((left, right) =>
+      left.localeCompare(right)
+    );
+    riskMemo.set(id, sortedRiskPrerequisiteIds);
+
+    return sortedRiskPrerequisiteIds;
+  };
+
+  return new Map(
+    items.map((item) => [
+      item.id,
+      item.isUnlocked ? collectRiskPrerequisiteIds(item.id) : []
+    ])
+  );
+}
+
 function toTreeSkill(
   item: KnowledgeNodeWithPrerequisites,
-  visibleItemMap: Map<string, KnowledgeNodeWithPrerequisites>
+  prerequisiteMap: Map<string, string[]>,
+  riskMap: Map<string, string[]>
 ): SkillTreeItem {
-  const visiblePrerequisiteIds = item.prerequisiteLinks
-    .map((link) => link.prerequisiteId)
-    .filter((prerequisiteId) => visibleItemMap.has(prerequisiteId))
-    .sort((left, right) => left.localeCompare(right));
-  const riskPrerequisiteIds = item.isUnlocked
-    ? visiblePrerequisiteIds.filter(
-        (prerequisiteId) => visibleItemMap.get(prerequisiteId)?.learningState !== "mastered"
-      )
-    : [];
+  const visiblePrerequisiteIds = prerequisiteMap.get(item.id) ?? [];
+  const riskPrerequisiteIds = riskMap.get(item.id) ?? [];
 
   return {
     ...toApiSkill(item),
@@ -320,7 +409,10 @@ export const skillsService = {
       Boolean(options.includeArchived)
     );
     const visibleItemMap = new Map(items.map((item) => [item.id, item]));
-    const treeItems = items.map((item) => toTreeSkill(item, visibleItemMap));
+    const prerequisiteMap = buildVisiblePrerequisiteMap(items, visibleItemMap);
+    assertAcyclicDependencyGraph(prerequisiteMap);
+    const riskMap = buildPrerequisiteRiskMap(items, visibleItemMap, prerequisiteMap);
+    const treeItems = items.map((item) => toTreeSkill(item, prerequisiteMap, riskMap));
 
     return {
       items: buildTree(treeItems),
