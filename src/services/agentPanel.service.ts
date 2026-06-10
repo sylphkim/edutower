@@ -56,7 +56,7 @@ async function countReviewedWrongbookItems(): Promise<number> {
 
 export const agentPanelService = {
   async buildPanel({ sessionId }: BuildAgentPanelParams): Promise<AgentPanelPayload> {
-    const context = chatContextService.buildContext({ sessionId });
+    const context = await chatContextService.buildContext({ sessionId });
     const { subject, topic } = parseSubjectLine(context.subject.name);
     const primaryWeakPoint = context.weakPoints[0];
     const agent = buildAgentSteps(topic, primaryWeakPoint?.title);

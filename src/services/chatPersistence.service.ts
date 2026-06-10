@@ -2,7 +2,7 @@ export interface SaveChatExchangeParams{
     sessionId: string;
     projectId?: string;
     userMessage: string;
-    aireply: string;
+    aiReply: string;
     engine: string;
 }
 
