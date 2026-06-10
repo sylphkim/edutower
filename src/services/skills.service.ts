@@ -362,35 +362,23 @@ export const skillsService = {
   ): Promise<SkillItem> {
     const updateInput = ensureValidLearningStateUpdateInput(input);
     const projectId = await resolveProjectId(options.projectId);
-    const currentItem = ensureSkillExists(
-      await knowledgeNodesRepository.findByIdForProject(id, projectId)
-    );
+    const result =
+      await knowledgeNodesRepository.updateLearningStateAndUnlockDirectDependentsByIdForProject(
+        id,
+        projectId,
+        toKnowledgeNodeLearningState(updateInput.learningState)
+      );
 
-    if (currentItem.archivedAt) {
-      throw new AppError("INVALID_REQUEST", "Archived skill cannot be updated.", 409);
+    switch (result.status) {
+      case "success":
+        return toApiSkill(result.item);
+      case "not_found":
+        throw new AppError("INVALID_REQUEST", "Skill item not found.", 404);
+      case "archived":
+        throw new AppError("INVALID_REQUEST", "Archived skill cannot be updated.", 409);
+      case "locked":
+        throw new AppError("INVALID_REQUEST", "Locked skill cannot change learningState.", 409);
     }
-
-    const currentLearningState = currentItem.learningState as SkillLearningState;
-
-    if (!currentItem.isUnlocked) {
-      if (updateInput.learningState === currentLearningState) {
-        return toApiSkill(currentItem);
-      }
-
-      throw new AppError("INVALID_REQUEST", "Locked skill cannot change learningState.", 409);
-    }
-
-    if (updateInput.learningState === currentLearningState) {
-      return toApiSkill(currentItem);
-    }
-
-    const updatedItem = await knowledgeNodesRepository.updateLearningStateByIdForProject(
-      id,
-      projectId,
-      toKnowledgeNodeLearningState(updateInput.learningState)
-    );
-
-    return toApiSkill(updatedItem);
   },
 
   async remove(id: string): Promise<SkillItem> {

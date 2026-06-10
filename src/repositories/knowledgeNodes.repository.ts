@@ -37,6 +37,15 @@ export type KnowledgeNodeWithPrerequisites = KnowledgeNodeGetPayload<{
   include: typeof nodeInclude;
 }>;
 
+export type UpdateLearningStateAndUnlockDependentsResult =
+  | {
+      status: "success";
+      item: KnowledgeNodeWithPrerequisites;
+    }
+  | {
+      status: "not_found" | "archived" | "locked";
+    };
+
 export const knowledgeNodesRepository = {
   listByProject(projectId: string): Promise<KnowledgeNodeWithPrerequisites[]> {
     return prisma.knowledgeNode.findMany({
@@ -196,22 +205,125 @@ export const knowledgeNodesRepository = {
     return this.findByIdForProject(id, projectId) as Promise<KnowledgeNodeWithPrerequisites>;
   },
 
-  async updateLearningStateByIdForProject(
+  async updateLearningStateAndUnlockDirectDependentsByIdForProject(
     id: string,
     projectId: string,
     learningState: KnowledgeNodeLearningState
-  ): Promise<KnowledgeNodeWithPrerequisites> {
-    await prisma.knowledgeNode.update({
-      where: {
-        id,
-        projectId
-      },
-      data: {
-        learningState
-      }
-    });
+  ): Promise<UpdateLearningStateAndUnlockDependentsResult> {
+    return prisma.$transaction(async (tx) => {
+      const currentItem = await tx.knowledgeNode.findFirst({
+        where: {
+          id,
+          projectId
+        },
+        include: nodeInclude
+      });
 
-    return this.findByIdForProject(id, projectId) as Promise<KnowledgeNodeWithPrerequisites>;
+      if (!currentItem) {
+        return {
+          status: "not_found"
+        };
+      }
+
+      if (currentItem.archivedAt) {
+        return {
+          status: "archived"
+        };
+      }
+
+      if (!currentItem.isUnlocked) {
+        if (currentItem.learningState === learningState) {
+          return {
+            status: "success",
+            item: currentItem
+          };
+        }
+
+        return {
+          status: "locked"
+        };
+      }
+
+      if (currentItem.learningState === learningState) {
+        return {
+          status: "success",
+          item: currentItem
+        };
+      }
+
+      await tx.knowledgeNode.update({
+        where: {
+          id,
+          projectId
+        },
+        data: {
+          learningState
+        }
+      });
+
+      if (learningState === "mastered" && currentItem.learningState !== "mastered") {
+        const directDependents = await tx.knowledgeNode.findMany({
+          where: {
+            projectId,
+            archivedAt: null,
+            isUnlocked: false,
+            prerequisiteLinks: {
+              some: {
+                prerequisiteId: id
+              }
+            }
+          },
+          include: {
+            prerequisiteLinks: {
+              include: {
+                prerequisite: {
+                  select: {
+                    learningState: true
+                  }
+                }
+              }
+            }
+          }
+        });
+        const unlockableDependentIds = directDependents
+          .filter((dependent) =>
+            dependent.prerequisiteLinks.every(
+              (link) => link.prerequisite.learningState === "mastered"
+            )
+          )
+          .map((dependent) => dependent.id);
+
+        if (unlockableDependentIds.length > 0) {
+          await tx.knowledgeNode.updateMany({
+            where: {
+              id: {
+                in: unlockableDependentIds
+              },
+              projectId,
+              archivedAt: null,
+              isUnlocked: false
+            },
+            data: {
+              isUnlocked: true,
+              unlockedAt: new Date()
+            }
+          });
+        }
+      }
+
+      const updatedItem = await tx.knowledgeNode.findFirst({
+        where: {
+          id,
+          projectId
+        },
+        include: nodeInclude
+      });
+
+      return {
+        status: "success",
+        item: updatedItem as KnowledgeNodeWithPrerequisites
+      };
+    });
   },
 
   deleteByIdForProject(id: string, projectId: string): Promise<KnowledgeNode> {
