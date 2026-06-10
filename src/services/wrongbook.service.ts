@@ -21,6 +21,10 @@ import type {
 } from "../types/wrongbook";
 import { AppError } from "../utils/errors";
 import { getDemoUserId } from "./demoUser.service";
+import {
+  loadWrongbookCustomTaxonomy,
+  saveWrongbookCustomTaxonomy
+} from "./wrongbookTaxonomy.store";
 
 type RuntimeQuestion = Partial<QuizQuestion> & {
   prompt?: string;
@@ -39,6 +43,40 @@ const customSubjects: WrongbookTaxonomyEntry[] = [];
 const customCategories: WrongbookTaxonomyEntry[] = [];
 let nextCustomSubjectNumber = 1;
 let nextCustomCategoryNumber = 1;
+let taxonomyHydrated = false;
+
+async function ensureCustomTaxonomyLoaded(): Promise<void> {
+  if (taxonomyHydrated) {
+    return;
+  }
+
+  const stored = await loadWrongbookCustomTaxonomy();
+  customSubjects.push(...stored.subjects);
+  customCategories.push(...stored.categories);
+
+  stored.subjects.forEach((entry) => {
+    const match = entry.id.match(/^subject-custom-(\d+)$/);
+    if (match) {
+      nextCustomSubjectNumber = Math.max(nextCustomSubjectNumber, Number(match[1]) + 1);
+    }
+  });
+
+  stored.categories.forEach((entry) => {
+    const match = entry.id.match(/^category-custom-(\d+)$/);
+    if (match) {
+      nextCustomCategoryNumber = Math.max(nextCustomCategoryNumber, Number(match[1]) + 1);
+    }
+  });
+
+  taxonomyHydrated = true;
+}
+
+async function persistCustomTaxonomy(): Promise<void> {
+  await saveWrongbookCustomTaxonomy({
+    subjects: customSubjects,
+    categories: customCategories
+  });
+}
 
 function allSubjects(): WrongbookTaxonomyEntry[] {
   return [...BUILTIN_WRONGBOOK_SUBJECTS, ...customSubjects];
@@ -289,6 +327,7 @@ function toApiWrongbookItem(item: PrismaWrongbookItem): WrongbookItem {
 
 export const wrongbookService = {
   async list(): Promise<WrongbookListPayload> {
+    await ensureCustomTaxonomyLoaded();
     const userId = await getDemoUserId();
     const items = await wrongbookRepository.listActiveByUser(userId);
 
@@ -306,7 +345,8 @@ export const wrongbookService = {
     return toApiWrongbookItem(item);
   },
 
-  createSubject(input: CreateWrongbookTaxonomyInput): WrongbookTaxonomyEntry {
+  async createSubject(input: CreateWrongbookTaxonomyInput): Promise<WrongbookTaxonomyEntry> {
+    await ensureCustomTaxonomyLoaded();
     const label = readTaxonomyLabel(input.label);
     ensureUniqueSubjectLabel(label);
 
@@ -318,10 +358,12 @@ export const wrongbookService = {
     };
 
     customSubjects.push(entry);
+    await persistCustomTaxonomy();
     return entry;
   },
 
-  createCategory(input: CreateWrongbookTaxonomyInput): WrongbookTaxonomyEntry {
+  async createCategory(input: CreateWrongbookTaxonomyInput): Promise<WrongbookTaxonomyEntry> {
+    await ensureCustomTaxonomyLoaded();
     const label = readTaxonomyLabel(input.label);
     ensureUniqueCategoryLabel(label);
 
@@ -332,10 +374,12 @@ export const wrongbookService = {
     };
 
     customCategories.push(entry);
+    await persistCustomTaxonomy();
     return entry;
   },
 
   async removeSubject(id: string): Promise<DeleteWrongbookTaxonomyResult> {
+    await ensureCustomTaxonomyLoaded();
     const index = customSubjects.findIndex((entry) => entry.id === id);
 
     if (index === -1) {
@@ -353,11 +397,13 @@ export const wrongbookService = {
       "uncategorized"
     );
     const [removed] = customSubjects.splice(index, 1);
+    await persistCustomTaxonomy();
 
     return { removed, reassignedItemCount };
   },
 
   async removeCategory(id: string): Promise<DeleteWrongbookTaxonomyResult> {
+    await ensureCustomTaxonomyLoaded();
     const index = customCategories.findIndex((entry) => entry.id === id);
 
     if (index === -1) {
@@ -375,11 +421,13 @@ export const wrongbookService = {
       "uncategorized"
     );
     const [removed] = customCategories.splice(index, 1);
+    await persistCustomTaxonomy();
 
     return { removed, reassignedItemCount };
   },
 
   async create(input: CreateWrongbookInput): Promise<WrongbookItem> {
+    await ensureCustomTaxonomyLoaded();
     ensureValidCreateInput(input);
 
     const userId = await getDemoUserId();
@@ -401,6 +449,7 @@ export const wrongbookService = {
   },
 
   async update(id: string, input: UpdateWrongbookInput): Promise<WrongbookItem> {
+    await ensureCustomTaxonomyLoaded();
     ensureValidUpdateInput(input);
 
     const userId = await getDemoUserId();

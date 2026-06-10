@@ -327,6 +327,174 @@
           <div class="module-body" id="memoryRoot"></div>
         </section>
 
+        <!-- 帮助 -->
+        <section class="module-zone view-panel is-hidden" id="view-help" data-view="help" aria-hidden="true">
+          <header class="module-header">
+            <div class="module-header__titles">
+              <h1 class="module-header__title">使用帮助</h1>
+              <p class="module-header__subtitle">快速了解 EduTower 各模块的用法</p>
+            </div>
+            <button type="button" class="btn btn--ghost btn--compact" data-go-view="home">返回首页</button>
+          </header>
+          <div class="module-body">
+            <article class="info-page">
+              <section class="info-page__section">
+                <h2>开始之前</h2>
+                <p>在登录页输入称呼即可进入（无需密码）。称呼保存在本机浏览器，用于首页问候与本地聊天记录分组。</p>
+                <p>请通过 <strong>http://localhost:3000</strong> 访问（先运行 <code>npm run dev</code>），不要直接双击 HTML 文件，否则样式与接口可能异常。</p>
+              </section>
+              <section class="info-page__section">
+                <h2>资料录入</h2>
+                <ul>
+                  <li>支持文本笔记、网页链接，以及 PDF / Word / 图片上传（单文件最大 20 MB）。</li>
+                  <li>可用文件夹分类管理；上传文件支持在列表中下载。</li>
+                  <li>资料会写入本地数据库，供后续学习计划关联使用。</li>
+                </ul>
+              </section>
+              <section class="info-page__section">
+                <h2>学习计划与练习</h2>
+                <ul>
+                  <li>在「学习计划」中创建计划，通过「管理任务」安排每日任务。</li>
+                  <li>练习类任务请关联「技能」，才能在「练习测验」的「按计划任务」下拉框中选用。</li>
+                  <li>生成练习后答题提交，错题会自动进入错题本。</li>
+                </ul>
+              </section>
+              <section class="info-page__section">
+                <h2>AI 智能复习</h2>
+                <ul>
+                  <li>在对话区输入问题，Enter 发送，Shift+Enter 换行。</li>
+                  <li>右侧 Agent 面板展示复习进度与今日清单；可从学习计划导入清单项。</li>
+                  <li>历史对话保存在浏览器本地；配置 LLM 密钥后可获得完整 AI 回复。</li>
+                </ul>
+              </section>
+              <section class="info-page__section">
+                <h2>常见问题</h2>
+                <dl class="info-page__faq">
+                  <dt>练习页没有计划任务可选？</dt>
+                  <dd>请先在学习计划中为「练习测验」或「掌握技能」类任务关联技能并保存。</dd>
+                  <dt>AI 回复异常或提示未配置密钥？</dt>
+                  <dd>在项目根目录 <code>.env</code> 中配置 <code>LLM_API_KEY</code>，并确保 FastAPI AI Engine 已启动（可选）。</dd>
+                  <dt>自定义错题分类丢失？</dt>
+                  <dd>自定义分类会保存到服务器 <code>data/wrongbook-taxonomy.json</code>，请确认后端有写入权限。</dd>
+                </dl>
+              </section>
+            </article>
+          </div>
+        </section>
+
+        <!-- 关于 -->
+        <section class="module-zone view-panel is-hidden" id="view-about" data-view="about" aria-hidden="true">
+          <header class="module-header">
+            <div class="module-header__titles">
+              <h1 class="module-header__title">关于 EduTower</h1>
+              <p class="module-header__subtitle">学以立塔，志以行远</p>
+            </div>
+            <button type="button" class="btn btn--ghost btn--compact" data-go-view="home">返回首页</button>
+          </header>
+          <div class="module-body">
+            <article class="info-page">
+              <section class="info-page__section">
+                <h2>产品简介</h2>
+                <p>EduTower 是一款面向学生的 AI 学习助手，将资料管理、学习计划、技能图谱、练习测验、错题本与智能对话整合在同一工作台，帮助你有条理地复习、练习与复盘。</p>
+              </section>
+              <section class="info-page__section">
+                <h2>核心能力</h2>
+                <ul>
+                  <li>学习资料录入与文件夹管理</li>
+                  <li>可编排的学习计划与日任务</li>
+                  <li>技能树与知识图谱可视化</li>
+                  <li>练习生成、自动判分与错题收录</li>
+                  <li>AI 助教对话与复习进度面板</li>
+                  <li>学习记忆与偏好记录</li>
+                </ul>
+              </section>
+              <section class="info-page__section">
+                <h2>技术架构</h2>
+                <p>前端为静态页面 + 原生 JavaScript；后端为 Express + TypeScript + Prisma（SQLite）；AI 能力由 FastAPI Agent 或本地 LLM 接口提供。</p>
+                <p class="info-page__meta">版本：0.1.0 · 更新：2026 年</p>
+              </section>
+            </article>
+          </div>
+        </section>
+
+        <!-- 隐私政策 -->
+        <section class="module-zone view-panel is-hidden" id="view-privacy" data-view="privacy" aria-hidden="true">
+          <header class="module-header">
+            <div class="module-header__titles">
+              <h1 class="module-header__title">隐私说明</h1>
+              <p class="module-header__subtitle">我们如何处理你的学习数据</p>
+            </div>
+            <button type="button" class="btn btn--ghost btn--compact" data-go-view="home">返回首页</button>
+          </header>
+          <div class="module-body">
+            <article class="info-page">
+              <section class="info-page__section">
+                <h2>数据存储位置</h2>
+                <ul>
+                  <li><strong>服务器本地</strong>：学习资料、计划、技能、练习、错题等业务数据存放在本机 SQLite 数据库（<code>dev.db</code>）与 <code>uploads/</code> 目录。</li>
+                  <li><strong>浏览器本地</strong>：登录称呼、AI 聊天历史、部分 Agent 清单项使用 <code>localStorage</code> / <code>sessionStorage</code>，不会自动同步到其他设备。</li>
+                </ul>
+              </section>
+              <section class="info-page__section">
+                <h2>账号与身份</h2>
+                <p>当前为演示模式：后端使用固定的 Demo 用户，无密码登录。页脚称呼仅用于界面展示，不与服务器账号绑定。</p>
+              </section>
+              <section class="info-page__section">
+                <h2>AI 与第三方服务</h2>
+                <p>向 AI 助教发送的消息会转发至你配置的 LLM 服务（如 DeepSeek、OpenAI 兼容接口）。请勿在对话中输入身份证号、银行卡等敏感个人信息。</p>
+                <p>AI 回复为模型生成内容，不代表平台立场，详见「服务条款」中的免责声明。</p>
+              </section>
+              <section class="info-page__section">
+                <h2>你的控制权</h2>
+                <ul>
+                  <li>可在资料库、错题本、学习计划等模块中删除你创建的内容。</li>
+                  <li>清除浏览器站点数据将删除本地聊天历史与称呼，但不影响服务器上的学习记录。</li>
+                  <li>卸载或删除项目目录将移除全部本地数据库与上传文件。</li>
+                </ul>
+              </section>
+            </article>
+          </div>
+        </section>
+
+        <!-- 服务条款 -->
+        <section class="module-zone view-panel is-hidden" id="view-terms" data-view="terms" aria-hidden="true">
+          <header class="module-header">
+            <div class="module-header__titles">
+              <h1 class="module-header__title">服务条款</h1>
+              <p class="module-header__subtitle">使用 EduTower 前请知悉</p>
+            </div>
+            <button type="button" class="btn btn--ghost btn--compact" data-go-view="home">返回首页</button>
+          </header>
+          <div class="module-body">
+            <article class="info-page">
+              <section class="info-page__section">
+                <h2>接受条款</h2>
+                <p>使用 EduTower 即表示你理解本产品主要用于个人学习辅助。若你不同意下列条款，请停止使用。</p>
+              </section>
+              <section class="info-page__section">
+                <h2>教育用途与内容准确性</h2>
+                <ul>
+                  <li>平台内容（含 AI 生成）仅供学习参考，不构成专业教学、升学或医疗建议。</li>
+                  <li>重要考试与作业请以教材、教师讲解及官方资料为准，自行核对 AI 输出。</li>
+                  <li>练习题目可能由规则或模型生成，不保证与真实考题一致。</li>
+                </ul>
+              </section>
+              <section class="info-page__section">
+                <h2>用户责任</h2>
+                <ul>
+                  <li>你对上传的资料、输入的对话内容及学习计划负责，不得上传违法或侵权内容。</li>
+                  <li>请妥善保管本机环境与 API 密钥，避免未授权访问你的本地服务端口。</li>
+                </ul>
+              </section>
+              <section class="info-page__section">
+                <h2>服务变更与免责</h2>
+                <p>在本地部署场景下，功能可能随版本迭代调整；因网络、模型服务、磁盘故障等导致的资料丢失或服务中断，请在重要数据上做好自行备份。</p>
+                <p class="info-page__meta">如有疑问，可通过项目仓库 Issue 反馈。</p>
+              </section>
+            </article>
+          </div>
+        </section>
+
         <!-- 资料录入区 70% -->
         <section class="materials-zone view-panel is-hidden" id="view-materials" data-view="materials" aria-hidden="true">
           <header class="chat-header">
@@ -621,13 +789,13 @@
       <footer class="app-footer">
         <span>© 2026 EduTower. 学以立塔，志以行远。</span>
         <nav class="footer-links" aria-label="页脚链接">
-          <a href="#">帮助</a>
+          <a href="#help" data-footer-view="help">帮助</a>
           <span class="footer-divider">|</span>
-          <a href="#">关于</a>
+          <a href="#about" data-footer-view="about">关于</a>
           <span class="footer-divider">|</span>
-          <a href="#">隐私</a>
+          <a href="#privacy" data-footer-view="privacy">隐私</a>
           <span class="footer-divider">|</span>
-          <a href="#">条款</a>
+          <a href="#terms" data-footer-view="terms">条款</a>
         </nav>
       </footer>
     </main>

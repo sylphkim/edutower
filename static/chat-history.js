@@ -1,5 +1,6 @@
 /**
- * EduTower — AI 复习历史对话（前端本地存储，按主题分组展示）
+ * EduTower — AI 复习历史对话（浏览器本地存储，按主题分组展示）
+ * 注：后端 Conversation API 尚未接入，会话数据保存在本机 localStorage。
  */
 (function () {
   "use strict";
@@ -33,7 +34,7 @@
     drawerEl.innerHTML =
       '<header class="chat-history-drawer__header">' +
       '<div><h2 class="chat-history-drawer__title">历史对话</h2>' +
-      '<p class="chat-history-drawer__subtitle">按复习主题查看过往会话</p></div>' +
+      '<p class="chat-history-drawer__subtitle">按复习主题查看过往会话（保存在本机浏览器）</p></div>' +
       '<button type="button" class="icon-btn chat-history-drawer__close" data-action="close-history" aria-label="关闭">' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 6L6 18M6 6l12 12"/></svg></button></header>' +
       '<div class="chat-history-drawer__toolbar">' +
@@ -84,6 +85,15 @@
       if (session) {
         window.EduTowerChat.loadSession(session);
         closeDrawer();
+      }
+      return;
+    }
+
+    if (target.matches("[data-action='delete-session']")) {
+      var deleteId = target.getAttribute("data-session-id");
+      if (deleteId && window.EduTowerChat && typeof window.EduTowerChat.deleteSession === "function") {
+        window.EduTowerChat.deleteSession(deleteId);
+        renderDrawer();
       }
     }
   }
@@ -138,9 +148,10 @@
     var activeClass = session.id === activeId ? " chat-history-item--active" : "";
 
     return (
-      '<button type="button" class="chat-history-item' +
+      '<div class="chat-history-item-wrap' +
       activeClass +
-      '" data-action="open-session" data-session-id="' +
+      '">' +
+      '<button type="button" class="chat-history-item" data-action="open-session" data-session-id="' +
       escapeAttr(session.id) +
       '">' +
       '<span class="chat-history-item__title">' +
@@ -153,7 +164,10 @@
       escapeHtml(formatWhen(session.updatedAt)) +
       " · " +
       ((session.messages && session.messages.length) || 0) +
-      " 条</span></button>"
+      " 条</span></button>" +
+      '<button type="button" class="chat-history-item__delete" data-action="delete-session" data-session-id="' +
+      escapeAttr(session.id) +
+      '" aria-label="删除此对话">×</button></div>'
     );
   }
 

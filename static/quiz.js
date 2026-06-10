@@ -56,9 +56,26 @@
 
     rootEl.addEventListener("change", function (event) {
       var target = event.target;
-      if (!(target instanceof HTMLInputElement)) return;
-      if (target.name !== "quiz-answer") return;
-      answers[target.getAttribute("data-question-id") || ""] = target.value;
+      if (!(target instanceof HTMLElement)) return;
+
+      if (target instanceof HTMLInputElement && target.name === "quiz-answer") {
+        answers[target.getAttribute("data-question-id") || ""] = target.value;
+        return;
+      }
+
+      if (target.id === "quizSkillTarget") {
+        var taskSelect = document.getElementById("quizTaskTarget");
+        if (taskSelect && target.value) {
+          taskSelect.value = "";
+        }
+      }
+
+      if (target.id === "quizTaskTarget" && target.value) {
+        var skillSelect = document.getElementById("quizSkillTarget");
+        if (skillSelect) {
+          skillSelect.value = "";
+        }
+      }
     });
   }
 
@@ -78,6 +95,12 @@
     }
   }
 
+  function isQuizRelevantTask(task) {
+    if (!task) return false;
+    if (task.skillId) return true;
+    return task.type === "practice_quiz" || task.type === "master_skill";
+  }
+
   async function loadTargetOptions() {
     try {
       var skillData = await api.get("/api/skills");
@@ -86,15 +109,52 @@
       skills = [];
     }
 
-    if (window.EduTowerPlan && typeof window.EduTowerPlan.getActivePlanTasks === "function") {
-      planTasks = window.EduTowerPlan
-        .getActivePlanTasks()
-        .filter(function (task) {
-          return task && task.skillId;
+    planTasks = [];
+
+    try {
+      var planData = await api.get("/api/plan");
+      var plans = planData && Array.isArray(planData.items) ? planData.items : [];
+      var active =
+        plans.find(function (p) {
+          return p.status === "active";
+        }) || plans[0];
+
+      if (active && active.days) {
+        active.days.forEach(function (day) {
+          (day.tasks || []).forEach(function (task) {
+            if (!isQuizRelevantTask(task)) return;
+            planTasks.push({
+              id: task.id,
+              title: task.title,
+              type: task.type,
+              skillId: task.skillId,
+              planTitle: active.title,
+              day: day.day,
+            });
+          });
         });
-    } else {
+      }
+    } catch (_err) {
       planTasks = [];
     }
+
+    if (
+      !planTasks.length &&
+      window.EduTowerPlan &&
+      typeof window.EduTowerPlan.getActivePlanTasks === "function"
+    ) {
+      planTasks = window.EduTowerPlan.getActivePlanTasks().filter(isQuizRelevantTask);
+    }
+  }
+
+  function taskTypeLabel(type) {
+    var map = {
+      read_material: "阅读",
+      practice_quiz: "练习",
+      review_wrongbook: "错题",
+      master_skill: "掌握",
+    };
+    return map[type] || type;
   }
 
   function renderBanner() {
@@ -121,44 +181,75 @@
       })
       .join("");
 
+    var quizReadyTasks = planTasks.filter(function (task) {
+      return task.skillId;
+    });
+
     var taskOptions = planTasks
       .map(function (task) {
+        var label =
+          (task.planTitle ? task.planTitle + " · " : "") +
+          "第" +
+          (task.day || "?") +
+          "天 · " +
+          taskTypeLabel(task.type) +
+          " · " +
+          task.title;
+        var disabled = !task.skillId;
+        var suffix = disabled ? "（需先在计划中关联技能）" : "";
+
         return (
           '<option value="' +
           api.escapeAttr(task.id) +
           '" data-skill-id="' +
-          api.escapeAttr(task.skillId) +
-          '">' +
-          api.escapeHtml(task.title) +
+          api.escapeAttr(task.skillId || "") +
+          '"' +
+          (disabled ? " disabled" : "") +
+          ">" +
+          api.escapeHtml(label + suffix) +
           "</option>"
         );
       })
       .join("");
 
-    var hasTarget = skills.length > 0 || planTasks.length > 0;
+    var hasTarget = skills.length > 0 || quizReadyTasks.length > 0;
+    var planHint =
+      planTasks.length && !quizReadyTasks.length
+        ? '<p class="quiz-create__hint">学习计划里已有任务，但尚未关联技能。请到「学习计划 → 管理任务」，在任务行选择「关联技能」后保存。</p>'
+        : planTasks.length
+          ? '<p class="quiz-create__hint">在「按计划任务」下拉框中选择练习/掌握类任务；与「按技能」二选一即可。</p>'
+          : '<p class="quiz-create__hint">暂无计划任务。可在「学习计划」中添加「练习测验」或「掌握技能」类任务并关联技能。</p>';
 
     return (
       '<section class="quiz-create">' +
       '<h3 class="module-subtitle">生成新练习</h3>' +
       '<div class="quiz-create__row">' +
+      '<label class="quiz-create__label" for="quizDifficulty">难度</label>' +
       '<select id="quizDifficulty" class="form-input form-input--compact">' +
       '<option value="pass">及格练（3 题）</option>' +
       '<option value="high_score">高分练（5 题）</option>' +
       "</select>" +
-      '<select id="quizSkillTarget" class="form-input form-input--compact">' +
-      '<option value="">按技能生成</option>' +
+      '<label class="quiz-create__label" for="quizSkillTarget">按技能</label>' +
+      '<select id="quizSkillTarget" class="form-input form-input--compact"' +
+      (skills.length ? "" : " disabled") +
+      ">" +
+      '<option value="">选择技能…</option>' +
       skillOptions +
       "</select>" +
-      '<select id="quizTaskTarget" class="form-input form-input--compact">' +
-      '<option value="">按计划任务生成</option>' +
+      '<label class="quiz-create__label" for="quizTaskTarget">按计划任务</label>' +
+      '<select id="quizTaskTarget" class="form-input form-input--compact"' +
+      (quizReadyTasks.length ? "" : " disabled") +
+      ">" +
+      '<option value="">选择计划任务…</option>' +
       taskOptions +
       "</select>" +
       '<button type="button" class="btn btn--primary btn--compact" data-action="create-quiz"' +
       (hasTarget ? "" : " disabled") +
       ">生成练习</button></div>" +
+      planHint +
       (hasTarget
         ? ""
-        : '<p class="module-empty">请先创建技能，或创建带技能的计划任务。</p>') +
+        : '<p class="module-empty">请先在「技能图谱」创建技能，或在学习计划任务中关联技能。</p>') +
       "</section>"
     );
   }
@@ -407,12 +498,18 @@
     };
 
     if (taskSelect && taskSelect.value) {
-      payload.studyTaskId = taskSelect.value;
       var taskOption = taskSelect.options[taskSelect.selectedIndex];
       var taskSkillId = taskOption ? taskOption.getAttribute("data-skill-id") : "";
-      if (taskSkillId) {
-        payload.skillId = taskSkillId;
+      if (!taskSkillId) {
+        banner = {
+          type: "error",
+          message: "该计划任务尚未关联技能，请先在「学习计划 → 管理任务」中为任务选择技能。",
+        };
+        renderList();
+        return;
       }
+      payload.studyTaskId = taskSelect.value;
+      payload.skillId = taskSkillId;
     } else if (skillSelect && skillSelect.value) {
       payload.skillId = skillSelect.value;
     } else {
