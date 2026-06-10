@@ -20,7 +20,7 @@ export async function createWrongbookSubject(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = wrongbookService.createSubject(req.body);
+    const result = await wrongbookService.createSubject(req.body);
 
     sendSuccess(res, result, 201);
   } catch (error) {
@@ -34,7 +34,7 @@ export async function createWrongbookCategory(
   next: NextFunction
 ): Promise<void> {
   try {
-    const result = wrongbookService.createCategory(req.body);
+    const result = await wrongbookService.createCategory(req.body);
 
     sendSuccess(res, result, 201);
   } catch (error) {

@@ -1,4 +1,4 @@
-export type SkillStatus = "locked" | "available" | "in_progress" | "mastered";
+export type SkillLearningState = "not_started" | "learning" | "mastered";
 
 export interface SkillItem {
   id: string;
@@ -6,35 +6,42 @@ export interface SkillItem {
   description?: string;
   parentId?: string;
   prerequisites: string[];
-  status: SkillStatus;
+  learningState: SkillLearningState;
+  isUnlocked: boolean;
+  unlockedAt?: string;
   mastery: number;
   order: number;
+  archivedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
 
-// 创建时不传 id 和时间，由 service 统一生成。
+export interface SkillDependencyEdge {
+  sourceId: string;
+  targetId: string;
+}
+
 export interface CreateSkillInput {
   title: string;
   description?: string;
   parentId?: string;
   prerequisites?: string[];
-  status?: SkillStatus;
+  learningState?: SkillLearningState;
   mastery?: number;
   order?: number;
 }
 
-// PATCH 只传需要修改的字段。
-export interface UpdateSkillInput {
-  title?: string;
-  description?: string;
-  parentId?: string | null;
-  prerequisites?: string[];
-  status?: SkillStatus;
-  mastery?: number;
-  order?: number;
+export interface UpdateSkillLearningStateInput {
+  learningState: SkillLearningState;
 }
 
 export interface SkillTreeItem extends SkillItem {
+  prerequisiteRisk: boolean;
+  riskPrerequisiteIds: string[];
   children: SkillTreeItem[];
+}
+
+export interface SkillTreeResponse {
+  items: SkillTreeItem[];
+  dependencyEdges: SkillDependencyEdge[];
 }

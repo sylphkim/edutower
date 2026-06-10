@@ -1250,6 +1250,67 @@ code {
   user-select: none;
 }
 
+/* Info sub-pages (help / about / privacy / terms) */
+.info-page {
+  max-width: 720px;
+  padding: 8px 4px 32px;
+}
+
+.info-page__section {
+  margin-bottom: 28px;
+}
+
+.info-page__section h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 10px;
+}
+
+.info-page__section p,
+.info-page__section li {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+
+.info-page__section ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.info-page__section li + li {
+  margin-top: 6px;
+}
+
+.info-page__section code {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--color-main-bg);
+  border: 1px solid var(--color-border);
+}
+
+.info-page__faq dt {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-top: 12px;
+}
+
+.info-page__faq dd {
+  margin: 6px 0 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--color-text-secondary);
+}
+
+.info-page__meta {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 12px;
+}
+
 /* ==========================================================================
    Responsive
    ========================================================================== */
@@ -2812,6 +2873,10 @@ body:has(.local-file-warning:not([hidden])) .app {
 
 .module-header {
   flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   padding: 28px 32px 16px;
   border-bottom: 1px solid var(--color-border);
   background: rgba(255, 255, 255, 0.9);
@@ -4087,6 +4152,19 @@ body:has(.local-file-warning:not([hidden])) .app {
   align-items: center;
 }
 
+.quiz-create__label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-right: -4px;
+}
+
+.quiz-create__hint {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+}
+
 .quiz-list {
   list-style: none;
   display: flex;
@@ -4312,6 +4390,145 @@ body:has(.local-file-warning:not([hidden])) .app {
 
 .memory-card__relations {
   flex: 1;
+}
+
+/* Plan task editor */
+.plan-days-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.plan-day-editor {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  background: #fff;
+}
+
+.plan-day-editor__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.plan-day-editor__label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.plan-day-editor__day-num {
+  width: 72px;
+}
+
+.plan-day-editor__day-title {
+  flex: 1;
+  min-width: 160px;
+}
+
+.plan-task-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-task-editor__row {
+  display: grid;
+  grid-template-columns: 1fr minmax(110px, 0.7fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.plan-task-editor__remove {
+  min-width: 36px;
+  padding: 6px 10px;
+}
+
+.form-row--inline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+/* Skills CRUD */
+.skills-toolbar__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.skills-form {
+  margin-bottom: 20px;
+}
+
+.skills-prereq-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-main-bg);
+}
+
+.skills-prereq-option {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.skill-node__prereq {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 4px 0 8px;
+}
+
+.skill-node__actions {
+  margin-top: 10px;
+}
+
+.checklist-item__toggle {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.chat-history-item-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.chat-history-item-wrap.chat-history-item--active .chat-history-item {
+  border-color: var(--color-accent-muted);
+  background: rgba(196, 149, 106, 0.06);
+}
+
+.chat-history-item-wrap .chat-history-item {
+  flex: 1;
+}
+
+.chat-history-item__delete {
+  flex-shrink: 0;
+  width: 36px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+  color: var(--color-text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-history-item__delete:hover {
+  color: #b33;
+  border-color: rgba(179, 51, 51, 0.35);
+  background: rgba(179, 51, 51, 0.06);
 }
 
 @media (max-width: 1100px) {

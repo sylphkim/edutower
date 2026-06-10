@@ -53,6 +53,7 @@ Frontend
 - `memory` 当前仍是内存 mock。
 - `chat context` 当前仍来自 `src/mock/demo*`。
 - Demo 用户和 Demo project 用于当前开发阶段。
+- Skills 已完成项目内 SQLite 技能树主链路：DAG 前置依赖、学习状态、解锁资格、自动解锁、回退风险提示和归档字段。
 
 模块分层职责：
 
@@ -85,6 +86,24 @@ Frontend
 -> 删除资料
 -> 文件和数据库记录都消失
 ```
+
+### Phase 5: 技能树状态闭环
+
+状态：Express 后端已完成当前可对接能力，前端和 AI Engine 不在本阶段范围内。
+
+- `KnowledgeNode` 保存项目内技能节点、学习状态、解锁资格和归档字段。
+- `KnowledgeNodePrerequisite` 保存真实业务依赖，允许一个节点有多个直接前置。
+- `parentId/order` 只表达展示布局，不能作为业务依赖。
+- `GET /api/skills/tree` 支持 `projectId` 和 `includeArchived=true`，返回展示树、DAG 依赖边和前置风险。
+- `PATCH /api/skills/:id` 只允许修改 `learningState`，并由后端自动解锁满足条件的直接后续节点。
+- 上游从 `mastered` 回退后，后续节点不重新锁定；风险由 tree 查询沿整条可见上游链实时派生。
+- 可用 `npm.cmd run seed:skills` 写入二次函数 demo 技能树进行联调。
+
+当前未完成：
+
+- `DELETE /api/skills/:id` 仍是硬删除，后续要按“有历史学习记录则归档”改造。
+- 独立的结构管理接口和手动解锁接口尚未实现。
+- Skills 仍默认使用 demo project；真实用户/项目权限隔离放到用户系统阶段处理。
 
 ## 下一阶段真实能力
 
