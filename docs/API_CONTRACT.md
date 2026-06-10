@@ -299,6 +299,69 @@ Materials 已接 Prisma/SQLite。上传文件保存在 `uploads/materials/`，�
 | PATCH | `/api/plan/:projectId/versions/:versionId` | ready | 整份替换草稿阶段 |
 | POST | `/api/plan/:projectId/versions/:versionId/confirm` | ready | 确认草稿并替代旧版本 |
 | POST | `/api/plan/:projectId/versions/:versionId/revise` | ready | 复制当前确认版本为新草稿 |
+| POST | `/api/plan/:projectId/proposals/apply` | ready | 校验并原子保存 AI Engine 的整体计划提案 |
+
+### `POST /api/plan/:projectId/proposals/apply`
+
+该接口是 AI Engine 到 Express 的受信后端契约。Express 不调用模型，只接收结构化提案，完成严格校验后在单个事务中创建知识树、前置关系和版本 1 阶段计划草稿。
+
+```json
+{
+  "proposalId": "unique-proposal-id",
+  "metadata": {
+    "provider": "optional",
+    "model": "optional",
+    "generatedAt": "optional"
+  },
+  "nodes": [
+    {
+      "key": "algebra-basics",
+      "title": "代数基础",
+      "description": "可选",
+      "parentKey": "optional-parent-key"
+    }
+  ],
+  "prerequisiteEdges": [
+    {
+      "prerequisiteKey": "algebra-basics",
+      "nodeKey": "quadratic-functions"
+    }
+  ],
+  "phases": [
+    {
+      "title": "基础阶段",
+      "goal": "掌握基础知识",
+      "description": "可选",
+      "completionCriteria": "可选",
+      "nodeKeys": ["algebra-basics"]
+    }
+  ]
+}
+```
+
+成功响应的 `data`：
+
+```json
+{
+  "planVersion": {},
+  "knowledgeNodes": [
+    {
+      "key": "algebra-basics",
+      "id": "database-node-id"
+    }
+  ],
+  "idempotentReplay": false
+}
+```
+
+- 仅允许初始化属于 Demo 用户、状态为 `planning`、没有知识点且没有计划版本的项目；成功后项目仍为 `planning`。
+- 首次应用返回 201。相同 `proposalId` 和相同规范化内容重试返回 200 及原结果；同 ID 不同内容返回 409。
+- `parentKey` 只描述展示树，`prerequisiteEdges` 描述业务 DAG；两种图分别检测循环。
+- 所有引用必须指向提案内节点。每个节点至少属于一个阶段，前置节点首次出现的阶段不得晚于后继节点。
+- 限制为 200 个节点、50 个阶段、1000 条前置边和 1000 个阶段节点引用。
+- 无直接前置的节点初始解锁；其余节点锁定。所有节点初始为 `not_started`、`mastery = 0`。
+- `inputSnapshot` 由后端组装，包含项目目标字段、已关联资料的元数据、提案元数据、规范化内容哈希和 node key 映射；不包含文件路径或完整 `extractedText`。
+- 知识节点、父子关系、前置边、阶段和阶段节点关联在同一事务内写入，失败不会保留部分数据。
 
 创建草稿请求：
 

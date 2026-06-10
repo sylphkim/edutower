@@ -15,8 +15,11 @@ import {
   revisePlanVersion,
   updatePlanVersion
 } from "../controllers/planVersions.controller";
+import { applyPlanProposal } from "../controllers/planProposals.controller";
 
 const router = Router();
+
+router.post("/:projectId/proposals/apply", applyPlanProposal);
 
 router.get("/:projectId/versions", listPlanVersions);
 router.get("/:projectId/versions/current", getCurrentPlanVersion);

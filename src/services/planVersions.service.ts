@@ -206,7 +206,7 @@ function parseInputSnapshot(value: string): Record<string, unknown> {
   throw new AppError("INTERNAL_ERROR", "Stored plan input snapshot is invalid.", 500);
 }
 
-function toApiItem(item: PlanVersionWithPhases): PlanVersionItem {
+export function toPlanVersionItem(item: PlanVersionWithPhases): PlanVersionItem {
   return {
     id: item.id,
     projectId: item.projectId,
@@ -250,7 +250,7 @@ export const planVersionsService = {
     const items = await planVersionsRepository.listByProject(normalizedProjectId);
 
     return {
-      items: items.map(toApiItem)
+      items: items.map(toPlanVersionItem)
     };
   },
 
@@ -262,7 +262,7 @@ export const planVersionsService = {
       throw new AppError("INVALID_REQUEST", "Confirmed plan version not found.", 404);
     }
 
-    return toApiItem(item);
+    return toPlanVersionItem(item);
   },
 
   async getById(projectId: string, versionId: string): Promise<PlanVersionItem> {
@@ -276,7 +276,7 @@ export const planVersionsService = {
       throw new AppError("INVALID_REQUEST", "Plan version not found.", 404);
     }
 
-    return toApiItem(item);
+    return toPlanVersionItem(item);
   },
 
   async create(projectId: string, input: unknown): Promise<PlanVersionItem> {
@@ -291,7 +291,7 @@ export const planVersionsService = {
         normalizedInput.phases
       );
 
-      return toApiItem(item);
+      return toPlanVersionItem(item);
     } catch (error) {
       return throwVersionConflict(error);
     }
@@ -319,7 +319,7 @@ export const planVersionsService = {
       throw new AppError("INVALID_REQUEST", "Only draft plan versions can be updated.", 409);
     }
 
-    return toApiItem(result.item);
+    return toPlanVersionItem(result.item);
   },
 
   async confirm(projectId: string, versionId: string): Promise<PlanVersionItem> {
@@ -332,7 +332,7 @@ export const planVersionsService = {
     switch (result.status) {
       case "success":
       case "already_confirmed":
-        return toApiItem(result.item);
+        return toPlanVersionItem(result.item);
       case "not_found":
         throw new AppError("INVALID_REQUEST", "Plan version not found.", 404);
       case "superseded":
@@ -363,7 +363,7 @@ export const planVersionsService = {
 
       switch (result.status) {
         case "success":
-          return toApiItem(result.item);
+          return toPlanVersionItem(result.item);
         case "not_found":
           throw new AppError("INVALID_REQUEST", "Plan version not found.", 404);
         case "not_current":
