@@ -6,8 +6,25 @@ import {
   listPlans,
   updatePlan
 } from "../controllers/plan.controller";
+import {
+  confirmPlanVersion,
+  createPlanVersion,
+  getCurrentPlanVersion,
+  getPlanVersion,
+  listPlanVersions,
+  revisePlanVersion,
+  updatePlanVersion
+} from "../controllers/planVersions.controller";
 
 const router = Router();
+
+router.get("/:projectId/versions", listPlanVersions);
+router.get("/:projectId/versions/current", getCurrentPlanVersion);
+router.get("/:projectId/versions/:versionId", getPlanVersion);
+router.post("/:projectId/versions", createPlanVersion);
+router.patch("/:projectId/versions/:versionId", updatePlanVersion);
+router.post("/:projectId/versions/:versionId/confirm", confirmPlanVersion);
+router.post("/:projectId/versions/:versionId/revise", revisePlanVersion);
 
 router.get("/", listPlans);
 router.get("/:id", getPlan);

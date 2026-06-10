@@ -288,6 +288,66 @@ Materials 已接 Prisma/SQLite。上传文件保存在 `uploads/materials/`，�
 | PATCH | `/api/plan/:id` | partial | 更新学习计划 |
 | DELETE | `/api/plan/:id` | partial | 删除学习计划 |
 
+阶段计划版本使用独立子资源，不改变上面的旧 Plan CRUD：
+
+| Method | Path | Status | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/plan/:projectId/versions` | ready | 按版本倒序查询阶段计划历史 |
+| GET | `/api/plan/:projectId/versions/current` | ready | 查询当前已确认版本 |
+| GET | `/api/plan/:projectId/versions/:versionId` | ready | 查询指定版本 |
+| POST | `/api/plan/:projectId/versions` | ready | 创建下一版本草稿 |
+| PATCH | `/api/plan/:projectId/versions/:versionId` | ready | 整份替换草稿阶段 |
+| POST | `/api/plan/:projectId/versions/:versionId/confirm` | ready | 确认草稿并替代旧版本 |
+| POST | `/api/plan/:projectId/versions/:versionId/revise` | ready | 复制当前确认版本为新草稿 |
+
+创建草稿请求：
+
+```json
+{
+  "inputSnapshot": {},
+  "phases": [
+    {
+      "title": "基础阶段",
+      "goal": "掌握基础知识",
+      "description": "可选",
+      "completionCriteria": "可选",
+      "knowledgeNodeIds": ["knowledge-node-id"]
+    }
+  ]
+}
+```
+
+- 同一项目最多存在一个 `draft`；冲突返回 409。
+- 草稿允许空阶段或阶段暂时没有知识点，确认时要求至少一个阶段且每阶段至少一个有效知识点。
+- `PATCH` 请求体只能包含完整的 `phases` 数组；阶段和知识点顺序按数组顺序保存。
+- 知识点必须未归档且属于当前项目；同一阶段不可重复，同一知识点可以出现在多个阶段。
+- 已确认和已替代版本不可修改。重复确认当前版本是幂等操作。
+- 确认会在同一事务中替代旧确认版本、激活项目并更新 `planConfirmedAt`。
+- `revise` 复制当前确认版本的阶段、知识点关联和 `inputSnapshot`，版本号自动递增。
+
+版本响应示例：
+
+```json
+{
+  "id": "plan-version-id",
+  "projectId": "project-id",
+  "version": 1,
+  "status": "draft",
+  "inputSnapshot": {},
+  "phases": [
+    {
+      "id": "phase-id",
+      "title": "基础阶段",
+      "goal": "掌握基础知识",
+      "order": 0,
+      "knowledgeNodeIds": ["knowledge-node-id"]
+    }
+  ],
+  "createdAt": "2026-06-10T00:00:00.000Z",
+  "updatedAt": "2026-06-10T00:00:00.000Z"
+}
+```
+
 创建请求体：
 
 ```json
