@@ -89,7 +89,7 @@ export class AiEngineService {
     message: string,
     context?: ChatContext
   ): Promise<AiEngineChatResult> {
-    const systemPrompt = context?.systemPrompt || this.buildFallbackSystemPrompt(context);
+    const systemPrompt = this.buildFallbackSystemPrompt(context);
 
     try {
       const result = await llmService.generateText({
