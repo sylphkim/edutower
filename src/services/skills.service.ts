@@ -1,17 +1,28 @@
 import { knowledgeNodesRepository } from "../repositories/knowledgeNodes.repository";
-import type { KnowledgeNodeStatus } from "../generated/prisma/client";
+import type { KnowledgeNodeLearningState } from "../generated/prisma/client";
 import type { KnowledgeNodeWithPrerequisites } from "../repositories/knowledgeNodes.repository";
 import type {
   CreateSkillInput,
+  SkillDependencyEdge,
   SkillItem,
-  SkillStatus,
+  SkillLearningState,
+  SkillTreeResponse,
   SkillTreeItem,
-  UpdateSkillInput
+  UpdateSkillLearningStateInput
 } from "../types/skills";
 import { AppError } from "../utils/errors";
 import { getDemoProjectId } from "./demoProject.service";
 
-const VALID_STATUSES: SkillStatus[] = ["locked", "available", "in_progress", "mastered"];
+const VALID_LEARNING_STATES: SkillLearningState[] = ["not_started", "learning", "mastered"];
+
+interface GetSkillTreeOptions {
+  projectId?: string;
+  includeArchived?: boolean;
+}
+
+interface UpdateSkillOptions {
+  projectId?: string;
+}
 
 function ensureSkillExists(
   item: KnowledgeNodeWithPrerequisites | null
@@ -60,10 +71,10 @@ function ensureValidCreateInput(input: CreateSkillInput): void {
     ensureValidPrerequisites(input.prerequisites);
   }
 
-  if (input.status !== undefined && !VALID_STATUSES.includes(input.status)) {
+  if (input.learningState !== undefined && !VALID_LEARNING_STATES.includes(input.learningState)) {
     throw new AppError(
       "INVALID_REQUEST",
-      `status must be one of: ${VALID_STATUSES.join(", ")}.`,
+      `learningState must be one of: ${VALID_LEARNING_STATES.join(", ")}.`,
       400
     );
   }
@@ -80,57 +91,40 @@ function ensureValidCreateInput(input: CreateSkillInput): void {
   }
 }
 
-function ensureValidUpdateInput(id: string, input: UpdateSkillInput): void {
-  if (!input || typeof input !== "object") {
+function ensureValidLearningStateUpdateInput(
+  input: unknown
+): UpdateSkillLearningStateInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new AppError("INVALID_REQUEST", "Request body is required.", 400);
   }
 
-  if (input.title !== undefined && (typeof input.title !== "string" || !input.title.trim())) {
-    throw new AppError("INVALID_REQUEST", "title must be a non-empty string.", 400);
-  }
+  const body = input as Record<string, unknown>;
+  const keys = Object.keys(body);
 
-  if (input.description !== undefined && typeof input.description !== "string") {
-    throw new AppError("INVALID_REQUEST", "description must be a string.", 400);
-  }
-
-  if (
-    input.parentId !== undefined &&
-    input.parentId !== null &&
-    (typeof input.parentId !== "string" || !input.parentId)
-  ) {
-    throw new AppError("INVALID_REQUEST", "parentId must be a non-empty string or null.", 400);
-  }
-
-  if (input.parentId === id) {
-    throw new AppError("INVALID_REQUEST", "parentId cannot be the same as id.", 400);
-  }
-
-  if (input.prerequisites !== undefined) {
-    ensureValidPrerequisites(input.prerequisites);
-
-    if (input.prerequisites.includes(id)) {
-      throw new AppError("INVALID_REQUEST", "prerequisites cannot include itself.", 400);
-    }
-  }
-
-  if (input.status !== undefined && !VALID_STATUSES.includes(input.status)) {
+  if (keys.length !== 1 || keys[0] !== "learningState") {
     throw new AppError(
       "INVALID_REQUEST",
-      `status must be one of: ${VALID_STATUSES.join(", ")}.`,
+      "PATCH /api/skills/:id only accepts learningState.",
       400
     );
   }
 
-  if (input.mastery !== undefined) {
-    ensureValidMastery(input.mastery);
-  }
+  const learningState = body.learningState;
 
   if (
-    input.order !== undefined &&
-    (typeof input.order !== "number" || !Number.isFinite(input.order))
+    typeof learningState !== "string" ||
+    !VALID_LEARNING_STATES.includes(learningState as SkillLearningState)
   ) {
-    throw new AppError("INVALID_REQUEST", "order must be a number.", 400);
+    throw new AppError(
+      "INVALID_REQUEST",
+      `learningState must be one of: ${VALID_LEARNING_STATES.join(", ")}.`,
+      400
+    );
   }
+
+  return {
+    learningState: learningState as SkillLearningState
+  };
 }
 
 async function ensureParentBelongsToProject(
@@ -181,26 +175,47 @@ async function ensurePrerequisitesBelongToProject(
   }
 }
 
-function toKnowledgeNodeStatus(status: SkillStatus): KnowledgeNodeStatus {
-  return status as KnowledgeNodeStatus;
+function toKnowledgeNodeLearningState(
+  learningState: SkillLearningState
+): KnowledgeNodeLearningState {
+  return learningState as KnowledgeNodeLearningState;
 }
 
 function toApiSkill(item: KnowledgeNodeWithPrerequisites): SkillItem {
+  const prerequisiteIds = item.prerequisiteLinks
+    .map((link) => link.prerequisiteId)
+    .sort((left, right) => left.localeCompare(right));
+
   return {
     id: item.id,
     title: item.title,
     description: item.description ?? undefined,
     parentId: item.parentId ?? undefined,
-    prerequisites: item.prerequisiteLinks.map((link) => link.prerequisiteId),
-    status: item.status as SkillStatus,
+    prerequisites: prerequisiteIds,
+    learningState: item.learningState as SkillLearningState,
+    isUnlocked: item.isUnlocked,
+    unlockedAt: item.unlockedAt?.toISOString(),
     mastery: item.mastery,
     order: item.order,
+    archivedAt: item.archivedAt?.toISOString(),
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString()
   };
 }
 
-function buildTree(items: SkillItem[]): SkillTreeItem[] {
+function compareTreeItems(left: SkillTreeItem, right: SkillTreeItem): number {
+  if (left.order !== right.order) {
+    return left.order - right.order;
+  }
+
+  if (left.createdAt !== right.createdAt) {
+    return left.createdAt.localeCompare(right.createdAt);
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function buildTree(items: SkillTreeItem[]): SkillTreeItem[] {
   const itemMap = new Map<string, SkillTreeItem>();
   const roots: SkillTreeItem[] = [];
 
@@ -221,12 +236,153 @@ function buildTree(items: SkillItem[]): SkillTreeItem[] {
   }
 
   const sortByOrder = (treeItems: SkillTreeItem[]): void => {
-    treeItems.sort((left, right) => left.order - right.order);
+    treeItems.sort(compareTreeItems);
     treeItems.forEach((item) => sortByOrder(item.children));
   };
 
   sortByOrder(roots);
   return roots;
+}
+
+function buildVisiblePrerequisiteMap(
+  items: KnowledgeNodeWithPrerequisites[],
+  visibleItemMap: Map<string, KnowledgeNodeWithPrerequisites>
+): Map<string, string[]> {
+  return new Map(
+    items.map((item) => [
+      item.id,
+      item.prerequisiteLinks
+        .map((link) => link.prerequisiteId)
+        .filter((prerequisiteId) => visibleItemMap.has(prerequisiteId))
+        .sort((left, right) => left.localeCompare(right))
+    ])
+  );
+}
+
+function assertAcyclicDependencyGraph(
+  prerequisiteMap: Map<string, string[]>
+): void {
+  const visitState = new Map<string, "visiting" | "visited">();
+
+  const visit = (id: string): void => {
+    const currentState = visitState.get(id);
+
+    if (currentState === "visiting") {
+      throw new AppError(
+        "INVALID_REQUEST",
+        "Skill dependency graph contains a cycle.",
+        409
+      );
+    }
+
+    if (currentState === "visited") {
+      return;
+    }
+
+    visitState.set(id, "visiting");
+    for (const prerequisiteId of prerequisiteMap.get(id) ?? []) {
+      visit(prerequisiteId);
+    }
+    visitState.set(id, "visited");
+  };
+
+  for (const id of prerequisiteMap.keys()) {
+    visit(id);
+  }
+}
+
+function buildPrerequisiteRiskMap(
+  items: KnowledgeNodeWithPrerequisites[],
+  visibleItemMap: Map<string, KnowledgeNodeWithPrerequisites>,
+  prerequisiteMap: Map<string, string[]>
+): Map<string, string[]> {
+  const riskMemo = new Map<string, string[]>();
+
+  const collectRiskPrerequisiteIds = (id: string): string[] => {
+    const memoizedRiskIds = riskMemo.get(id);
+
+    if (memoizedRiskIds) {
+      return memoizedRiskIds;
+    }
+
+    const riskPrerequisiteIds = new Set<string>();
+
+    for (const prerequisiteId of prerequisiteMap.get(id) ?? []) {
+      const prerequisite = visibleItemMap.get(prerequisiteId);
+
+      if (!prerequisite) {
+        continue;
+      }
+
+      if (prerequisite.learningState !== "mastered") {
+        riskPrerequisiteIds.add(prerequisiteId);
+      }
+
+      for (const upstreamRiskId of collectRiskPrerequisiteIds(prerequisiteId)) {
+        riskPrerequisiteIds.add(upstreamRiskId);
+      }
+    }
+
+    const sortedRiskPrerequisiteIds = [...riskPrerequisiteIds].sort((left, right) =>
+      left.localeCompare(right)
+    );
+    riskMemo.set(id, sortedRiskPrerequisiteIds);
+
+    return sortedRiskPrerequisiteIds;
+  };
+
+  return new Map(
+    items.map((item) => [
+      item.id,
+      item.isUnlocked ? collectRiskPrerequisiteIds(item.id) : []
+    ])
+  );
+}
+
+function toTreeSkill(
+  item: KnowledgeNodeWithPrerequisites,
+  prerequisiteMap: Map<string, string[]>,
+  riskMap: Map<string, string[]>
+): SkillTreeItem {
+  const visiblePrerequisiteIds = prerequisiteMap.get(item.id) ?? [];
+  const riskPrerequisiteIds = riskMap.get(item.id) ?? [];
+
+  return {
+    ...toApiSkill(item),
+    prerequisites: visiblePrerequisiteIds,
+    prerequisiteRisk: riskPrerequisiteIds.length > 0,
+    riskPrerequisiteIds,
+    children: []
+  };
+}
+
+function buildDependencyEdges(
+  items: KnowledgeNodeWithPrerequisites[],
+  visibleItemMap: Map<string, KnowledgeNodeWithPrerequisites>
+): SkillDependencyEdge[] {
+  return items
+    .flatMap((item) =>
+      item.prerequisiteLinks
+        .filter((link) => visibleItemMap.has(link.prerequisiteId))
+        .map((link) => ({
+          sourceId: link.prerequisiteId,
+          targetId: item.id
+        }))
+    )
+    .sort((left, right) => {
+      const sourceCompare = left.sourceId.localeCompare(right.sourceId);
+      return sourceCompare !== 0 ? sourceCompare : left.targetId.localeCompare(right.targetId);
+    });
+}
+
+async function resolveProjectId(projectId: string | undefined): Promise<string> {
+  const normalizedProjectId = projectId?.trim();
+
+  if (normalizedProjectId) {
+    return normalizedProjectId;
+  }
+
+  return getDemoProjectId();
 }
 
 export const skillsService = {
@@ -246,12 +402,21 @@ export const skillsService = {
     return toApiSkill(item);
   },
 
-  async getTree(): Promise<{ items: SkillTreeItem[] }> {
-    const projectId = await getDemoProjectId();
-    const items = await knowledgeNodesRepository.listByProject(projectId);
+  async getTree(options: GetSkillTreeOptions = {}): Promise<SkillTreeResponse> {
+    const projectId = await resolveProjectId(options.projectId);
+    const items = await knowledgeNodesRepository.listTreeByProject(
+      projectId,
+      Boolean(options.includeArchived)
+    );
+    const visibleItemMap = new Map(items.map((item) => [item.id, item]));
+    const prerequisiteMap = buildVisiblePrerequisiteMap(items, visibleItemMap);
+    assertAcyclicDependencyGraph(prerequisiteMap);
+    const riskMap = buildPrerequisiteRiskMap(items, visibleItemMap, prerequisiteMap);
+    const treeItems = items.map((item) => toTreeSkill(item, prerequisiteMap, riskMap));
 
     return {
-      items: buildTree(items.map(toApiSkill))
+      items: buildTree(treeItems),
+      dependencyEdges: buildDependencyEdges(items, visibleItemMap)
     };
   },
 
@@ -271,7 +436,7 @@ export const skillsService = {
       title: input.title.trim(),
       description: input.description,
       parentId: input.parentId,
-      status: toKnowledgeNodeStatus(input.status ?? "available"),
+      learningState: toKnowledgeNodeLearningState(input.learningState ?? "not_started"),
       mastery: input.mastery ?? 0,
       order:
         input.order ??
@@ -282,33 +447,30 @@ export const skillsService = {
     return toApiSkill(item);
   },
 
-  async update(id: string, input: UpdateSkillInput): Promise<SkillItem> {
-    ensureValidUpdateInput(id, input);
+  async update(
+    id: string,
+    input: unknown,
+    options: UpdateSkillOptions = {}
+  ): Promise<SkillItem> {
+    const updateInput = ensureValidLearningStateUpdateInput(input);
+    const projectId = await resolveProjectId(options.projectId);
+    const result =
+      await knowledgeNodesRepository.updateLearningStateAndUnlockDirectDependentsByIdForProject(
+        id,
+        projectId,
+        toKnowledgeNodeLearningState(updateInput.learningState)
+      );
 
-    const projectId = await getDemoProjectId();
-    const currentItem = ensureSkillExists(
-      await knowledgeNodesRepository.findByIdForProject(id, projectId)
-    );
-    await ensureParentBelongsToProject(input.parentId ?? undefined, projectId);
-    if (input.prerequisites !== undefined) {
-      await ensurePrerequisitesBelongToProject(id, input.prerequisites, projectId);
+    switch (result.status) {
+      case "success":
+        return toApiSkill(result.item);
+      case "not_found":
+        throw new AppError("INVALID_REQUEST", "Skill item not found.", 404);
+      case "archived":
+        throw new AppError("INVALID_REQUEST", "Archived skill cannot be updated.", 409);
+      case "locked":
+        throw new AppError("INVALID_REQUEST", "Locked skill cannot change learningState.", 409);
     }
-
-    const updatedItem = await knowledgeNodesRepository.updateByIdForProject(id, projectId, {
-      title: input.title !== undefined ? input.title.trim() : currentItem.title,
-      description: input.description ?? currentItem.description ?? undefined,
-      parentId:
-        input.parentId !== undefined ? input.parentId ?? null : currentItem.parentId,
-      status:
-        input.status !== undefined
-          ? toKnowledgeNodeStatus(input.status)
-          : currentItem.status,
-      mastery: input.mastery ?? currentItem.mastery,
-      order: input.order ?? currentItem.order,
-      prerequisiteIds: input.prerequisites
-    });
-
-    return toApiSkill(updatedItem);
   },
 
   async remove(id: string): Promise<SkillItem> {

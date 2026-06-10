@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
+    "seed:skills": "tsx src/scripts/seedSkills.ts",
     "start": "node dist/server.js"
   },
   "keywords": [
