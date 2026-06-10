@@ -49,7 +49,22 @@ Frontend / static
 - 未捕获异常会返回 `INTERNAL_ERROR`。
 - 当前多数业务接口使用 Demo 用户，不要求登录态。
 
-## API 总览
+例如 `GET /api/health` 的健康检查响应：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "status": "ok",
+    "database": "not_configured"
+  }
+}
+```
+
+- `status`：`"ok"` 或 `"degraded"`（数据库异常时降级）。
+- `database`：`"ok"`、`"not_configured"`、`"error"`。当前阶段未配置 `DATABASE_URL` 时返回 `"not_configured"`。
+
+## API总览
 
 | Method | Path | Status | 说明 |
 | --- | --- | --- | --- |

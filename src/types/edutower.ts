@@ -4,6 +4,8 @@ export type { MaterialOrigin, MaterialStatus } from "./materials";
 
 export type ModuleStatus = "stub" | "mock" | "ready";
 
+export type DatabaseStatus = "ok" | "not_configured" | "error";
+
 export interface StubMeta {
   module: string;
   status: ModuleStatus;
