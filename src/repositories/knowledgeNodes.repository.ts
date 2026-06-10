@@ -58,6 +58,34 @@ export const knowledgeNodesRepository = {
     });
   },
 
+  listTreeByProject(
+    projectId: string,
+    includeArchived: boolean
+  ): Promise<KnowledgeNodeWithPrerequisites[]> {
+    return prisma.knowledgeNode.findMany({
+      where: {
+        projectId,
+        ...(includeArchived
+          ? {}
+          : {
+              archivedAt: null
+            })
+      },
+      include: nodeInclude,
+      orderBy: [
+        {
+          order: "asc"
+        },
+        {
+          createdAt: "asc"
+        },
+        {
+          id: "asc"
+        }
+      ]
+    });
+  },
+
   findByIdForProject(
     id: string,
     projectId: string

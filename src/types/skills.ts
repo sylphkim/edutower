@@ -16,6 +16,11 @@ export interface SkillItem {
   updatedAt: string;
 }
 
+export interface SkillDependencyEdge {
+  sourceId: string;
+  targetId: string;
+}
+
 export interface CreateSkillInput {
   title: string;
   description?: string;
@@ -37,5 +42,12 @@ export interface UpdateSkillInput {
 }
 
 export interface SkillTreeItem extends SkillItem {
+  prerequisiteRisk: boolean;
+  riskPrerequisiteIds: string[];
   children: SkillTreeItem[];
+}
+
+export interface SkillTreeResponse {
+  items: SkillTreeItem[];
+  dependencyEdges: SkillDependencyEdge[];
 }

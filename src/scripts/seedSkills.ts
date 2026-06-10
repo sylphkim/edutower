@@ -137,7 +137,7 @@ const SEED_PREREQUISITES: SeedPrerequisite[] = [
   },
   {
     nodeId: "seed-skill-quadratic-graph-opening",
-    prerequisiteId: "seed-skill-quadratic-definition"
+    prerequisiteId: "seed-skill-quadratic-standard-form"
   },
   {
     nodeId: "seed-skill-quadratic-vertex-form",

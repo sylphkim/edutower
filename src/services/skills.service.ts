@@ -3,8 +3,10 @@ import type { KnowledgeNodeLearningState } from "../generated/prisma/client";
 import type { KnowledgeNodeWithPrerequisites } from "../repositories/knowledgeNodes.repository";
 import type {
   CreateSkillInput,
+  SkillDependencyEdge,
   SkillItem,
   SkillLearningState,
+  SkillTreeResponse,
   SkillTreeItem,
   UpdateSkillInput
 } from "../types/skills";
@@ -12,6 +14,11 @@ import { AppError } from "../utils/errors";
 import { getDemoProjectId } from "./demoProject.service";
 
 const VALID_LEARNING_STATES: SkillLearningState[] = ["not_started", "learning", "mastered"];
+
+interface GetSkillTreeOptions {
+  projectId?: string;
+  includeArchived?: boolean;
+}
 
 function ensureSkillExists(
   item: KnowledgeNodeWithPrerequisites | null
@@ -191,12 +198,16 @@ function toKnowledgeNodeLearningState(
 }
 
 function toApiSkill(item: KnowledgeNodeWithPrerequisites): SkillItem {
+  const prerequisiteIds = item.prerequisiteLinks
+    .map((link) => link.prerequisiteId)
+    .sort((left, right) => left.localeCompare(right));
+
   return {
     id: item.id,
     title: item.title,
     description: item.description ?? undefined,
     parentId: item.parentId ?? undefined,
-    prerequisites: item.prerequisiteLinks.map((link) => link.prerequisiteId),
+    prerequisites: prerequisiteIds,
     learningState: item.learningState as SkillLearningState,
     isUnlocked: item.isUnlocked,
     unlockedAt: item.unlockedAt?.toISOString(),
@@ -208,7 +219,19 @@ function toApiSkill(item: KnowledgeNodeWithPrerequisites): SkillItem {
   };
 }
 
-function buildTree(items: SkillItem[]): SkillTreeItem[] {
+function compareTreeItems(left: SkillTreeItem, right: SkillTreeItem): number {
+  if (left.order !== right.order) {
+    return left.order - right.order;
+  }
+
+  if (left.createdAt !== right.createdAt) {
+    return left.createdAt.localeCompare(right.createdAt);
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function buildTree(items: SkillTreeItem[]): SkillTreeItem[] {
   const itemMap = new Map<string, SkillTreeItem>();
   const roots: SkillTreeItem[] = [];
 
@@ -229,12 +252,64 @@ function buildTree(items: SkillItem[]): SkillTreeItem[] {
   }
 
   const sortByOrder = (treeItems: SkillTreeItem[]): void => {
-    treeItems.sort((left, right) => left.order - right.order);
+    treeItems.sort(compareTreeItems);
     treeItems.forEach((item) => sortByOrder(item.children));
   };
 
   sortByOrder(roots);
   return roots;
+}
+
+function toTreeSkill(
+  item: KnowledgeNodeWithPrerequisites,
+  visibleItemMap: Map<string, KnowledgeNodeWithPrerequisites>
+): SkillTreeItem {
+  const visiblePrerequisiteIds = item.prerequisiteLinks
+    .map((link) => link.prerequisiteId)
+    .filter((prerequisiteId) => visibleItemMap.has(prerequisiteId))
+    .sort((left, right) => left.localeCompare(right));
+  const riskPrerequisiteIds = item.isUnlocked
+    ? visiblePrerequisiteIds.filter(
+        (prerequisiteId) => visibleItemMap.get(prerequisiteId)?.learningState !== "mastered"
+      )
+    : [];
+
+  return {
+    ...toApiSkill(item),
+    prerequisites: visiblePrerequisiteIds,
+    prerequisiteRisk: riskPrerequisiteIds.length > 0,
+    riskPrerequisiteIds,
+    children: []
+  };
+}
+
+function buildDependencyEdges(
+  items: KnowledgeNodeWithPrerequisites[],
+  visibleItemMap: Map<string, KnowledgeNodeWithPrerequisites>
+): SkillDependencyEdge[] {
+  return items
+    .flatMap((item) =>
+      item.prerequisiteLinks
+        .filter((link) => visibleItemMap.has(link.prerequisiteId))
+        .map((link) => ({
+          sourceId: link.prerequisiteId,
+          targetId: item.id
+        }))
+    )
+    .sort((left, right) => {
+      const sourceCompare = left.sourceId.localeCompare(right.sourceId);
+      return sourceCompare !== 0 ? sourceCompare : left.targetId.localeCompare(right.targetId);
+    });
+}
+
+async function resolveTreeProjectId(projectId: string | undefined): Promise<string> {
+  const normalizedProjectId = projectId?.trim();
+
+  if (normalizedProjectId) {
+    return normalizedProjectId;
+  }
+
+  return getDemoProjectId();
 }
 
 export const skillsService = {
@@ -254,12 +329,18 @@ export const skillsService = {
     return toApiSkill(item);
   },
 
-  async getTree(): Promise<{ items: SkillTreeItem[] }> {
-    const projectId = await getDemoProjectId();
-    const items = await knowledgeNodesRepository.listByProject(projectId);
+  async getTree(options: GetSkillTreeOptions = {}): Promise<SkillTreeResponse> {
+    const projectId = await resolveTreeProjectId(options.projectId);
+    const items = await knowledgeNodesRepository.listTreeByProject(
+      projectId,
+      Boolean(options.includeArchived)
+    );
+    const visibleItemMap = new Map(items.map((item) => [item.id, item]));
+    const treeItems = items.map((item) => toTreeSkill(item, visibleItemMap));
 
     return {
-      items: buildTree(items.map(toApiSkill))
+      items: buildTree(treeItems),
+      dependencyEdges: buildDependencyEdges(items, visibleItemMap)
     };
   },
 
