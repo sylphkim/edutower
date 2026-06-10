@@ -196,6 +196,24 @@ export const knowledgeNodesRepository = {
     return this.findByIdForProject(id, projectId) as Promise<KnowledgeNodeWithPrerequisites>;
   },
 
+  async updateLearningStateByIdForProject(
+    id: string,
+    projectId: string,
+    learningState: KnowledgeNodeLearningState
+  ): Promise<KnowledgeNodeWithPrerequisites> {
+    await prisma.knowledgeNode.update({
+      where: {
+        id,
+        projectId
+      },
+      data: {
+        learningState
+      }
+    });
+
+    return this.findByIdForProject(id, projectId) as Promise<KnowledgeNodeWithPrerequisites>;
+  },
+
   deleteByIdForProject(id: string, projectId: string): Promise<KnowledgeNode> {
     return prisma.knowledgeNode.delete({
       where: {

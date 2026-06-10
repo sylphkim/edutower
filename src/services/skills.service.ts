@@ -8,7 +8,7 @@ import type {
   SkillLearningState,
   SkillTreeResponse,
   SkillTreeItem,
-  UpdateSkillInput
+  UpdateSkillLearningStateInput
 } from "../types/skills";
 import { AppError } from "../utils/errors";
 import { getDemoProjectId } from "./demoProject.service";
@@ -18,6 +18,10 @@ const VALID_LEARNING_STATES: SkillLearningState[] = ["not_started", "learning", 
 interface GetSkillTreeOptions {
   projectId?: string;
   includeArchived?: boolean;
+}
+
+interface UpdateSkillOptions {
+  projectId?: string;
 }
 
 function ensureSkillExists(
@@ -87,42 +91,29 @@ function ensureValidCreateInput(input: CreateSkillInput): void {
   }
 }
 
-function ensureValidUpdateInput(id: string, input: UpdateSkillInput): void {
-  if (!input || typeof input !== "object") {
+function ensureValidLearningStateUpdateInput(
+  input: unknown
+): UpdateSkillLearningStateInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new AppError("INVALID_REQUEST", "Request body is required.", 400);
   }
 
-  if (input.title !== undefined && (typeof input.title !== "string" || !input.title.trim())) {
-    throw new AppError("INVALID_REQUEST", "title must be a non-empty string.", 400);
+  const body = input as Record<string, unknown>;
+  const keys = Object.keys(body);
+
+  if (keys.length !== 1 || keys[0] !== "learningState") {
+    throw new AppError(
+      "INVALID_REQUEST",
+      "PATCH /api/skills/:id only accepts learningState.",
+      400
+    );
   }
 
-  if (input.description !== undefined && typeof input.description !== "string") {
-    throw new AppError("INVALID_REQUEST", "description must be a string.", 400);
-  }
+  const learningState = body.learningState;
 
   if (
-    input.parentId !== undefined &&
-    input.parentId !== null &&
-    (typeof input.parentId !== "string" || !input.parentId)
-  ) {
-    throw new AppError("INVALID_REQUEST", "parentId must be a non-empty string or null.", 400);
-  }
-
-  if (input.parentId === id) {
-    throw new AppError("INVALID_REQUEST", "parentId cannot be the same as id.", 400);
-  }
-
-  if (input.prerequisites !== undefined) {
-    ensureValidPrerequisites(input.prerequisites);
-
-    if (input.prerequisites.includes(id)) {
-      throw new AppError("INVALID_REQUEST", "prerequisites cannot include itself.", 400);
-    }
-  }
-
-  if (
-    input.learningState !== undefined &&
-    !VALID_LEARNING_STATES.includes(input.learningState)
+    typeof learningState !== "string" ||
+    !VALID_LEARNING_STATES.includes(learningState as SkillLearningState)
   ) {
     throw new AppError(
       "INVALID_REQUEST",
@@ -131,16 +122,9 @@ function ensureValidUpdateInput(id: string, input: UpdateSkillInput): void {
     );
   }
 
-  if (input.mastery !== undefined) {
-    ensureValidMastery(input.mastery);
-  }
-
-  if (
-    input.order !== undefined &&
-    (typeof input.order !== "number" || !Number.isFinite(input.order))
-  ) {
-    throw new AppError("INVALID_REQUEST", "order must be a number.", 400);
-  }
+  return {
+    learningState: learningState as SkillLearningState
+  };
 }
 
 async function ensureParentBelongsToProject(
@@ -302,7 +286,7 @@ function buildDependencyEdges(
     });
 }
 
-async function resolveTreeProjectId(projectId: string | undefined): Promise<string> {
+async function resolveProjectId(projectId: string | undefined): Promise<string> {
   const normalizedProjectId = projectId?.trim();
 
   if (normalizedProjectId) {
@@ -330,7 +314,7 @@ export const skillsService = {
   },
 
   async getTree(options: GetSkillTreeOptions = {}): Promise<SkillTreeResponse> {
-    const projectId = await resolveTreeProjectId(options.projectId);
+    const projectId = await resolveProjectId(options.projectId);
     const items = await knowledgeNodesRepository.listTreeByProject(
       projectId,
       Boolean(options.includeArchived)
@@ -371,31 +355,40 @@ export const skillsService = {
     return toApiSkill(item);
   },
 
-  async update(id: string, input: UpdateSkillInput): Promise<SkillItem> {
-    ensureValidUpdateInput(id, input);
-
-    const projectId = await getDemoProjectId();
+  async update(
+    id: string,
+    input: unknown,
+    options: UpdateSkillOptions = {}
+  ): Promise<SkillItem> {
+    const updateInput = ensureValidLearningStateUpdateInput(input);
+    const projectId = await resolveProjectId(options.projectId);
     const currentItem = ensureSkillExists(
       await knowledgeNodesRepository.findByIdForProject(id, projectId)
     );
-    await ensureParentBelongsToProject(input.parentId ?? undefined, projectId);
-    if (input.prerequisites !== undefined) {
-      await ensurePrerequisitesBelongToProject(id, input.prerequisites, projectId);
+
+    if (currentItem.archivedAt) {
+      throw new AppError("INVALID_REQUEST", "Archived skill cannot be updated.", 409);
     }
 
-    const updatedItem = await knowledgeNodesRepository.updateByIdForProject(id, projectId, {
-      title: input.title !== undefined ? input.title.trim() : currentItem.title,
-      description: input.description ?? currentItem.description ?? undefined,
-      parentId:
-        input.parentId !== undefined ? input.parentId ?? null : currentItem.parentId,
-      learningState:
-        input.learningState !== undefined
-          ? toKnowledgeNodeLearningState(input.learningState)
-          : currentItem.learningState,
-      mastery: input.mastery ?? currentItem.mastery,
-      order: input.order ?? currentItem.order,
-      prerequisiteIds: input.prerequisites
-    });
+    const currentLearningState = currentItem.learningState as SkillLearningState;
+
+    if (!currentItem.isUnlocked) {
+      if (updateInput.learningState === currentLearningState) {
+        return toApiSkill(currentItem);
+      }
+
+      throw new AppError("INVALID_REQUEST", "Locked skill cannot change learningState.", 409);
+    }
+
+    if (updateInput.learningState === currentLearningState) {
+      return toApiSkill(currentItem);
+    }
+
+    const updatedItem = await knowledgeNodesRepository.updateLearningStateByIdForProject(
+      id,
+      projectId,
+      toKnowledgeNodeLearningState(updateInput.learningState)
+    );
 
     return toApiSkill(updatedItem);
   },

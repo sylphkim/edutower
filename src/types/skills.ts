@@ -31,14 +31,8 @@ export interface CreateSkillInput {
   order?: number;
 }
 
-export interface UpdateSkillInput {
-  title?: string;
-  description?: string;
-  parentId?: string | null;
-  prerequisites?: string[];
-  learningState?: SkillLearningState;
-  mastery?: number;
-  order?: number;
+export interface UpdateSkillLearningStateInput {
+  learningState: SkillLearningState;
 }
 
 export interface SkillTreeItem extends SkillItem {

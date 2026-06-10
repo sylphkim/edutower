@@ -80,7 +80,8 @@ export async function updateSkill(
 ): Promise<void> {
   try {
     const { id } = req.params;
-    const result = await skillsService.update(id, req.body);
+    const projectId = getOptionalQueryString(req, "projectId");
+    const result = await skillsService.update(id, req.body, { projectId });
 
     sendSuccess(res, result);
   } catch (error) {
