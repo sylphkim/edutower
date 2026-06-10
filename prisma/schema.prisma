@@ -370,6 +370,20 @@ model SummarySuggestion {
   @@index([knowledgeNodeId])
 }
 
+model Memory {
+  id                  String   @id @default(cuid())
+  type                String
+  title               String
+  content             String
+  importance          String   @default("medium")
+  relatedMaterialIds  String   @default("[]")
+  relatedSkillIds     String   @default("[]")
+  relatedQuizIds      String   @default("[]")
+  relatedWrongbookIds String   @default("[]")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
 enum MaterialSourceType {
   pdf
   doc
