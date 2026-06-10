@@ -17,12 +17,23 @@
   var banner = { type: "", message: "" };
   var isBusy = false;
 
-  var STATUS_LABEL = {
-    locked: "未解锁",
-    available: "可学习",
-    in_progress: "学习中",
+  var LEARNING_STATE_LABEL = {
+    not_started: "未开始",
+    learning: "学习中",
     mastered: "已掌握",
   };
+
+  function getNodeCssKey(node) {
+    if (!node || node.isUnlocked === false) return "locked";
+    if (node.learningState === "mastered") return "mastered";
+    if (node.learningState === "learning") return "in_progress";
+    return "available";
+  }
+
+  function getNodeBadgeLabel(node) {
+    if (!node || node.isUnlocked === false) return "未解锁";
+    return LEARNING_STATE_LABEL[node.learningState] || node.learningState || "未开始";
+  }
 
   bindEvents();
   refresh();
@@ -170,8 +181,8 @@
       .join("");
   }
 
-  function statusOptions(selected) {
-    return Object.keys(STATUS_LABEL)
+  function learningStateOptions(selected) {
+    return Object.keys(LEARNING_STATE_LABEL)
       .map(function (key) {
         return (
           '<option value="' +
@@ -179,7 +190,7 @@
           '"' +
           (selected === key ? " selected" : "") +
           ">" +
-          api.escapeHtml(STATUS_LABEL[key]) +
+          api.escapeHtml(LEARNING_STATE_LABEL[key]) +
           "</option>"
         );
       })
@@ -199,7 +210,9 @@
       return "";
     }
 
-    var title = formMode === "edit" ? "编辑技能" : "新建技能";
+    var title = formMode === "edit" ? "更新学习状态" : "新建技能";
+    var isEdit = formMode === "edit";
+    var fieldDisabled = isEdit ? " disabled" : "";
     var deleteBlock =
       formMode === "edit" && pendingDeleteId === skill.id
         ? '<div class="module-inline-confirm">' +
@@ -226,26 +239,41 @@
       '<div class="form-row"><label class="form-label" for="skillFormTitle">名称</label>' +
       '<input id="skillFormTitle" class="form-input" type="text" maxlength="120" value="' +
       api.escapeAttr(skill ? skill.title : "") +
-      '" required /></div>' +
+      '"' +
+      fieldDisabled +
+      " required /></div>" +
       '<div class="form-row"><label class="form-label" for="skillFormDesc">说明（可选）</label>' +
-      '<textarea id="skillFormDesc" class="form-textarea" rows="2">' +
+      '<textarea id="skillFormDesc" class="form-textarea" rows="2"' +
+      fieldDisabled +
+      ">" +
       api.escapeHtml(skill && skill.description ? skill.description : "") +
       "</textarea></div>" +
       '<div class="form-row form-row--inline">' +
       '<div><label class="form-label" for="skillFormParent">父级技能</label>' +
-      '<select id="skillFormParent" class="form-input">' +
+      '<select id="skillFormParent" class="form-input"' +
+      fieldDisabled +
+      ">" +
       parentOptions(skill ? skill.parentId : "", skill ? skill.id : "") +
       "</select></div>" +
-      '<div><label class="form-label" for="skillFormStatus">状态</label>' +
-      '<select id="skillFormStatus" class="form-input">' +
-      statusOptions(skill ? skill.status : "available") +
+      '<div><label class="form-label" for="skillFormLearningState">学习状态</label>' +
+      '<select id="skillFormLearningState" class="form-input"' +
+      (formMode === "edit" && skill && skill.isUnlocked === false ? " disabled" : "") +
+      ">" +
+      learningStateOptions(skill ? skill.learningState || "not_started" : "not_started") +
       "</select></div>" +
       '<div><label class="form-label" for="skillFormMastery">掌握度 %</label>' +
       '<input id="skillFormMastery" class="form-input" type="number" min="0" max="100" value="' +
       api.escapeAttr(String(skill ? skill.mastery || 0 : 0)) +
-      '" /></div></div>' +
+      '"' +
+      fieldDisabled +
+      ' /></div></div>' +
+      (isEdit
+        ? '<p class="module-empty module-empty--inline">编辑模式下只能修改学习状态；结构字段请通过新建/删除管理。</p>'
+        : "") +
       '<div class="form-row"><span class="form-label">前置技能</span>' +
-      '<div class="skills-prereq-list" id="skillFormPrereqs">' +
+      '<div class="skills-prereq-list" id="skillFormPrereqs"' +
+      (isEdit ? ' aria-disabled="true"' : "") +
+      ">" +
       (flatSkills.length
         ? prerequisiteOptions(skill ? skill.prerequisites : [], skill ? skill.id : "")
         : '<p class="module-empty module-empty--inline">暂无其他技能可选。</p>') +
@@ -254,7 +282,7 @@
       '<button type="button" class="btn btn--ghost" data-action="skills-cancel-form">取消</button>' +
       deleteBlock +
       '<button type="button" class="btn btn--primary" data-action="skills-submit-form">' +
-      (formMode === "edit" ? "保存修改" : "创建技能") +
+      (formMode === "edit" ? "保存状态" : "创建技能") +
       "</button></div></section>"
     );
   }
@@ -405,9 +433,16 @@
           "</p>"
         : "";
 
+    var riskHint =
+      node.prerequisiteRisk && node.isUnlocked
+        ? '<p class="skill-node__prereq skill-node__prereq--risk">前置风险：上游技能尚未全部掌握</p>'
+        : "";
+
+    var cssKey = getNodeCssKey(node);
+
     return (
       '<li class="skill-node skill-node--' +
-      api.escapeAttr(node.status || "available") +
+      api.escapeAttr(cssKey) +
       '">' +
       '<div class="skill-node__card">' +
       '<div class="skill-node__header">' +
@@ -415,14 +450,15 @@
       api.escapeHtml(node.title) +
       "</h3>" +
       '<span class="module-badge module-badge--skill-' +
-      api.escapeAttr(node.status || "available") +
+      api.escapeAttr(cssKey) +
       '">' +
-      api.escapeHtml(STATUS_LABEL[node.status] || node.status) +
+      api.escapeHtml(getNodeBadgeLabel(node)) +
       "</span></div>" +
       (node.description
         ? '<p class="skill-node__desc">' + api.escapeHtml(node.description) + "</p>"
         : "") +
       prereqHint +
+      riskHint +
       '<div class="skill-node__progress">' +
       '<div class="progress-bar" role="progressbar" aria-valuenow="' +
       mastery +
@@ -445,14 +481,14 @@
     var titleInput = document.getElementById("skillFormTitle");
     var descInput = document.getElementById("skillFormDesc");
     var parentSelect = document.getElementById("skillFormParent");
-    var statusSelect = document.getElementById("skillFormStatus");
+    var learningStateSelect = document.getElementById("skillFormLearningState");
     var masteryInput = document.getElementById("skillFormMastery");
     var prereqRoot = document.getElementById("skillFormPrereqs");
 
     var title = titleInput ? titleInput.value.trim() : "";
     var description = descInput ? descInput.value.trim() : "";
     var parentId = parentSelect ? parentSelect.value : "";
-    var status = statusSelect ? statusSelect.value : "available";
+    var learningState = learningStateSelect ? learningStateSelect.value : "not_started";
     var mastery = masteryInput ? parseInt(masteryInput.value, 10) : 0;
     var prerequisites = [];
 
@@ -466,7 +502,7 @@
       title: title,
       description: description || undefined,
       parentId: parentId || undefined,
-      status: status,
+      learningState: learningState,
       mastery: Number.isFinite(mastery) ? Math.min(100, Math.max(0, mastery)) : 0,
       prerequisites: prerequisites,
     };
@@ -490,10 +526,10 @@
         await api.post("/api/skills", payload);
         setBanner("success", "已创建技能：" + payload.title);
       } else if (formMode === "edit" && editingId) {
-        var updatePayload = Object.assign({}, payload);
-        updatePayload.parentId = payload.parentId || null;
-        await api.patch("/api/skills/" + encodeURIComponent(editingId), updatePayload);
-        setBanner("success", "已更新技能：" + payload.title);
+        await api.patch("/api/skills/" + encodeURIComponent(editingId), {
+          learningState: payload.learningState,
+        });
+        setBanner("success", "已更新学习状态：" + payload.title);
       }
       formMode = null;
       editingId = null;

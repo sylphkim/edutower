@@ -36,9 +36,18 @@ EduTower 使用 Express 作为面向前端的主后端，使用 FastAPI 作为 A
 当前状态：
 
 - Materials、Plan、Skills、Quiz、Wrongbook 主要使用 Prisma/SQLite。
+- Skills 的节点、DAG 前置依赖、学习状态、解锁资格和归档字段都由 Express 后端通过 Prisma/SQLite 管理。
 - MaterialFolders 已实现完整分层，但当前未在 `src/app.ts` 挂载为公开 API。
 - Memory 仍使用内存 mock。
 - Chat Context 仍使用 demo mock，不直接从数据库/RAG 读取。
+
+Skills 分层边界：
+
+- controller 只解析 `projectId`、`includeArchived` 和 PATCH body。
+- service 负责学习状态校验、自动解锁、前置风险派生和依赖环检测。
+- repository 负责 `KnowledgeNode` / `KnowledgeNodePrerequisite` 的 Prisma 读写和事务。
+- 前端只调用 Express API，不直接推导解锁资格或风险。
+- FastAPI AI Engine 不直接读写技能树数据库；后续需要技能上下文时由 Express 组装后传给 AI Engine。
 
 ## 分层职责
 

@@ -1,6 +1,21 @@
 import { NextFunction, Request, Response } from "express";
 import { skillsService } from "../services/skills.service";
 import { sendSuccess } from "../utils/apiResponse";
+import { AppError } from "../utils/errors";
+
+function getOptionalQueryString(req: Request, key: string): string | undefined {
+  const value = req.query[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throw new AppError("INVALID_REQUEST", `${key} must be a string.`, 400);
+  }
+
+  return value;
+}
 
 export async function listSkills(
   _req: Request,
@@ -15,12 +30,15 @@ export async function listSkills(
 }
 
 export async function getSkillTree(
-  _req: Request,
+  req: Request,
   res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
-    sendSuccess(res, await skillsService.getTree());
+    const projectId = getOptionalQueryString(req, "projectId");
+    const includeArchived = getOptionalQueryString(req, "includeArchived") === "true";
+
+    sendSuccess(res, await skillsService.getTree({ projectId, includeArchived }));
   } catch (error) {
     next(error);
   }
@@ -62,7 +80,8 @@ export async function updateSkill(
 ): Promise<void> {
   try {
     const { id } = req.params;
-    const result = await skillsService.update(id, req.body);
+    const projectId = getOptionalQueryString(req, "projectId");
+    const result = await skillsService.update(id, req.body, { projectId });
 
     sendSuccess(res, result);
   } catch (error) {

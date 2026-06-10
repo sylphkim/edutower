@@ -49,7 +49,22 @@ Frontend / static
 - 未捕获异常会返回 `INTERNAL_ERROR`。
 - 当前多数业务接口使用 Demo 用户，不要求登录态。
 
-## API 总览
+例如 `GET /api/health` 的健康检查响应：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "status": "ok",
+    "database": "not_configured"
+  }
+}
+```
+
+- `status`：`"ok"` 或 `"degraded"`（数据库异常时降级）。
+- `database`：`"ok"`、`"not_configured"`、`"error"`。当前阶段未配置 `DATABASE_URL` 时返回 `"not_configured"`。
+
+## API总览
 
 | Method | Path | Status | 说明 |
 | --- | --- | --- | --- |
@@ -287,31 +302,101 @@ Materials 已接 Prisma/SQLite。上传文件保存在 `uploads/materials/`，�
 
 ## Skills
 
-`/api/skills` 映射到 Prisma `KnowledgeNode`。当前仍围绕 Demo project 工作。
+`/api/skills` 映射到 Prisma `KnowledgeNode` 和 `KnowledgeNodePrerequisite`。技能树属于学习项目；`parentId/order` 只负责展示布局，真实业务依赖来自 DAG 前置边。
 
 | Method | Path | Status | 说明 |
 | --- | --- | --- | --- |
-| GET | `/api/skills` | partial | 查询技能平铺列表 |
-| GET | `/api/skills/tree` | partial | 查询技能树 |
-| GET | `/api/skills/:id` | partial | 查询单个技能 |
-| POST | `/api/skills` | partial | 创建技能 |
-| PATCH | `/api/skills/:id` | partial | 更新技能 |
-| DELETE | `/api/skills/:id` | partial | 删除技能 |
+| GET | `/api/skills` | partial | 查询 demo project 技能平铺列表 |
+| GET | `/api/skills/tree` | ready | 查询项目技能树、DAG 依赖边、解锁状态和风险提示 |
+| GET | `/api/skills/:id` | partial | 查询 demo project 单个技能 |
+| POST | `/api/skills` | partial | 创建 demo project 技能，结构管理仍是开发接口 |
+| PATCH | `/api/skills/:id` | ready | 受控修改学习状态，并触发后端自动解锁 |
+| DELETE | `/api/skills/:id` | partial | 当前仍是硬删除；后续会改成“有历史则归档” |
 
-核心字段：
+### `GET /api/skills/tree`
+
+Query：
+
+| 参数 | 说明 |
+| --- | --- |
+| `projectId` | 可选；不传时使用 demo project |
+| `includeArchived` | 可选；只有字符串 `"true"` 会包含归档节点 |
+
+成功响应的 `data`：
 
 ```json
 {
-  "id": "skill-id",
-  "title": "二次函数",
-  "description": "可选描述",
-  "parentId": null,
-  "prerequisites": [],
-  "status": "available",
-  "mastery": 0,
-  "order": 1
+  "items": [
+    {
+      "id": "skill-id",
+      "title": "二次函数定义",
+      "description": "可选描述",
+      "parentId": "parent-skill-id",
+      "prerequisites": [],
+      "learningState": "mastered",
+      "isUnlocked": true,
+      "unlockedAt": "2026-06-01T00:00:00.000Z",
+      "mastery": 100,
+      "order": 1,
+      "createdAt": "2026-06-10T00:00:00.000Z",
+      "updatedAt": "2026-06-10T00:00:00.000Z",
+      "prerequisiteRisk": false,
+      "riskPrerequisiteIds": [],
+      "children": []
+    }
+  ],
+  "dependencyEdges": [
+    {
+      "sourceId": "prerequisite-skill-id",
+      "targetId": "dependent-skill-id"
+    }
+  ]
 }
 ```
+
+说明：
+
+- `items` 是展示树；`dependencyEdges` 是真实 DAG 依赖边。
+- `description`、`parentId`、`unlockedAt`、`archivedAt` 无值时可能不出现在 JSON 中。
+- 默认只返回 `archivedAt = null` 的节点；活跃节点的 `parentId` 如果指向隐藏节点，会在展示树中提升为根，原始 `parentId` 不改。
+- `prerequisites` 和 `dependencyEdges` 只包含本次可见节点集合内的依赖。
+- `prerequisiteRisk` 只在 `isUnlocked=true` 的节点上计算。
+- `riskPrerequisiteIds` 返回整条可见上游依赖链中当前未 `mastered` 的祖先节点 id。
+- 如果本次可见依赖图存在环，返回 `409 INVALID_REQUEST`。
+
+### `PATCH /api/skills/:id`
+
+Query：
+
+| 参数 | 说明 |
+| --- | --- |
+| `projectId` | 可选；不传时使用 demo project |
+
+请求体只能包含一个字段：
+
+```json
+{
+  "learningState": "learning"
+}
+```
+
+`learningState` 只允许：
+
+```text
+not_started | learning | mastered
+```
+
+行为：
+
+- 只能修改学习状态，不能由客户端直接修改 `isUnlocked`、`unlockedAt`、`prerequisites`、`parentId`、`mastery`、`order` 或风险字段。
+- 节点不存在或不属于该 `projectId` 返回 404。
+- 归档节点返回 409。
+- 锁定节点只能 PATCH 当前状态作为幂等 no-op；要改成其他状态返回 409。
+- 解锁节点允许三态互转，包括 `mastered -> learning`。
+- 当节点实际变成 `mastered` 时，后端检查它的直接后续节点；所有直接前置都已 `mastered` 的活跃后续节点会自动 `isUnlocked=true` 并写入 `unlockedAt`。
+- 上游回退不会重新锁定后续节点；风险由下一次 `GET /api/skills/tree` 派生。
+
+专项说明见 `docs/SKILL_TREE.md`。
 
 ## Quiz
 

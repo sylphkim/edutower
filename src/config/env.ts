@@ -31,5 +31,7 @@ export const env = {
   llmBaseUrl:
     process.env.LLM_BASE_URL?.trim() || process.env.OPENAI_BASE_URL?.trim() || undefined,
   llmTimeoutMs: parseInteger(process.env.LLM_TIMEOUT_MS, 30000),
-  llmMaxOutputTokens: parseInteger(process.env.LLM_MAX_OUTPUT_TOKENS, 1000)
+  llmMaxOutputTokens: parseInteger(process.env.LLM_MAX_OUTPUT_TOKENS, 1000),
+
+  databaseUrl: process.env.DATABASE_URL?.trim() || ""
 };
