@@ -1,11 +1,12 @@
 import type { QuizDifficulty } from "../types/quiz";
 import { logger } from "../utils/logger";
-import { llmService } from "./llm.service";
+import { aiEngineService } from "./aiEngine.service";
 
 /**
- * 出题器：给定知识点 + 难度 + 题数，优先用 LLM 生成【单项选择题】。
- * 只要 LLM 不可用 / 报错 / 返回无法解析或不合格的内容，就退回内置 mock 题，
- * 保证调用方永远拿得到一组可用的题目——这个函数对外【绝不抛错】。
+ * 出题器：给定知识点 + 难度 + 题数，优先经 FastAPI AI Engine 出【单项选择题】。
+ * 按架构要求 Express 不直接调 LLM（前端 → Express → FastAPI → LLM），出题统一走
+ * aiEngineService.generateQuiz()。FastAPI 不可用 / 返回不合格时，退回内置 mock 题。
+ * 这个函数对外【绝不抛错】，调用方永远拿得到一组可用的单选题。
  */
 
 export interface GenerateQuestionsInput {
@@ -25,7 +26,7 @@ export interface GeneratedQuestion {
 }
 
 export interface GenerateQuestionsResult {
-  /** 这组题最终来自哪里：ai = LLM 真出题，mock = 兜底 */
+  /** 这组题最终来自哪里：ai = FastAPI 出题，mock = 兜底 */
   source: "ai" | "mock";
   questions: GeneratedQuestion[];
 }
@@ -34,7 +35,6 @@ const MIN_COUNT = 1;
 const MAX_COUNT = 20;
 const MIN_OPTIONS = 2;
 const MAX_EXPLANATION_LENGTH = 120;
-const MAX_AI_ATTEMPTS = 2;
 
 function clampCount(count: number): number {
   if (!Number.isFinite(count)) {
@@ -48,120 +48,37 @@ export const quizGenerator = {
   async generate(input: GenerateQuestionsInput): Promise<GenerateQuestionsResult> {
     const count = clampCount(input.count);
 
-    // LLM 输出不稳定，失败时重试几次再兜底，明显降低退回 mock 的概率。
-    for (let attempt = 1; attempt <= MAX_AI_ATTEMPTS; attempt += 1) {
-      try {
-        const questions = await generateWithLlm({ ...input, count });
+    try {
+      const rawQuestions = await aiEngineService.generateQuiz({
+        knowledgeTitle: input.knowledgeTitle,
+        knowledgeDescription: input.knowledgeDescription,
+        difficulty: input.difficulty,
+        count
+      });
 
-        if (questions.length > 0) {
-          return { source: "ai", questions: questions.slice(0, count) };
-        }
+      const questions = rawQuestions
+        .map((raw) => toGeneratedQuestion(raw))
+        .filter((question): question is GeneratedQuestion => question !== null);
 
-        logger.warn(`quizGenerator: 第 ${attempt} 次 LLM 未产出可用题目。`);
-      } catch (error) {
-        logger.warn(`quizGenerator: 第 ${attempt} 次 LLM 出题失败。`, error);
+      if (questions.length > 0) {
+        return { source: "ai", questions: questions.slice(0, count) };
       }
+
+      logger.warn("quizGenerator: AI Engine 未产出可用题目，改用 mock 兜底。");
+    } catch (error) {
+      logger.warn("quizGenerator: AI Engine 出题失败，改用 mock 兜底。", error);
     }
 
-    logger.warn("quizGenerator: LLM 多次失败，改用 mock 兜底。");
     return { source: "mock", questions: buildMockQuestions(input, count) };
   }
 };
 
-// ── AI 路径 ────────────────────────────────────────────────
-
-async function generateWithLlm(
-  input: GenerateQuestionsInput & { count: number }
-): Promise<GeneratedQuestion[]> {
-  const result = await llmService.generateText({
-    systemPrompt: buildSystemPrompt(input.difficulty),
-    userPrompt: buildUserPrompt(input),
-    temperature: 0.4,
-    maxOutputTokens: Math.min(6000, 800 * input.count + 1200),
-    jsonMode: true
-  });
-
-  return parseQuestionList(result.text)
-    .map((raw) => toGeneratedQuestion(raw))
-    .filter((question): question is GeneratedQuestion => question !== null);
-}
-
-function buildSystemPrompt(difficulty: QuizDifficulty): string {
-  const difficultyLine =
-    difficulty === "high_score"
-      ? "难度：偏高。考查细节、易错点和综合应用，可以设置有迷惑性的干扰项。"
-      : "难度：基础。考查核心概念，题目直接、不绕弯，不要怪题偏题。";
-
-  return [
-    "你是一位严谨的出题老师，只出【单项选择题】。",
-    difficultyLine,
-    "直接输出 JSON 对象本身，不要输出任何思考过程、解题草稿或代码围栏。",
-    "explanation 只写结论性理由、一句话、不超过 40 字，不要写推导过程。"
-  ].join("\n");
-}
-
-function buildUserPrompt(input: GenerateQuestionsInput & { count: number }): string {
-  const description = input.knowledgeDescription?.trim()
-    ? `知识点说明：${input.knowledgeDescription.trim()}`
-    : "知识点说明：（无）";
-
-  return [
-    `知识点：${input.knowledgeTitle}`,
-    description,
-    `请围绕该知识点出 ${input.count} 道单项选择题。`,
-    "要求：",
-    "- 用简体中文。",
-    "- 每题给 3 到 4 个选项，有且只有一个正确答案。",
-    "- answer 字段必须与 options 中的某一项【完全一致，一字不差】。",
-    "- explanation 用一句话给出结论性理由，不超过 40 字，不要写推导过程。",
-    "只输出如下结构的 JSON 对象，不要任何额外文字：",
-    '{"questions":[{"prompt":"题干","options":["选项1","选项2","选项3"],"answer":"正确选项原文","explanation":"解析"}]}'
-  ].join("\n");
-}
-
-/**
- * 解析模型返回，拿到题目数组。
- * JSON 模式下通常整段就是 {"questions":[...]}；这里也兼容直接给数组，
- * 以及偶尔被代码围栏/多余文字包裹的情况。解析失败抛错，由 generate() 兜底。
- */
-function parseQuestionList(text: string): unknown[] {
-  const parsed = safeJsonParse(text.trim());
-
-  if (Array.isArray(parsed)) {
-    return parsed;
-  }
-
-  if (
-    parsed &&
-    typeof parsed === "object" &&
-    Array.isArray((parsed as { questions?: unknown }).questions)
-  ) {
-    return (parsed as { questions: unknown[] }).questions;
-  }
-
-  throw new Error("LLM 返回的 JSON 里没有题目数组。");
-}
-
-/**
- * 先整体 JSON.parse；失败时再宽容地截取第一个 { 到最后一个 }（应对围栏/多余文字）。
- */
-function safeJsonParse(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-
-    if (start !== -1 && end > start) {
-      return JSON.parse(text.slice(start, end + 1));
-    }
-
-    throw new Error("LLM 返回内容不是合法 JSON。");
-  }
-}
+// ── 校验 / 规整 FastAPI 返回的题目 ─────────────────────────────
 
 /**
  * 把一条原始记录校验并规整成 GeneratedQuestion；不合格返回 null（丢弃该题）。
+ * 不管题来自 FastAPI 哪种实现，这里都做一层防御：答案必须对齐到某个选项、
+ * 选项去重、解析过长截断、题型强制单选。
  */
 function toGeneratedQuestion(raw: unknown): GeneratedQuestion | null {
   if (typeof raw !== "object" || raw === null) {
@@ -179,7 +96,7 @@ function toGeneratedQuestion(raw: unknown): GeneratedQuestion | null {
   const rawAnswer = typeof record.answer === "string" ? record.answer.trim() : "";
   const explanation = normalizeExplanation(record.explanation);
 
-  // 去重，避免模型给出重复选项
+  // 去重，避免重复选项
   const uniqueOptions = Array.from(new Set(options));
 
   if (!prompt || uniqueOptions.length < MIN_OPTIONS || !rawAnswer) {
@@ -201,8 +118,7 @@ function toGeneratedQuestion(raw: unknown): GeneratedQuestion | null {
 }
 
 /**
- * explanation 兜底清洗：trim、空串归 undefined、过长截断，
- * 防止模型把解题草稿塞进 explanation 里。
+ * explanation 兜底清洗：trim、空串归 undefined、过长截断，防止把解题草稿塞进来。
  */
 function normalizeExplanation(value: unknown): string | undefined {
   if (typeof value !== "string") {
@@ -245,7 +161,7 @@ function resolveAnswer(answer: string, options: string[]): string | null {
 // ── 兜底路径：内置 mock 题（全单选） ──────────────────────────
 
 /**
- * AI 不可用时的兜底题。题目模板化、围绕知识点标题，
+ * FastAPI 出题不可用时的兜底题。题目模板化、围绕知识点标题，
  * explanation 里明确标注是兜底题，方便和真·AI 题区分。
  */
 function buildMockQuestions(input: GenerateQuestionsInput, count: number): GeneratedQuestion[] {

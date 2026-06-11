@@ -14,6 +14,13 @@ export interface AiEngineChatResult {
   reply: string;
 }
 
+export interface AiEngineQuizParams {
+  knowledgeTitle: string;
+  knowledgeDescription?: string;
+  difficulty: "pass" | "high_score";
+  count: number;
+}
+
 type RecordLike = Record<string, unknown>;
 
 export class AiEngineService {
@@ -80,6 +87,64 @@ export class AiEngineService {
 
     // 2) 降级：使用本地 llmService 直接调用 LLM
     return this.fallbackChat(sessionId, message, params.context);
+  }
+
+  /**
+   * 出题：转发给 FastAPI AI Engine 的 /generate-quiz。
+   * 按架构要求只经 FastAPI，不走本地 LLM 降级；失败直接抛错，
+   * 由上层 quizGenerator 退回 mock。返回原始题目数组，交由上层校验。
+   */
+  async generateQuiz(params: AiEngineQuizParams): Promise<unknown[]> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), env.aiEngineTimeoutMs);
+
+    try {
+      const response = await fetch(this.generateQuizUrl(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          knowledge_title: params.knowledgeTitle,
+          knowledge_description: params.knowledgeDescription,
+          difficulty: params.difficulty,
+          count: params.count
+        }),
+        signal: controller.signal
+      });
+
+      const data = await this.readJson(response);
+
+      if (
+        response.ok &&
+        isRecordLike(data) &&
+        Array.isArray((data as { questions?: unknown }).questions)
+      ) {
+        return (data as { questions: unknown[] }).questions;
+      }
+
+      throw new AppError("AI_ENGINE_REQUEST_FAILED", "AI engine 出题返回异常。", 502);
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      const reason =
+        error instanceof Error && error.name === "AbortError"
+          ? "timeout"
+          : error instanceof Error
+            ? error.message
+            : String(error);
+
+      throw new AppError(
+        "AI_ENGINE_CONNECTION_ERROR",
+        `AI engine 出题不可达 (${reason})。`,
+        502,
+        error
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   // ── 降级逻辑：本地 LLM ──────────────────────────────────────
@@ -211,6 +276,10 @@ export class AiEngineService {
 
   private chatUrl(): string {
     return new URL("/chat", env.aiEngineBaseUrl).toString();
+  }
+
+  private generateQuizUrl(): string {
+    return new URL("/generate-quiz", env.aiEngineBaseUrl).toString();
   }
 
   private async readJson(response: Response): Promise<unknown> {
