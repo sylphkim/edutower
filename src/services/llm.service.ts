@@ -33,7 +33,8 @@ export class LLMService {
         }
       ],
       temperature: params.temperature,
-      maxOutputTokens: params.maxOutputTokens
+      maxOutputTokens: params.maxOutputTokens,
+      jsonMode: params.jsonMode
     });
   }
 
@@ -83,6 +84,7 @@ export class LLMService {
     messages: LLMMessage[];
     temperature?: number;
     maxOutputTokens?: number;
+    jsonMode?: boolean;
   }): Promise<LLMResult> {
     try {
       const response = await this.getClient().chat.completions.create(
@@ -90,7 +92,10 @@ export class LLMService {
           model: env.llmModel,
           messages: params.messages as ChatCompletionMessageParam[],
           temperature: this.normalizeTemperature(params.temperature),
-          max_tokens: this.normalizeMaxOutputTokens(params.maxOutputTokens)
+          max_tokens: this.normalizeMaxOutputTokens(params.maxOutputTokens),
+          ...(params.jsonMode
+            ? { response_format: { type: "json_object" as const } }
+            : {})
         },
         {
           timeout: env.llmTimeoutMs
