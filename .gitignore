@@ -13,3 +13,4 @@ uploads/materials/*
 !uploads/materials/.gitkeep
 *.memory-card.json
 /src/generated/prisma
+.claude

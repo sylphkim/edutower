@@ -18,6 +18,8 @@ EduTower 使用 Express 作为面向前端的主后端，使用 FastAPI 作为 A
 | Chat Context | `src/services/chatContext.service.ts`, `src/types/chatContext.ts`, `src/mock/demo*.ts` | 组装当前 demo 学习上下文 |
 | Agent Panel | `src/routes/agentPanel.routes.ts`, `src/controllers/agentPanel.controller.ts`, `src/services/agentPanel.service.ts`, `src/types/agentPanel.ts` | 基于 demo context 和错题数据输出面板信息 |
 | 文件上传中间件 | `src/middlewares/materialUpload.middleware.ts` | 校验并保存资料上传文件 |
+| 本地日期工具 | `src/utils/localDate.ts` | Asia/Shanghai 本地日期与次日零点计算，供每日学习单使用 |
+| 零点 Sweeper | `src/services/dailySheetSweeper.ts`, `src/server.ts` | 每 60 秒扫描过零点未结束的学习单并强制结算；服务启动时挂载 |
 
 ## 产品模块
 
@@ -27,7 +29,8 @@ EduTower 使用 Express 作为面向前端的主后端，使用 FastAPI 作为 A
 | --- | --- | --- | --- | --- | --- | --- |
 | Materials | `src/routes/materials.routes.ts` | `src/controllers/materials.controller.ts` | `src/services/materials.service.ts` | `src/repositories/materials.repository.ts` | `src/types/materials.ts` | `src/mock/materials.ts` |
 | MaterialFolders | `src/routes/materialFolders.routes.ts` | `src/controllers/materialFolders.controller.ts` | `src/services/materialFolders.service.ts` | `src/repositories/materialFolders.repository.ts` | `src/types/materialFolders.ts` | none |
-| Plan | `src/routes/plan.routes.ts` | `src/controllers/plan.controller.ts` | `src/services/plan.service.ts` | `src/repositories/projects.repository.ts` | `src/types/plan.ts` | `src/mock/plan.ts` |
+| Plan | `src/routes/plan.routes.ts` | `src/controllers/plan.controller.ts`, `src/controllers/planVersions.controller.ts`, `src/controllers/planProposals.controller.ts` | `src/services/plan.service.ts`, `src/services/planVersions.service.ts`, `src/services/planProposals.service.ts`, `src/services/planProposalValidation.ts` | `src/repositories/projects.repository.ts`, `src/repositories/planVersions.repository.ts`, `src/repositories/planProposals.repository.ts` | `src/types/plan.ts`, `src/types/planVersion.ts`, `src/types/planProposal.ts` | `src/mock/plan.ts` |
+| DailyTasks | `src/routes/dailyTasks.routes.ts` | `src/controllers/dailyTasks.controller.ts` | `src/services/dailyTasks.service.ts`, `src/services/dailySummaries.service.ts`, `src/services/dailyTaskGeneration.ts`, `src/services/dailyTaskMappers.ts` | `src/repositories/dailyTaskSheets.repository.ts` | `src/types/dailyTasks.ts` | none |
 | Skills | `src/routes/skills.routes.ts` | `src/controllers/skills.controller.ts` | `src/services/skills.service.ts` | `src/repositories/knowledgeNodes.repository.ts` | `src/types/skills.ts` | `src/mock/skills.ts`, `src/mock/knowledgePoints.ts` |
 | Quiz | `src/routes/quiz.routes.ts` | `src/controllers/quiz.controller.ts` | `src/services/quiz.service.ts` | `src/repositories/quizzes.repository.ts` | `src/types/quiz.ts` | `src/mock/quiz.ts` |
 | Wrongbook | `src/routes/wrongbook.routes.ts` | `src/controllers/wrongbook.controller.ts` | `src/services/wrongbook.service.ts` | `src/repositories/wrongbook.repository.ts` | `src/types/wrongbook.ts` | `src/mock/wrongbook.ts`, `src/mock/wrongbookTaxonomy.ts` |
@@ -35,10 +38,10 @@ EduTower 使用 Express 作为面向前端的主后端，使用 FastAPI 作为 A
 
 当前状态：
 
-- Materials、Plan、Skills、Quiz、Wrongbook 主要使用 Prisma/SQLite。
+- Materials、Plan、DailyTasks、Skills、Quiz、Wrongbook 主要使用 Prisma/SQLite。
 - Skills 的节点、DAG 前置依赖、学习状态、解锁资格和归档字段都由 Express 后端通过 Prisma/SQLite 管理。
 - MaterialFolders 已实现完整分层，但当前未在 `src/app.ts` 挂载为公开 API。
-- Memory 仍使用内存 mock。
+- Memory 仍使用内存 mock；每日总结确认后写入的记忆同样落在 mock 中。
 - Chat Context 仍使用 demo mock，不直接从数据库/RAG 读取。
 
 Skills 分层边界：
@@ -48,6 +51,15 @@ Skills 分层边界：
 - repository 负责 `KnowledgeNode` / `KnowledgeNodePrerequisite` 的 Prisma 读写和事务。
 - 前端只调用 Express API，不直接推导解锁资格或风险。
 - FastAPI AI Engine 不直接读写技能树数据库；后续需要技能上下文时由 Express 组装后传给 AI Engine。
+
+DailyTasks 分层边界：
+
+- controller 只解析 `projectId`、`taskId`、`summaryId`、query 和 body，调用 service 返回统一响应。
+- `dailyTasks.service` 负责今日学习单的幂等获取/生成、任务状态流转、重排和用户结束入口。
+- `dailySummaries.service` 负责结束流程：证据聚合、总结草稿、规则建议、决策应用和零点强制结算。
+- `dailyTaskGeneration.ts` 是纯生成逻辑：系统规则限定候选池，AI 只在候选内排序、取舍并解释，输出经严格校验，失败回退规则排序。
+- `dailyTaskSheets.repository` 负责学习单、任务、总结、建议、薄弱点、状态事件的 Prisma 读写和事务；建议决策事务复用 `knowledgeNodes.repository` 导出的状态变更与自动解锁函数，保证与 Skills PATCH 同一套解锁规则。
+- AI 调用走 `llm.service`（OpenAI-compatible provider）；未配置 key 或调用失败时整条链路保持可用。
 
 ## 分层职责
 

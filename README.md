@@ -32,13 +32,20 @@ Frontend / static
 - `GET /api/skills/tree` 返回项目内稳定技能结构、依赖边、学习状态、解锁状态和前置风险。
 - `PATCH /api/skills/:id` 已收窄为学习状态修改入口，后端负责自动解锁直接后续节点。
 - 已提供二次函数 demo 技能树 seed，可用于本地联调和规则验证。
+- 整体计划（阶段计划）已持久化：版本历史、草稿编辑、确认与修订，整体计划和技能树共用同一套知识点。
+- `POST /api/plan/:projectId/proposals/apply` 可接收 AI Engine 的结构化提案，单事务初始化知识树和版本 1 计划。
+- 每日学习单（`/api/daily`）闭环：进入项目幂等生成今日任务并持久化，刷新只读取；系统规则限定候选（续排/薄弱点/错题/进行中/当前阶段新知识点），AI 只在候选内排序取舍并解释，失败回退规则。
+- 任务状态流转、用户重排未完成任务；任务全部完成、用户主动结束或 24:00 零点都会结束当天学习。
+- 结束当天生成总结草稿与待确认建议；建议确认后回写技能树（复用自动解锁）、薄弱点和状态事件；零点由系统直接判定并保留判断依据。
 
 仍未完成或后续继续做：
 
 - 登录鉴权与真实多用户隔离。
 - 文件解析、OCR、RAG、向量数据库。
 - 上传文件的静态访问或下载接口。
-- 真实学习计划、测验、每日总结的 AI 生成闭环。
+- 聊天对话持久化到 `Conversation`（当天学习记录的子对话目前为空）。
+- Memory 仍是内存 mock；AI Engine 侧的整体计划提案生成链路。
+- Quiz 题目生成仍是 mock 规则。
 - 技能节点删除策略还未切换为“有历史学习记录则归档”；数据模型已有 `archivedAt`，tree 查询默认隐藏归档节点。
 - 完整自动化测试套件。
 
@@ -208,6 +215,8 @@ seed 会在 `demo-project` 下写入 10 个“高中数学二次函数”技能�
 | Materials | `POST /api/materials`, `PATCH /api/materials/:id`, `DELETE /api/materials/:id` |
 | Upload | `POST /api/materials/upload` |
 | Plan | `GET /api/plan`, `POST /api/plan`, `PATCH /api/plan/:id`, `DELETE /api/plan/:id` |
+| Plan Versions | `GET/POST /api/plan/:projectId/versions`, `PATCH /api/plan/:projectId/versions/:versionId`, `POST .../confirm`, `POST .../revise`, `POST /api/plan/:projectId/proposals/apply` |
+| Daily | `GET/POST /api/daily/:projectId/today`, `POST .../today/regenerate`, `POST .../today/close`, `GET /api/daily/:projectId/sheets`, `PATCH /api/daily/:projectId/tasks/:taskId`, `POST /api/daily/:projectId/summaries/:summaryId/decisions` |
 | Skills | `GET /api/skills`, `GET /api/skills/tree`, `POST /api/skills`, `PATCH /api/skills/:id`, `DELETE /api/skills/:id` |
 | Quiz | `GET /api/quiz`, `POST /api/quiz`, `POST /api/quiz/:id/submit`, `DELETE /api/quiz/:id` |
 | Wrongbook | `GET /api/wrongbook`, `POST /api/wrongbook`, `PATCH /api/wrongbook/:id`, `DELETE /api/wrongbook/:id` |
@@ -270,6 +279,14 @@ FastAPI AI Engine 接口：
 -> 返回统一格式的 AI 回复
 ```
 
+```text
+进入项目
+-> POST /api/daily/:projectId/today 幂等生成今日任务
+-> PATCH 任务状态，全部完成自动结束（或 POST close / 零点强制结束）
+-> 总结建议 accept/modify/reject
+-> 技能树、薄弱点、状态事件回写
+```
+
 验收时至少确认：
 
 - `npm.cmd run build` 通过。
@@ -279,3 +296,7 @@ FastAPI AI Engine 接口：
 - 删除上传资料后磁盘文件和数据库记录都消失。
 - 删除文本或链接资料不会误删文件。
 - `POST /api/ai/chat` 能拿到 AI Engine 返回的回复，或在 AI Engine 不可用时走现有降级逻辑。
+- 重复 `POST /api/daily/:projectId/today` 返回同一张学习单（200），不重新生成。
+- 未配置 `LLM_API_KEY` 时每日任务仍可生成（规则排序兜底）。
+- 最后一个任务 `done` 后响应 `autoClosed=true` 并附总结与建议。
+- 建议确认后 `KnowledgeNode` 状态/掌握度更新，`KnowledgeStateEvent` 留有证据快照。

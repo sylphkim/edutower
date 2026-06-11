@@ -159,14 +159,16 @@ Plan API 映射：
 
 ### DailyTaskSheet
 
-`DailyTaskSheet` 表示一个项目某一天生成并持久化的学习单。
+`DailyTaskSheet` 表示一个项目某一天生成并持久化的学习单，由 `/api/daily` 模块读写。
 
 - `localDate` 使用 `YYYY-MM-DD` 字符串，`timezone` 固定默认为 `Asia/Shanghai`。
-- `@@unique([projectId, localDate])` 保证同项目同一天只存在一张学习单，页面刷新只能读取已有记录。
-- 可选关联生成时使用的计划版本和当前阶段。
-- `availableMinutes` 保存当天时间预算；`inputSnapshot` 保存生成依据快照。
-- 状态为 `generating/active/awaiting_confirmation/completed/forced_closed/generation_failed`。
-- `closesAt` 保存计划关闭时间，`endedAt` 和 `closeReason` 保存实际结束结果。
+- `@@unique([projectId, localDate])` 保证同项目同一天只存在一张学习单；生成先以 `generating` 状态占位创建，唯一约束冲突表示并发请求已占位，页面刷新只能读取已有记录。
+- 可选关联生成时使用的已确认计划版本（`planVersionId`）和当前阶段（`currentPhaseId`）。当前阶段是已确认计划中第一个仍含未掌握知识点的阶段，用于限定新知识点候选。
+- `availableMinutes` 保存当天时间预算（项目 `dailyMinutes`，缺省 60，范围 15–480）。
+- `inputSnapshot` 以 `{ "generations": [...] }` 形式累积每次编排的判断依据：候选池（含每条候选的规则证据）、AI/规则选择模式、模型信息、入选结果与失败原因。该字段不通过 API 返回，仅用于审计。
+- 状态机：`generating ->（成功）active /（失败）generation_failed`；`active -> awaiting_confirmation`（结束后有待确认建议）或直接 `completed`；全部建议决策完成后 `awaiting_confirmation -> completed`；零点强制路径最终为 `forced_closed`。`generation_failed` 可被再次 POST 重新认领生成。
+- `closesAt` 固定为本地日期次日 00:00（Asia/Shanghai），是零点强制结束的判定时间；`endedAt` 和 `closeReason`（`all_tasks_done/user/midnight`）保存实际结束结果。
+- 重排（regenerate）不删除任务：未完成任务标记 `cancelled`，新批次任务的 `generationBatch` 取自增后的 `generationCount`。
 
 ### ProjectMaterial
 
@@ -200,7 +202,7 @@ API 映射：
 - `PlanTask.status -> StudyTask.status`
 - `PlanDay.day -> StudyTask.day`
 
-兼容边界：现有任务不回填 `dailyTaskSheetId`，`day` 继续保留且可空。每日任务被重新生成替换时可标记为 `cancelled`，不删除历史记录。
+兼容边界：现有任务不回填 `dailyTaskSheetId`，`day` 继续保留且可空。每日任务被重新生成替换时标记为 `cancelled`，不删除历史记录。旧 Plan API 更新任务时只清理 `dailyTaskSheetId = null` 的按天任务，不会触碰每日学习单上的任务。
 
 删除 `Material` 或 `KnowledgeNode` 时，任务上的对应引用会置空，保留任务历史。
 
@@ -330,22 +332,23 @@ API 映射：
 
 ### DailySummary / SummarySuggestion
 
-`DailySummary` 保存每日总结草稿和用户确认后的内容。
+`DailySummary` 保存每日总结草稿和确认后的内容，由结束当天学习的流程创建。
 
-`SummarySuggestion` 保存 AI 提出的状态、薄弱点或复习建议，等待用户接受、修改或拒绝。
+`SummarySuggestion` 保存系统规则生成的状态、薄弱点或复习建议，等待用户接受、修改或拒绝。AI 只负责总结正文（`aiDraft`，失败时回退模板），不直接产生或决策建议。
 
-- 新总结可唯一关联一张 `DailyTaskSheet`；旧记录继续允许只关联 `StudySession`。
-- 总结状态增加 `awaiting_confirmation`，表示存在尚未决策的建议。
-- `confirmationSource` 区分用户确认、系统确认和零点强制确认。
-- `SummarySuggestion.decisionSource` 区分用户决策与系统强制决策。
+- 新总结唯一关联一张 `DailyTaskSheet`；旧记录继续允许只关联 `StudySession`。
+- 有待决策建议时总结为 `awaiting_confirmation`；全部建议决策完成（或没有建议）后变为 `confirmed`。
+- `confirmationSource` 区分用户确认（`user`）、任务全部完成时的系统确认（`system`）和零点强制确认（`system_forced`）。
+- `SummarySuggestion.decisionSource` 区分用户决策与系统强制决策；`modifiedContent` 保存用户修改后的内容。
+- 总结确认后会写入每日总结型长期记忆（当前 Memory 仍是内存 mock）。
 
 ### WeakPoint / KnowledgeStateEvent
 
-`WeakPoint` 是项目内已确认薄弱点，必须关联一个 `KnowledgeNode`。它保存严重度、状态、证据快照及确认来源；零点强制产生的记录使用 `system_forced`。
+`WeakPoint` 是项目内已确认薄弱点，必须关联一个 `KnowledgeNode`。`weakness` 类建议被接受（用户或零点系统强制）时创建或刷新：保存严重度（按当天测验正确率与新增错题数判定）、状态、证据快照及确认来源；零点强制产生的记录使用 `system_forced`。同一知识点的活跃薄弱点只保留一条，重复确认会刷新严重度和证据。
 
-`KnowledgeStateEvent` 是知识点状态和掌握度变化的不可变审计记录，可关联每日学习单和总结建议。它只定义数据基础，本阶段不会自动写入事件。
+`KnowledgeStateEvent` 是知识点状态和掌握度变化的不可变审计记录。`knowledge_status` 类建议生效时写入：保存变更前后的 `learningState/mastery`、来源（`user_confirmation/system_forced`）和证据快照（建议内容、当天测验与错题数据、决策方式）。零点自动结束的"系统直接判断"依据就保留在这里。
 
-当前 Memory API 仍使用内存 mock；`DailySummary` 和 `SummarySuggestion` 是后续真实长期记忆和学习闭环的数据基础。
+每日任务候选与建议生成读取 `WeakPoint`（活跃薄弱点进入候选池）形成闭环。
 
 ## API 到 Prisma 映射
 
