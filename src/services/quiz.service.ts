@@ -115,9 +115,7 @@ function toApiQuiz(quiz: QuizWithQuestions): QuizItem {
       prompt: question.prompt,
       options: question.options.length
         ? question.options.map((option) => option.text)
-        : undefined,
-      answer: question.answer,
-      explanation: question.explanation ?? undefined
+        : undefined
     })),
     createdAt: quiz.createdAt.toISOString()
   };

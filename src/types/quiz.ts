@@ -10,6 +10,10 @@ export interface QuizQuestion {
   explanation?: string;
 }
 
+// 取测验作答时返回给前端的题目：故意不含 answer / explanation，
+// 防止交卷前就把答案泄露给客户端。判分一律走服务端 /submit。
+export type QuizQuestionPublic = Omit<QuizQuestion, "answer" | "explanation">;
+
 export interface QuizItem {
   id: string;
   title: string;
@@ -17,7 +21,7 @@ export interface QuizItem {
   skillId?: string;
   studyTaskId?: string;
   difficulty: QuizDifficulty;
-  questions: QuizQuestion[];
+  questions: QuizQuestionPublic[];
   createdAt: string;
 }
 

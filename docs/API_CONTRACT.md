@@ -78,7 +78,7 @@ Frontend / static
 | `/api/plan` | partial | 旧学习计划 CRUD 已持久化；阶段计划版本与提案接口为 ready |
 | `/api/daily` | ready | 每日学习单：生成、任务状态、重排、结束、总结建议决策、历史查询 |
 | `/api/skills` | partial | 知识点/技能 CRUD 已持久化，仍使用 demo project |
-| `/api/quiz` | partial | Quiz 持久化，题目生成仍是 mock 规则 |
+| `/api/quiz` | partial | Quiz 持久化；题目由 AI 生成、失败兜底 mock；取测验不返回正确答案 |
 | `/api/wrongbook` | partial | 错题项持久化，taxonomy 仍是服务端常量 |
 | `/api/memory` | mock | 长期记忆当前为内存 mock |
 | `/api/material-folders` | implemented-not-mounted | 文件夹模块已实现，但当前未在 `app.ts` 挂载 |
@@ -738,9 +738,9 @@ Quiz、Question、Attempt 已接 Prisma；题目生成仍是 mock 规则，不�
 
 | Method | Path | Status | 说明 |
 | --- | --- | --- | --- |
-| GET | `/api/quiz` | partial | 查询测验列表 |
-| GET | `/api/quiz/:id` | partial | 查询单个测验 |
-| POST | `/api/quiz` | partial | 创建 mock 测验 |
+| GET | `/api/quiz` | partial | 查询测验列表（题目不含正确答案/解析） |
+| GET | `/api/quiz/:id` | partial | 查询单个测验（题目不含正确答案/解析） |
+| POST | `/api/quiz` | partial | 创建测验（AI 出题，失败兜底 mock；响应不含正确答案） |
 | POST | `/api/quiz/:id/submit` | partial | 提交答案并写入答题记录/错题 |
 | DELETE | `/api/quiz/:id` | partial | 删除测验 |
 
