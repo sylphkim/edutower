@@ -1,8 +1,8 @@
-import type { Material } from "../types/material";
-import type { Plan } from "../types/plan";
-import type { QuizResult } from "../types/quizResult";
-import type { Skill } from "../types/skill";
-import type { WrongBookRecord } from "../types/wrongbook";
+import type { MaterialItem } from "../types/materials";
+import type { PlanItem } from "../types/plan";
+import type { QuizItem } from "../types/quiz";
+import type { SkillItem } from "../types/skills";
+import type { WrongbookItem } from "../types/wrongbook";
 import { aiEngineService, type AiEngineChatParams } from "./aiEngine.service";
 
 // ── Agent 对话 ────────────────────────────────────────
@@ -14,11 +14,11 @@ export interface AgentChatRequest {
 }
 
 export interface AgentContext {
-  plan?: Plan;
-  skills?: Skill[];
-  materials?: Material[];
-  recentQuizResults?: QuizResult[];
-  wrongbookRecords?: WrongBookRecord[];
+  plan?: PlanItem;
+  skills?: SkillItem[];
+  materials?: MaterialItem[];
+  recentQuizResults?: QuizItem[];
+  wrongbookRecords?: WrongbookItem[];
 }
 
 export class AgentService {
@@ -35,7 +35,9 @@ export class AgentService {
         materials: [],
         knowledgePoints: [],
         weakPoints: [],
-        history: [],
+        sessionHistory: [],
+        memories: [],
+        generatedAt: new Date().toISOString(),
       },
     };
 

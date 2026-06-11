@@ -105,6 +105,31 @@ Frontend
 - 独立的结构管理接口和手动解锁接口尚未实现。
 - Skills 仍默认使用 demo project；真实用户/项目权限隔离放到用户系统阶段处理。
 
+### Phase 6: 整体计划与每日任务闭环
+
+状态：Express 后端已完成，前端对接和聊天对话持久化不在本阶段范围内。
+
+整体计划（阶段计划）：
+
+- `StudyPlanVersion/PlanPhase/PlanPhaseKnowledgeNode` 持久化阶段计划版本，整体计划和技能树共用同一套 `KnowledgeNode`，计划只负责展示学习路线，实际进度以技能树为准。
+- `/api/plan/:projectId/versions` 提供版本历史、草稿编辑、确认与修订。
+- `POST /api/plan/:projectId/proposals/apply` 接收 AI Engine 的结构化提案，严格校验后在单事务内初始化知识树、前置 DAG 和版本 1 阶段计划。
+
+每日任务（`/api/daily`）：
+
+- 同项目同一天唯一一张 `DailyTaskSheet`，生成后持久化，刷新只读取不重算。
+- 候选池由系统规则限定：昨日未完成续排、活跃薄弱点、未订正错题、进行中知识点、当前阶段新知识点；AI 只在候选内排序、取舍和解释，输出非法或模型不可用时回退规则排序。
+- 任务状态流转、用户重排未完成任务（旧批次 `cancelled`，新批次自增）。
+- 三种结束方式：任务全部完成自动结束、用户主动结束、24:00 零点强制结束（定时 sweeper + 接口惰性兜底双保险）。
+- 结束生成总结（AI 草稿、模板兜底）与规则建议；用户对建议 accept/modify/reject，确认后在同一事务内更新技能树（复用自动解锁规则）、薄弱点和状态事件，并写入每日总结记忆（Memory 仍为 mock）。
+- 零点强制结束由系统直接按建议内容决策（`system_forced`），判断依据保留在 `KnowledgeStateEvent/WeakPoint` 的证据快照中。
+
+当前未完成：
+
+- 聊天对话尚未写入 `Conversation` 表，当天学习记录中的 `conversations` 通常为空。
+- Memory 仍是内存 mock，总结确认写入的记忆重启即丢。
+- 每日任务尚未关联具体资料（`materialId` 字段已预留）。
+
 ## 下一阶段真实能力
 
 推荐按下面顺序接入，不要一次性铺太多面。
@@ -138,10 +163,11 @@ Frontend
 
 ### 5. AI 生成学习计划和测验
 
-- Plan：基于学习目标、可用时间、资料、技能薄弱点生成计划草稿。
-- Quiz：基于资料 chunks 和 skill 生成题目。
+- Plan：整体计划提案落库（`proposals/apply`）和每日任务编排已完成；AI Engine 侧的提案生成 prompt/工具链仍需补齐。
+- Quiz：基于资料 chunks 和 skill 生成题目（当前仍是 mock 规则）。
 - Wrongbook：继续从 quiz submit 沉淀错题。
-- Memory：从学习事件、错题、计划完成情况中生成长期记忆。
+- Memory：把每日总结确认后的记忆写入从内存 mock 换成 Prisma 持久化，再扩展到学习事件和错题。
+- Conversation：把 `/api/ai/chat` 的对话写入 `Conversation/Message`，让当天学习记录的子对话生效。
 
 ### 6. 用户系统与权限
 
@@ -208,11 +234,11 @@ Frontend
 
 ## 当前推荐工作顺序
 
-1. 补齐文档：README、API_CONTRACT、DEVELOPMENT_FLOW、MODULE_SPLIT。
-2. 挂载并验收 `/api/material-folders`。
-3. 设计受控文件下载接口。
-4. 接入文件解析，先做 PDF，再做 DOC/DOCX 和图片 OCR。
-5. 设计资料 chunks/RAG schema。
-6. 用真实资料上下文替换 demo chat context。
-7. 接 AI 生成计划和测验。
+1. 前端对接 `/api/daily` 今日任务闭环和阶段计划版本接口。
+2. 把 `/api/ai/chat` 对话持久化到 `Conversation/Message`，点亮当天学习记录的子对话。
+3. Memory 从内存 mock 换成 Prisma 持久化。
+4. AI Engine 侧补齐整体计划提案生成，调用 `POST /api/plan/:projectId/proposals/apply`。
+5. 挂载并验收 `/api/material-folders`；设计受控文件下载接口。
+6. 接入文件解析（PDF → DOC/DOCX → 图片 OCR），设计资料 chunks/RAG schema。
+7. 用真实资料上下文替换 demo chat context；Quiz 从 mock 规则换成 AI 生成。
 8. 引入真实用户和权限隔离。

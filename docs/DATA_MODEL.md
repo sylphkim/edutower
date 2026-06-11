@@ -25,11 +25,17 @@ StudyProject
 ├─ ProjectMaterial -> Material
 ├─ KnowledgeNode
 │  └─ KnowledgeNodePrerequisite
-├─ StudyTask
+├─ StudyPlanVersion
+│  └─ PlanPhase
+│     └─ PlanPhaseKnowledgeNode -> KnowledgeNode
+├─ DailyTaskSheet
+│  ├─ StudyTask
+│  └─ DailySummary
 ├─ StudySession
 ├─ Quiz
 ├─ WrongbookItem
-└─ DailySummary
+├─ WeakPoint
+└─ KnowledgeStateEvent
 ```
 
 测验与错题关系：
@@ -138,6 +144,32 @@ Plan API 映射：
 - `PlanItem.materialIds` 通过 `ProjectMaterial` 表达。
 - `PlanDay` 和 `PlanTask` 主要由 `StudyTask.day`、`StudyTask.type`、`StudyTask.status` 组成。
 
+旧 Plan API 仍将 `StudyProject` 和 `StudyTask.day` 作为按天计划视图。新的阶段计划与每日学习单暂不接入该 API，后续通过独立 service 和接口逐步替换。
+
+### StudyPlanVersion / PlanPhase
+
+`StudyPlanVersion` 保存项目整体计划的版本历史。同一项目通过递增的 `version` 区分版本，状态为 `draft/confirmed/superseded`。
+
+`PlanPhase` 表示计划中的阶段，保存阶段目标、说明、完成标准和顺序，不精确排期到具体日期。`PlanPhaseKnowledgeNode` 将阶段关联到现有 `KnowledgeNode`：
+
+- 整体计划和技能树共用同一套知识点，不复制知识点内容。
+- 同一知识点可以出现在多个阶段。
+- `@@id([planPhaseId, knowledgeNodeId])` 禁止同一阶段重复引用同一知识点。
+- `@@unique([planVersionId, order])` 保证同一计划版本内阶段顺序唯一。
+
+### DailyTaskSheet
+
+`DailyTaskSheet` 表示一个项目某一天生成并持久化的学习单，由 `/api/daily` 模块读写。
+
+- `localDate` 使用 `YYYY-MM-DD` 字符串，`timezone` 固定默认为 `Asia/Shanghai`。
+- `@@unique([projectId, localDate])` 保证同项目同一天只存在一张学习单；生成先以 `generating` 状态占位创建，唯一约束冲突表示并发请求已占位，页面刷新只能读取已有记录。
+- 可选关联生成时使用的已确认计划版本（`planVersionId`）和当前阶段（`currentPhaseId`）。当前阶段是已确认计划中第一个仍含未掌握知识点的阶段，用于限定新知识点候选。
+- `availableMinutes` 保存当天时间预算（项目 `dailyMinutes`，缺省 60，范围 15–480）。
+- `inputSnapshot` 以 `{ "generations": [...] }` 形式累积每次编排的判断依据：候选池（含每条候选的规则证据）、AI/规则选择模式、模型信息、入选结果与失败原因。该字段不通过 API 返回，仅用于审计。
+- 状态机：`generating ->（成功）active /（失败）generation_failed`；`active -> awaiting_confirmation`（结束后有待确认建议）或直接 `completed`；全部建议决策完成后 `awaiting_confirmation -> completed`；零点强制路径最终为 `forced_closed`。`generation_failed` 可被再次 POST 重新认领生成。
+- `closesAt` 固定为本地日期次日 00:00（Asia/Shanghai），是零点强制结束的判定时间；`endedAt` 和 `closeReason`（`all_tasks_done/user/midnight`）保存实际结束结果。
+- 重排（regenerate）不删除任务：未完成任务标记 `cancelled`，新批次任务的 `generationBatch` 取自增后的 `generationCount`。
+
 ### ProjectMaterial
 
 `ProjectMaterial` 是 `StudyProject` 与 `Material` 的多对多关系表。
@@ -157,6 +189,9 @@ Plan API 映射：
 - 必须属于一个 `StudyProject`。
 - 可选关联一个 `KnowledgeNode`。
 - 可选关联一个 `Material`。
+- 可选关联一个 `DailyTaskSheet` 和 `PlanPhase`。
+- `carriedFromTaskId` 可追溯任务候选来源，但未完成任务是否续排由后续规则决定。
+- `estimatedMinutes`、`sourceType`、`selectionReason` 和 `generationBatch` 保存每日编排结果。
 - 可被 `Quiz`、`StudySession`、`SummarySuggestion` 引用。
 
 API 映射：
@@ -166,6 +201,8 @@ API 映射：
 - `PlanTask.type -> StudyTask.type`
 - `PlanTask.status -> StudyTask.status`
 - `PlanDay.day -> StudyTask.day`
+
+兼容边界：现有任务不回填 `dailyTaskSheetId`，`day` 继续保留且可空。每日任务被重新生成替换时标记为 `cancelled`，不删除历史记录。旧 Plan API 更新任务时只清理 `dailyTaskSheetId = null` 的按天任务，不会触碰每日学习单上的任务。
 
 删除 `Material` 或 `KnowledgeNode` 时，任务上的对应引用会置空，保留任务历史。
 
@@ -295,11 +332,23 @@ API 映射：
 
 ### DailySummary / SummarySuggestion
 
-`DailySummary` 保存每日总结草稿和用户确认后的内容。
+`DailySummary` 保存每日总结草稿和确认后的内容，由结束当天学习的流程创建。
 
-`SummarySuggestion` 保存 AI 提出的状态、薄弱点或复习建议，等待用户接受、修改或拒绝。
+`SummarySuggestion` 保存系统规则生成的状态、薄弱点或复习建议，等待用户接受、修改或拒绝。AI 只负责总结正文（`aiDraft`，失败时回退模板），不直接产生或决策建议。
 
-当前 Memory API 仍使用内存 mock；`DailySummary` 和 `SummarySuggestion` 是后续真实长期记忆和学习闭环的数据基础。
+- 新总结唯一关联一张 `DailyTaskSheet`；旧记录继续允许只关联 `StudySession`。
+- 有待决策建议时总结为 `awaiting_confirmation`；全部建议决策完成（或没有建议）后变为 `confirmed`。
+- `confirmationSource` 区分用户确认（`user`）、任务全部完成时的系统确认（`system`）和零点强制确认（`system_forced`）。
+- `SummarySuggestion.decisionSource` 区分用户决策与系统强制决策；`modifiedContent` 保存用户修改后的内容。
+- 总结确认后会写入每日总结型长期记忆（当前 Memory 仍是内存 mock）。
+
+### WeakPoint / KnowledgeStateEvent
+
+`WeakPoint` 是项目内已确认薄弱点，必须关联一个 `KnowledgeNode`。`weakness` 类建议被接受（用户或零点系统强制）时创建或刷新：保存严重度（按当天测验正确率与新增错题数判定）、状态、证据快照及确认来源；零点强制产生的记录使用 `system_forced`。同一知识点的活跃薄弱点只保留一条，重复确认会刷新严重度和证据。
+
+`KnowledgeStateEvent` 是知识点状态和掌握度变化的不可变审计记录。`knowledge_status` 类建议生效时写入：保存变更前后的 `learningState/mastery`、来源（`user_confirmation/system_forced`）和证据快照（建议内容、当天测验与错题数据、决策方式）。零点自动结束的"系统直接判断"依据就保留在这里。
+
+每日任务候选与建议生成读取 `WeakPoint`（活跃薄弱点进入候选池）形成闭环。
 
 ## API 到 Prisma 映射
 
@@ -317,6 +366,8 @@ API 映射：
 | `PlanItem` | `StudyProject` API view |
 | `PlanItem.materialIds` | `ProjectMaterial` |
 | `PlanTask` | `StudyTask` |
+| 阶段计划 | `StudyPlanVersion` + `PlanPhase` + `PlanPhaseKnowledgeNode` |
+| 每日学习单 | `DailyTaskSheet` + `StudyTask` |
 | `SkillItem` | `KnowledgeNode` |
 | `SkillItem.learningState` | `KnowledgeNode.learningState` |
 | `SkillItem.isUnlocked` | `KnowledgeNode.isUnlocked` |
@@ -344,6 +395,10 @@ Prisma 可以保证基础外键，但以下业务规则必须由 service 或 rep
 - `Material.folderId` 为字符串时，文件夹必须存在且属于当前用户。
 - `ProjectMaterial.projectId` 对应项目的 `userId` 必须与 `Material.userId` 一致。
 - `StudyTask.knowledgeNodeId` 如果存在，节点必须属于同一项目。
+- `PlanPhaseKnowledgeNode` 两端必须经 service 校验属于同一项目。
+- `DailyTaskSheet.planVersionId/currentPhaseId` 如果存在，必须属于同一项目且阶段属于该计划版本。
+- `StudyTask.dailyTaskSheetId/planPhaseId` 如果存在，必须与任务所属项目一致。
+- `WeakPoint` 和 `KnowledgeStateEvent` 的知识点必须属于记录对应项目。
 - `KnowledgeNode.parentId` 只用于展示布局，不能代替 `KnowledgeNodePrerequisite` 业务依赖。
 - `KnowledgeNodePrerequisite` 两端必须属于同一项目，且不能自依赖。
 - `PATCH /api/skills/:id` 只能修改 `learningState`，不能由客户端直接修改解锁、布局、依赖或风险字段。
@@ -360,7 +415,10 @@ Prisma schema 中的主要删除规则：
 
 - 删除 `User` 会级联删除其 `MaterialFolder`、`Material`、`StudyProject`、`Conversation`、`WrongbookItem`、`DailySummary`。
 - 删除 `MaterialFolder` 时，如果仍有 `Material` 指向它，`onDelete: Restrict` 会阻止删除。
-- 删除 `StudyProject` 会级联删除 `ProjectMaterial`、`KnowledgeNode`、`StudyTask`、`StudySession`。
+- 删除 `StudyProject` 会级联删除 `ProjectMaterial`、`KnowledgeNode`、`StudyPlanVersion`、`DailyTaskSheet`、`StudyTask`、`StudySession`、`WeakPoint` 和 `KnowledgeStateEvent`。
+- 删除计划版本会级联删除阶段和阶段知识点关联；每日学习单上的计划版本引用置空。
+- 删除每日学习单时，历史任务、总结、薄弱点和状态事件上的引用置空。
+- 已被阶段计划、薄弱点或状态事件引用的知识点不能硬删除，应通过 `archivedAt` 归档，避免破坏计划版本和审计历史。
 - 删除 `StudyProject` 时，历史型 `Conversation`、`WrongbookItem`、`DailySummary` 的项目引用置空。
 - 删除 `KnowledgeNode` 或 `StudyTask` 时，相关历史引用置空，保留学习历史。
 - 删除 `Conversation` 会级联删除 `Message`。

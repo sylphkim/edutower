@@ -52,5 +52,7 @@ export interface ChatContext {
   weakPoints: DemoWeakPoint[];
   sessionHistory: DemoSessionMessage[];
   generatedAt: string;
-  memories: ChatMemory[];   
+  memories: ChatMemory[];
+  /** Optional caller-provided system prompt that overrides the default one. */
+  systemPrompt?: string;
 }
