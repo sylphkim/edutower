@@ -1,50 +1,25 @@
-import { knowledgeNodesRepository } from "../repositories/knowledgeNodes.repository";
+import {
+  knowledgeNodesRepository,
+  type KnowledgeNodeWithPrerequisites
+} from "../repositories/knowledgeNodes.repository";
 import { quizzesRepository, type QuizWithQuestions } from "../repositories/quizzes.repository";
 import { wrongbookRepository } from "../repositories/wrongbook.repository";
 import type {
   CreateQuizInput,
   QuizDifficulty,
   QuizItem,
-  QuizQuestion,
   SubmitQuizInput,
   SubmitQuizResult
 } from "../types/quiz";
 import { AppError } from "../utils/errors";
+import { logger } from "../utils/logger";
 import { getDemoProjectId } from "./demoProject.service";
 import { getDemoUserId } from "./demoUser.service";
+import { quizGenerator } from "./quizGenerator.service";
 
 const VALID_DIFFICULTIES: QuizDifficulty[] = ["pass", "high_score"];
 const MAX_QUESTION_COUNT = 20;
-
-const MOCK_QUESTION_BANK: Omit<QuizQuestion, "id">[] = [
-  {
-    type: "single_choice",
-    prompt: "What does a derivative measure at a point?",
-    options: ["Average value", "Instantaneous rate of change", "Area under a curve"],
-    answer: "Instantaneous rate of change",
-    explanation: "A derivative captures the instantaneous rate of change at a point."
-  },
-  {
-    type: "single_choice",
-    prompt: "Which material type is usually best for lecture slides?",
-    options: ["slides", "photo", "note"],
-    answer: "slides",
-    explanation: "Slides are commonly used to organize lecture content."
-  },
-  {
-    type: "short_answer",
-    prompt: "Name one reason to review wrong questions.",
-    answer: "identify weak points",
-    explanation: "Review helps find weak points and improve later practice."
-  },
-  {
-    type: "single_choice",
-    prompt: "What should a study outline usually contain?",
-    options: ["Random guesses", "Main topics and structure", "Only final answers"],
-    answer: "Main topics and structure",
-    explanation: "An outline shows the structure and main topics of the material."
-  }
-];
+const DEFAULT_QUESTION_COUNT = 5;
 
 function ensureQuizExists(item: QuizWithQuestions | null): QuizWithQuestions {
   if (!item) {
@@ -122,17 +97,6 @@ function ensureValidSubmitInput(input: SubmitQuizInput): void {
   }
 }
 
-function createMockQuestions(count: number): Omit<QuizQuestion, "id">[] {
-  return Array.from({ length: count }, (_, index) => {
-    const baseQuestion = MOCK_QUESTION_BANK[index % MOCK_QUESTION_BANK.length];
-
-    return {
-      ...baseQuestion,
-      options: baseQuestion.options ? [...baseQuestion.options] : undefined
-    };
-  });
-}
-
 function normalizeAnswer(answer: string): string {
   return answer.trim().toLowerCase();
 }
@@ -162,7 +126,7 @@ function toApiQuiz(quiz: QuizWithQuestions): QuizItem {
 async function resolveQuizTarget(
   input: CreateQuizInput,
   projectId: string
-): Promise<{ knowledgeNodeId: string; studyTaskId?: string }> {
+): Promise<{ knowledgeNode: KnowledgeNodeWithPrerequisites; studyTaskId?: string }> {
   const studyTask = input.studyTaskId
     ? await quizzesRepository.findStudyTaskForProject(input.studyTaskId, projectId)
     : null;
@@ -173,18 +137,6 @@ async function resolveQuizTarget(
       "studyTaskId must reference a task in the same project.",
       400
     );
-  }
-
-  if (input.skillId) {
-    const skill = await knowledgeNodesRepository.findByIdForProject(input.skillId, projectId);
-
-    if (!skill) {
-      throw new AppError(
-        "INVALID_REQUEST",
-        "skillId must reference a skill in the same project.",
-        400
-      );
-    }
   }
 
   if (studyTask?.knowledgeNodeId && input.skillId && studyTask.knowledgeNodeId !== input.skillId) {
@@ -205,8 +157,18 @@ async function resolveQuizTarget(
     );
   }
 
+  const knowledgeNode = await knowledgeNodesRepository.findByIdForProject(knowledgeNodeId, projectId);
+
+  if (!knowledgeNode) {
+    throw new AppError(
+      "INVALID_REQUEST",
+      "skillId must reference a skill in the same project.",
+      400
+    );
+  }
+
   return {
-    knowledgeNodeId,
+    knowledgeNode,
     studyTaskId: studyTask?.id
   };
 }
@@ -233,15 +195,29 @@ export const quizService = {
 
     const projectId = await getDemoProjectId();
     const target = await resolveQuizTarget(input, projectId);
-    const questionCount = input.questionCount ?? 3;
-    const questions = createMockQuestions(questionCount);
+    const questionCount = input.questionCount ?? DEFAULT_QUESTION_COUNT;
+
+    // 优先让 AI 出题；AI 不可用时出题器内部会自动退回 mock（见 quizGenerator.service）。
+    const generated = await quizGenerator.generate({
+      knowledgeTitle: target.knowledgeNode.title,
+      knowledgeDescription: target.knowledgeNode.description ?? undefined,
+      difficulty: input.difficulty,
+      count: questionCount
+    });
+
+    logger.info("quiz.create: 出题完成", {
+      source: generated.source,
+      knowledgeNodeId: target.knowledgeNode.id,
+      count: generated.questions.length
+    });
+
     const quiz = await quizzesRepository.create({
       projectId,
-      title: input.title?.trim() || "Mock Quiz",
-      knowledgeNodeId: target.knowledgeNodeId,
+      title: input.title?.trim() || `${target.knowledgeNode.title} 测验`,
+      knowledgeNodeId: target.knowledgeNode.id,
       studyTaskId: target.studyTaskId,
       difficulty: input.difficulty,
-      questions: questions.map((question, index) => ({
+      questions: generated.questions.map((question, index) => ({
         type: question.type,
         prompt: question.prompt,
         options: question.options,
