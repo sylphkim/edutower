@@ -734,7 +734,7 @@ not_started | learning | mastered
 
 ## Quiz
 
-Quiz、Question、Attempt 已接 Prisma；题目生成仍是 mock 规则，不调用真实 LLM。
+Quiz、Question、Attempt 已接 Prisma。题目由出题器（`src/services/quizGenerator.service.ts`）生成：优先调用 LLM 出**单项选择题**（开启 JSON 模式、失败自动重试），不可用 / 返回不合格时兜底内置 mock 题；难度档位（`pass`/`high_score`）影响出题难易。取测验（list/get/create）响应**不返回** `answer`/`explanation`，正确答案只在 `/submit` 结果里返回。
 
 | Method | Path | Status | 说明 |
 | --- | --- | --- | --- |
@@ -851,7 +851,7 @@ Memory 当前使用内存 mock，不是 Prisma 持久化。服务重启后会回
 - chat context 使用 `src/mock/demo*` 数据。
 - Agent panel 主要来自 demo chat context，错题复习数量来自 wrongbook 当前数据。
 - Memory 使用内存 mock；每日总结确认后会调用它写入记忆，服务重启即丢失。
-- Quiz 题目生成是 mock 规则，但 Quiz/Question/Attempt 可持久化。
+- Quiz 题目由 LLM 出题器生成（失败兜底 mock），Quiz/Question/Attempt 可持久化；取测验响应不含正确答案。
 - Wrongbook taxonomy 使用服务端常量，WrongbookItem 可持久化。
 - Plan、Daily、Skills、Materials、Wrongbook、Quiz 目前主要依赖 Demo 用户或 Demo project。
 - Daily 的 `conversations` 依赖 `Conversation` 表；聊天链路尚未持久化对话，当前通常为空数组。

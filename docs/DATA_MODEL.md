@@ -271,7 +271,7 @@ API 映射：
 - `QuizItem.difficulty -> Quiz.difficulty`
 - `QuizItem.materialId` 不是 Quiz 自身字段，而是从关联任务的 `materialId` 派生。
 
-当前 Quiz 题目生成仍是 mock 规则，但 Quiz、Question、Option、Attempt 已可持久化。
+Quiz 题目由出题器生成：优先 LLM（JSON 模式 + 失败重试），不可用时兜底 mock；Quiz、Question、Option、Attempt 均已持久化。
 
 ### QuizQuestion / QuizOption / QuizAttempt
 
