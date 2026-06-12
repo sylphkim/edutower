@@ -1,4 +1,3 @@
-import { env } from "../config/env";
 import type {
   KnowledgeNodeLearningState,
   WeakPointSeverity
@@ -8,6 +7,7 @@ import {
   type CreateSuggestionRecordInput,
   type DailyTaskSheetWithRelations,
   type DailySummaryWithSuggestions,
+  type DayConversationTranscript,
   type DayEvidence,
   type OwnedProjectSummary,
   type SuggestionDecisionRecord
@@ -27,8 +27,8 @@ import {
   toDailySheetItem,
   toDailySummaryItem
 } from "./dailyTaskMappers";
+import { aiEngineService } from "./aiEngine.service";
 import { getDemoUserId } from "./demoUser.service";
-import { llmService } from "./llm.service";
 import { memoryService } from "./memory.service";
 
 type CloseReason = "all_tasks_done" | "user" | "midnight";
@@ -281,6 +281,10 @@ function buildTemplateSummary(
     lines.push(`新增错题 ${evidence.newWrongbookItems.length} 道。`);
   }
 
+  if (evidence.conversations.length > 0) {
+    lines.push(`今日进行了 ${evidence.conversations.length} 段学习对话。`);
+  }
+
   if (unfinishedTasks.length > 0) {
     lines.push(
       `未完成任务 ${unfinishedTasks.length} 个，将在明日优先续排：${unfinishedTasks
@@ -294,40 +298,54 @@ function buildTemplateSummary(
   return lines.join("\n");
 }
 
+const MAX_CONVERSATION_DIGEST_CHARS = 3000;
+
+function buildConversationDigest(transcripts: DayConversationTranscript[]): string | null {
+  if (transcripts.length === 0) {
+    return null;
+  }
+
+  const blocks = transcripts.map((transcript) => {
+    const header = transcript.title ? `【对话：${transcript.title}】` : "【学习对话】";
+    const lines = transcript.messages.map(
+      (message) => `${message.role === "user" ? "学生" : "助教"}：${message.content}`
+    );
+
+    return [header, ...lines].join("\n");
+  });
+
+  const digest = blocks.join("\n\n");
+
+  if (digest.length <= MAX_CONVERSATION_DIGEST_CHARS) {
+    return digest;
+  }
+
+  // 超长时保留最近的部分（末尾），并标注前文已省略。
+  return `……（较早对话已省略）\n${digest.slice(digest.length - MAX_CONVERSATION_DIGEST_CHARS)}`;
+}
+
 async function buildSummaryDraft(
   project: OwnedProjectSummary,
   sheet: DailyTaskSheetWithRelations,
-  evidence: DayEvidence
+  evidence: DayEvidence,
+  conversationDigest: string | null
 ): Promise<string> {
   const template = buildTemplateSummary(project, sheet, evidence);
 
-  if (!env.llmApiKey) {
-    return template;
-  }
+  // 优先经 FastAPI AI Engine 出总结；FastAPI 不可用时内部回退本地 LLM，
+  // 两条路都拿不到文本（含未配置 key）时返回 null，这里再退回确定性模板。
+  const aiText = await aiEngineService.generateSummary({
+    project: {
+      title: project.title,
+      subject: project.subject,
+      goal: project.goal
+    },
+    localDate: sheet.localDate,
+    studyData: template,
+    conversationDigest
+  });
 
-  try {
-    const result = await llmService.generateText({
-      systemPrompt: [
-        "你是一名学习助教，请根据学习数据为学生写一段当日学习总结。",
-        "要求：3-5 句中文，先肯定完成情况，再指出问题，最后给出明天的建议。",
-        "只输出总结正文，不要输出标题、列表符号或额外说明。"
-      ].join("\n"),
-      userPrompt: [
-        `学习项目：${project.title}（学科：${project.subject}，目标：${project.goal || "未填写"}）`,
-        "当日学习数据：",
-        template
-      ].join("\n"),
-      temperature: 0.4,
-      maxOutputTokens: 600
-    });
-    const text = result.text.trim();
-
-    return text ? text.slice(0, 2000) : template;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.warn(`Daily summary AI draft failed (${message}); using template summary.`);
-    return template;
-  }
+  return aiText ?? template;
 }
 
 function confirmationSourceForReason(
@@ -665,13 +683,15 @@ export const dailySummariesService = {
     const userId = await getDemoUserId();
     const dayStart = getLocalDayStart(sheet.localDate);
     const dayEnd = getLocalDayEnd(sheet.localDate);
-    const [evidence, activeNodes] = await Promise.all([
+    const [evidence, activeNodes, conversationTranscripts] = await Promise.all([
       dailyTaskSheetsRepository.collectDayEvidence(projectId, dayStart, dayEnd),
-      loadActiveNodes(projectId)
+      loadActiveNodes(projectId),
+      dailyTaskSheetsRepository.collectDayConversationMessages(projectId, dayStart, dayEnd)
     ]);
     const nodeEvidence = buildNodeEvidence(evidence);
     const suggestions = buildRuleSuggestions(sheet, activeNodes, nodeEvidence);
-    const aiDraft = await buildSummaryDraft(project, sheet, evidence);
+    const conversationDigest = buildConversationDigest(conversationTranscripts);
+    const aiDraft = await buildSummaryDraft(project, sheet, evidence, conversationDigest);
     const weaknessLines = suggestions
       .filter((suggestion) => suggestion.type === "weakness")
       .map((suggestion) => suggestion.content);

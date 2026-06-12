@@ -164,6 +164,18 @@ export interface DayEvidenceConversation {
   updatedAt: Date;
 }
 
+export interface DayConversationMessage {
+  role: string;
+  content: string;
+}
+
+export interface DayConversationTranscript {
+  id: string;
+  type: string;
+  title: string | null;
+  messages: DayConversationMessage[];
+}
+
 export interface DayEvidence {
   quizAttempts: DayEvidenceQuizAttempt[];
   newWrongbookItems: DayEvidenceWrongbookItem[];
@@ -773,6 +785,52 @@ export const dailyTaskSheetsRepository = {
         updatedAt: conversation.updatedAt
       }))
     };
+  },
+
+  /**
+   * 取当天有活动的对话的消息正文，供每日总结使用。与 collectDayEvidence 用
+   * 同一时间窗，但只在总结路径调用（GET 当天记录不需要正文，避免拖慢热路径）。
+   * 每段对话按时间倒序取最近 N 条，再翻回正序还原顺序。
+   */
+  async collectDayConversationMessages(
+    projectId: string,
+    dayStart: Date,
+    dayEnd: Date,
+    maxMessagesPerConversation = 40
+  ): Promise<DayConversationTranscript[]> {
+    const conversations = await prisma.conversation.findMany({
+      where: {
+        projectId,
+        createdAt: { lt: dayEnd },
+        updatedAt: { gte: dayStart }
+      },
+      select: {
+        id: true,
+        type: true,
+        title: true,
+        messages: {
+          where: {
+            createdAt: { gte: dayStart, lt: dayEnd }
+          },
+          select: { role: true, content: true },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: maxMessagesPerConversation
+        }
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }]
+    });
+
+    return conversations
+      .filter((conversation) => conversation.messages.length > 0)
+      .map((conversation) => ({
+        id: conversation.id,
+        type: conversation.type,
+        title: conversation.title,
+        messages: conversation.messages
+          .slice()
+          .reverse()
+          .map((message) => ({ role: message.role, content: message.content }))
+      }));
   },
 
   async closeSheet(input: CloseSheetInput): Promise<CloseSheetResult> {
