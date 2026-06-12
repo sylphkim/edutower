@@ -1,40 +1,81 @@
-import { Request, Response } from "express";
+import { NextFunction, Request, Response } from "express";
 import { memoryService } from "../services/memory.service";
 import { sendSuccess } from "../utils/apiResponse";
 
-export function listMemoryItems(_req: Request, res: Response): void {
-  sendSuccess(res, memoryService.list());
+export async function listMemoryItems(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    sendSuccess(res, await memoryService.list());
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function getMemoryItem(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = memoryService.getById(id);
+export async function getMemoryItem(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
 
-  sendSuccess(res, result);
+    sendSuccess(res, await memoryService.getById(id));
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function createMemoryItem(req: Request, res: Response): void {
-  const result = memoryService.create(req.body);
-
-  sendSuccess(res, result, 201);
+export async function createMemoryItem(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    sendSuccess(res, await memoryService.create(req.body), 201);
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function updateMemoryItem(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = memoryService.update(id, req.body);
+export async function updateMemoryItem(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
 
-  sendSuccess(res, result);
+    sendSuccess(res, await memoryService.update(id, req.body));
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function deleteMemoryItem(req: Request, res: Response): void {
-  const { id } = req.params;
-  const result = memoryService.remove(id);
+export async function deleteMemoryItem(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
 
-  sendSuccess(res, result);
+    sendSuccess(res, await memoryService.remove(id));
+  } catch (error) {
+    next(error);
+  }
 }
 
-export function createDailySummary(req: Request, res: Response): void {
-  const result = memoryService.createDailySummary(req.body);
-
-  sendSuccess(res, result, 201);
+export async function createDailySummary(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    sendSuccess(res, await memoryService.createDailySummary(req.body), 201);
+  } catch (error) {
+    next(error);
+  }
 }

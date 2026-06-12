@@ -1,4 +1,4 @@
-import { mockMemoryItems } from "../mock/memory";
+import { memoryRepository, type MemoryRecord } from "../repositories/memory.repository";
 import type {
   CreateMemoryInput,
   DailySummaryInput,
@@ -18,31 +18,12 @@ const VALID_MEMORY_TYPES: MemoryType[] = [
 ];
 const VALID_IMPORTANCE: MemoryImportance[] = ["low", "medium", "high"];
 
-// 先用内存数组保存长期记忆，以后可以替换成数据库查询。
-const memoryItems: MemoryItem[] = mockMemoryItems.map((item) => ({
-  ...item,
-  relatedMaterialIds: [...item.relatedMaterialIds],
-  relatedSkillIds: [...item.relatedSkillIds],
-  relatedQuizIds: [...item.relatedQuizIds],
-  relatedWrongbookIds: [...item.relatedWrongbookIds]
-}));
-let nextMemoryNumber = memoryItems.length + 1;
-
-function createMemoryId(): string {
-  const id = `mem-${String(nextMemoryNumber).padStart(3, "0")}`;
-  nextMemoryNumber += 1;
-  return id;
-}
-
-// 找不到 id 时直接抛错，避免调用方静默失败。
-function findIndexById(id: string): number {
-  const index = memoryItems.findIndex((item) => item.id === id);
-
-  if (index === -1) {
+function ensureMemoryExists(record: MemoryRecord | null): MemoryRecord {
+  if (!record) {
     throw new AppError("INVALID_REQUEST", "Memory item not found.", 404);
   }
 
-  return index;
+  return record;
 }
 
 function ensureStringArray(value: string[], fieldName: string): void {
@@ -173,97 +154,92 @@ function buildDailySummaryContent(input: DailySummaryInput): string {
   return parts.join("\n");
 }
 
+function toApiMemory(record: MemoryRecord): MemoryItem {
+  return {
+    id: record.id,
+    type: record.type as MemoryType,
+    title: record.title,
+    content: record.content,
+    relatedMaterialIds: record.relatedMaterialIds,
+    relatedSkillIds: record.relatedSkillIds,
+    relatedQuizIds: record.relatedQuizIds,
+    relatedWrongbookIds: record.relatedWrongbookIds,
+    importance: record.importance as MemoryImportance,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString()
+  };
+}
+
 export const memoryService = {
-  list(): { items: MemoryItem[] } {
-    return {
-      items: memoryItems
-    };
+  async list(): Promise<{ items: MemoryItem[] }> {
+    const records = await memoryRepository.list();
+
+    return { items: records.map(toApiMemory) };
   },
 
-  getById(id: string): MemoryItem {
-    return memoryItems[findIndexById(id)];
+  async getById(id: string): Promise<MemoryItem> {
+    const record = ensureMemoryExists(await memoryRepository.findById(id));
+
+    return toApiMemory(record);
   },
 
-  create(input: CreateMemoryInput): MemoryItem {
+  async create(input: CreateMemoryInput): Promise<MemoryItem> {
     ensureValidCreateInput(input);
 
-    const now = new Date().toISOString();
-    const item: MemoryItem = {
-      id: createMemoryId(),
+    const record = await memoryRepository.create({
       type: input.type,
       title: input.title.trim(),
       content: input.content.trim(),
-      relatedMaterialIds: input.relatedMaterialIds ? [...input.relatedMaterialIds] : [],
-      relatedSkillIds: input.relatedSkillIds ? [...input.relatedSkillIds] : [],
-      relatedQuizIds: input.relatedQuizIds ? [...input.relatedQuizIds] : [],
-      relatedWrongbookIds: input.relatedWrongbookIds ? [...input.relatedWrongbookIds] : [],
       importance: input.importance ?? "medium",
-      createdAt: now,
-      updatedAt: now
-    };
+      relatedMaterialIds: input.relatedMaterialIds ?? [],
+      relatedSkillIds: input.relatedSkillIds ?? [],
+      relatedQuizIds: input.relatedQuizIds ?? [],
+      relatedWrongbookIds: input.relatedWrongbookIds ?? []
+    });
 
-    memoryItems.push(item);
-    return item;
+    return toApiMemory(record);
   },
 
-  update(id: string, input: UpdateMemoryInput): MemoryItem {
+  async update(id: string, input: UpdateMemoryInput): Promise<MemoryItem> {
     ensureValidUpdateInput(input);
+    ensureMemoryExists(await memoryRepository.findById(id));
 
-    const index = findIndexById(id);
-    const currentItem = memoryItems[index];
-    const updatedItem: MemoryItem = {
-      ...currentItem,
-      type: input.type ?? currentItem.type,
-      title: input.title !== undefined ? input.title.trim() : currentItem.title,
-      content: input.content !== undefined ? input.content.trim() : currentItem.content,
-      relatedMaterialIds:
-        input.relatedMaterialIds !== undefined
-          ? [...input.relatedMaterialIds]
-          : currentItem.relatedMaterialIds,
-      relatedSkillIds:
-        input.relatedSkillIds !== undefined
-          ? [...input.relatedSkillIds]
-          : currentItem.relatedSkillIds,
-      relatedQuizIds:
-        input.relatedQuizIds !== undefined ? [...input.relatedQuizIds] : currentItem.relatedQuizIds,
-      relatedWrongbookIds:
-        input.relatedWrongbookIds !== undefined
-          ? [...input.relatedWrongbookIds]
-          : currentItem.relatedWrongbookIds,
-      importance: input.importance ?? currentItem.importance,
-      updatedAt: new Date().toISOString()
-    };
+    const record = await memoryRepository.update(id, {
+      type: input.type,
+      title: input.title !== undefined ? input.title.trim() : undefined,
+      content: input.content !== undefined ? input.content.trim() : undefined,
+      importance: input.importance,
+      relatedMaterialIds: input.relatedMaterialIds,
+      relatedSkillIds: input.relatedSkillIds,
+      relatedQuizIds: input.relatedQuizIds,
+      relatedWrongbookIds: input.relatedWrongbookIds
+    });
 
-    memoryItems[index] = updatedItem;
-    return updatedItem;
+    return toApiMemory(record);
   },
 
-  remove(id: string): MemoryItem {
-    const index = findIndexById(id);
-    const [removedItem] = memoryItems.splice(index, 1);
+  async remove(id: string): Promise<MemoryItem> {
+    ensureMemoryExists(await memoryRepository.findById(id));
 
-    return removedItem;
+    const record = await memoryRepository.deleteById(id);
+
+    return toApiMemory(record);
   },
 
-  createDailySummary(input: DailySummaryInput): MemoryItem {
+  async createDailySummary(input: DailySummaryInput): Promise<MemoryItem> {
     ensureValidDailySummaryInput(input);
 
-    const now = new Date().toISOString();
-    const item: MemoryItem = {
-      id: createMemoryId(),
+    const record = await memoryRepository.create({
       type: "daily_summary",
       title: "Daily Summary",
       content: buildDailySummaryContent(input),
+      importance: "medium",
       relatedMaterialIds: [],
       relatedSkillIds: input.learnedSkillIds ? [...input.learnedSkillIds] : [],
       relatedQuizIds: [],
-      relatedWrongbookIds: input.wrongbookIds ? [...input.wrongbookIds] : [],
-      importance: "medium",
-      createdAt: now,
-      updatedAt: now
-    };
+      relatedWrongbookIds: input.wrongbookIds ? [...input.wrongbookIds] : []
+    });
 
-    memoryItems.push(item);
-    return item;
+    return toApiMemory(record);
   }
 };

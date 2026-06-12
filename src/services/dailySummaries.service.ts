@@ -364,8 +364,9 @@ function writeDailySummaryMemory(params: {
   completedTaskIds: string[];
   learnedSkillIds: string[];
 }): void {
-  try {
-    memoryService.createDailySummary({
+  // 记忆写入是结束流程的副作用：异步进行、失败只告警，不阻塞 close。
+  void memoryService
+    .createDailySummary({
       summary: params.content,
       weaknesses: params.weaknesses
         ? params.weaknesses.split("\n").filter(Boolean)
@@ -376,11 +377,10 @@ function writeDailySummaryMemory(params: {
       learnedSkillIds: params.learnedSkillIds.length
         ? params.learnedSkillIds
         : undefined
+    })
+    .catch((error) => {
+      logger.warn("Failed to write daily summary memory.", error);
     });
-  } catch (error) {
-    // Memory is currently an in-memory mock; failures must not break the close flow.
-    logger.warn("Failed to write daily summary memory.", error);
-  }
 }
 
 async function buildDailyRecord(
