@@ -86,6 +86,12 @@ export const memoryRepository = {
     return item ? toRecord(item) : null;
   },
 
+  async findByTitle(title: string): Promise<MemoryRecord | null> {
+    const item = await prisma.memory.findFirst({ where: { title: title.trim() } });
+
+    return item ? toRecord(item) : null;
+  },
+
   async create(input: CreateMemoryRecordInput): Promise<MemoryRecord> {
     const item = await prisma.memory.create({
       data: {
