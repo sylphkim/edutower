@@ -7,6 +7,7 @@ import { isAppError } from "./utils/errors";
 import { logger } from "./utils/logger";
 import aiRoutes from "./routes/ai.routes";
 import agentPanelRoutes from "./routes/agentPanel.routes";
+import conversationsRoutes from "./routes/conversations.routes";
 import dailyTasksRoutes from "./routes/dailyTasks.routes";
 import healthRoutes from "./routes/health.routes";
 import llmRoutes from "./routes/llm.routes";
@@ -32,6 +33,7 @@ app.post("/chat", legacyChat);
 
 app.use("/api/health", healthRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/conversations", conversationsRoutes);
 app.use("/api/agent", agentPanelRoutes);
 app.use("/api/llm", llmRoutes);
 app.use("/api/material-folders", materialFoldersRoutes);
