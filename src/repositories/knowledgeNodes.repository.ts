@@ -1,7 +1,8 @@
 import { prisma } from "../lib/prisma";
 import type {
   KnowledgeNode,
-  KnowledgeNodeLearningState
+  KnowledgeNodeLearningState,
+  Prisma
 } from "../generated/prisma/client";
 import type {
   KnowledgeNodeGetPayload,
@@ -45,6 +46,132 @@ export type UpdateLearningStateAndUnlockDependentsResult =
   | {
       status: "not_found" | "archived" | "locked";
     };
+
+/**
+ * Applies a learning state change inside an existing transaction and unlocks
+ * direct dependents whose prerequisites are now all mastered. Shared between
+ * the skills PATCH endpoint and daily summary suggestion decisions so both
+ * paths enforce identical unlock rules.
+ */
+export async function applyLearningStateChangeWithinTransaction(
+  tx: Prisma.TransactionClient,
+  id: string,
+  projectId: string,
+  learningState: KnowledgeNodeLearningState
+): Promise<UpdateLearningStateAndUnlockDependentsResult> {
+  const currentItem = await tx.knowledgeNode.findFirst({
+    where: {
+      id,
+      projectId
+    },
+    include: nodeInclude
+  });
+
+  if (!currentItem) {
+    return {
+      status: "not_found"
+    };
+  }
+
+  if (currentItem.archivedAt) {
+    return {
+      status: "archived"
+    };
+  }
+
+  if (!currentItem.isUnlocked) {
+    if (currentItem.learningState === learningState) {
+      return {
+        status: "success",
+        item: currentItem
+      };
+    }
+
+    return {
+      status: "locked"
+    };
+  }
+
+  if (currentItem.learningState === learningState) {
+    return {
+      status: "success",
+      item: currentItem
+    };
+  }
+
+  await tx.knowledgeNode.update({
+    where: {
+      id,
+      projectId
+    },
+    data: {
+      learningState
+    }
+  });
+
+  if (learningState === "mastered" && currentItem.learningState !== "mastered") {
+    const directDependents = await tx.knowledgeNode.findMany({
+      where: {
+        projectId,
+        archivedAt: null,
+        isUnlocked: false,
+        prerequisiteLinks: {
+          some: {
+            prerequisiteId: id
+          }
+        }
+      },
+      include: {
+        prerequisiteLinks: {
+          include: {
+            prerequisite: {
+              select: {
+                learningState: true
+              }
+            }
+          }
+        }
+      }
+    });
+    const unlockableDependentIds = directDependents
+      .filter((dependent) =>
+        dependent.prerequisiteLinks.every(
+          (link) => link.prerequisite.learningState === "mastered"
+        )
+      )
+      .map((dependent) => dependent.id);
+
+    if (unlockableDependentIds.length > 0) {
+      await tx.knowledgeNode.updateMany({
+        where: {
+          id: {
+            in: unlockableDependentIds
+          },
+          projectId,
+          archivedAt: null,
+          isUnlocked: false
+        },
+        data: {
+          isUnlocked: true,
+          unlockedAt: new Date()
+        }
+      });
+    }
+  }
+
+  const updatedItem = await tx.knowledgeNode.findFirst({
+    where: {
+      id,
+      projectId
+    },
+    include: nodeInclude
+  });
+
+  return {
+    status: "success",
+    item: updatedItem as KnowledgeNodeWithPrerequisites
+  };
+}
 
 export const knowledgeNodesRepository = {
   listByProject(projectId: string): Promise<KnowledgeNodeWithPrerequisites[]> {
@@ -224,120 +351,9 @@ export const knowledgeNodesRepository = {
     projectId: string,
     learningState: KnowledgeNodeLearningState
   ): Promise<UpdateLearningStateAndUnlockDependentsResult> {
-    return prisma.$transaction(async (tx) => {
-      const currentItem = await tx.knowledgeNode.findFirst({
-        where: {
-          id,
-          projectId
-        },
-        include: nodeInclude
-      });
-
-      if (!currentItem) {
-        return {
-          status: "not_found"
-        };
-      }
-
-      if (currentItem.archivedAt) {
-        return {
-          status: "archived"
-        };
-      }
-
-      if (!currentItem.isUnlocked) {
-        if (currentItem.learningState === learningState) {
-          return {
-            status: "success",
-            item: currentItem
-          };
-        }
-
-        return {
-          status: "locked"
-        };
-      }
-
-      if (currentItem.learningState === learningState) {
-        return {
-          status: "success",
-          item: currentItem
-        };
-      }
-
-      await tx.knowledgeNode.update({
-        where: {
-          id,
-          projectId
-        },
-        data: {
-          learningState
-        }
-      });
-
-      if (learningState === "mastered" && currentItem.learningState !== "mastered") {
-        const directDependents = await tx.knowledgeNode.findMany({
-          where: {
-            projectId,
-            archivedAt: null,
-            isUnlocked: false,
-            prerequisiteLinks: {
-              some: {
-                prerequisiteId: id
-              }
-            }
-          },
-          include: {
-            prerequisiteLinks: {
-              include: {
-                prerequisite: {
-                  select: {
-                    learningState: true
-                  }
-                }
-              }
-            }
-          }
-        });
-        const unlockableDependentIds = directDependents
-          .filter((dependent) =>
-            dependent.prerequisiteLinks.every(
-              (link) => link.prerequisite.learningState === "mastered"
-            )
-          )
-          .map((dependent) => dependent.id);
-
-        if (unlockableDependentIds.length > 0) {
-          await tx.knowledgeNode.updateMany({
-            where: {
-              id: {
-                in: unlockableDependentIds
-              },
-              projectId,
-              archivedAt: null,
-              isUnlocked: false
-            },
-            data: {
-              isUnlocked: true,
-              unlockedAt: new Date()
-            }
-          });
-        }
-      }
-
-      const updatedItem = await tx.knowledgeNode.findFirst({
-        where: {
-          id,
-          projectId
-        },
-        include: nodeInclude
-      });
-
-      return {
-        status: "success",
-        item: updatedItem as KnowledgeNodeWithPrerequisites
-      };
-    });
+    return prisma.$transaction((tx) =>
+      applyLearningStateChangeWithinTransaction(tx, id, projectId, learningState)
+    );
   },
 
   deleteByIdForProject(id: string, projectId: string): Promise<KnowledgeNode> {

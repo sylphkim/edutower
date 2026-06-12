@@ -39,6 +39,12 @@ export interface DemoSessionMessage {
   createdAt: string;
 }
 
+export interface ChatMemory {
+  type: "weakness" | "daily_summary" | "progress" | "preference" | "note";
+  title: string;
+  content: string;
+}
+
 export interface ChatContext {
   subject: DemoSubject;
   materials: DemoMaterial[];
@@ -46,4 +52,7 @@ export interface ChatContext {
   weakPoints: DemoWeakPoint[];
   sessionHistory: DemoSessionMessage[];
   generatedAt: string;
+  memories: ChatMemory[];
+  /** Optional caller-provided system prompt that overrides the default one. */
+  systemPrompt?: string;
 }

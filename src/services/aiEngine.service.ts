@@ -14,6 +14,13 @@ export interface AiEngineChatResult {
   reply: string;
 }
 
+export interface AiEngineQuizParams {
+  knowledgeTitle: string;
+  knowledgeDescription?: string;
+  difficulty: "pass" | "high_score";
+  count: number;
+}
+
 type RecordLike = Record<string, unknown>;
 
 export class AiEngineService {
@@ -82,6 +89,64 @@ export class AiEngineService {
     return this.fallbackChat(sessionId, message, params.context);
   }
 
+  /**
+   * 出题：转发给 FastAPI AI Engine 的 /generate-quiz。
+   * 按架构要求只经 FastAPI，不走本地 LLM 降级；失败直接抛错，
+   * 由上层 quizGenerator 退回 mock。返回原始题目数组，交由上层校验。
+   */
+  async generateQuiz(params: AiEngineQuizParams): Promise<unknown[]> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), env.aiEngineTimeoutMs);
+
+    try {
+      const response = await fetch(this.generateQuizUrl(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          knowledge_title: params.knowledgeTitle,
+          knowledge_description: params.knowledgeDescription,
+          difficulty: params.difficulty,
+          count: params.count
+        }),
+        signal: controller.signal
+      });
+
+      const data = await this.readJson(response);
+
+      if (
+        response.ok &&
+        isRecordLike(data) &&
+        Array.isArray((data as { questions?: unknown }).questions)
+      ) {
+        return (data as { questions: unknown[] }).questions;
+      }
+
+      throw new AppError("AI_ENGINE_REQUEST_FAILED", "AI engine 出题返回异常。", 502);
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      const reason =
+        error instanceof Error && error.name === "AbortError"
+          ? "timeout"
+          : error instanceof Error
+            ? error.message
+            : String(error);
+
+      throw new AppError(
+        "AI_ENGINE_CONNECTION_ERROR",
+        `AI engine 出题不可达 (${reason})。`,
+        502,
+        error
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   // ── 降级逻辑：本地 LLM ──────────────────────────────────────
 
   private async fallbackChat(
@@ -89,7 +154,7 @@ export class AiEngineService {
     message: string,
     context?: ChatContext
   ): Promise<AiEngineChatResult> {
-    const systemPrompt = this.buildFallbackSystemPrompt(context);
+    const systemPrompt = context?.systemPrompt || this.buildFallbackSystemPrompt(context);
 
     try {
       const result = await llmService.generateText({
@@ -160,6 +225,14 @@ export class AiEngineService {
         lines.push("");
       }
 
+      if (context.memories && context.memories.length > 0) {
+        lines.push("## 长期记忆");
+        for (const mem of context.memories) {
+          lines.push(`- [${mem.type}] ${mem.title}：${mem.content}`);
+        }
+        lines.push("");
+      }
+
       if (context.sessionHistory && context.sessionHistory.length > 0) {
         lines.push("## 最近对话记录");
         for (const h of context.sessionHistory.slice(-6)) {
@@ -170,7 +243,19 @@ export class AiEngineService {
       }
     }
 
-    lines.push("请根据以上信息，为学生提供有针对性的辅导。");
+    lines.push("");
+    lines.push("## 记忆更新指令");
+    lines.push("当你在对话中发现需要记录的重要信息时（如学生的新薄弱点、偏好、学习进步等），");
+    lines.push("可以在回复末尾附加 memory_updates 块，格式如下：");
+    lines.push("");
+    lines.push("---memory_updates");
+    lines.push('[{"type": "weakness", "title": "标题", "content": "详细描述", "importance": "medium"}]');
+    lines.push("---");
+    lines.push("");
+    lines.push("支持的 type: weakness, daily_summary, progress, preference, note");
+    lines.push("importance: low, medium, high（默认 medium）");
+    lines.push("一次可以提交多条记忆，用 JSON 数组格式。");
+    lines.push("只在确实需要记录的信息时才使用，不要每个回复都附加。");
     return lines.join("\n");
   }
 
@@ -191,6 +276,10 @@ export class AiEngineService {
 
   private chatUrl(): string {
     return new URL("/chat", env.aiEngineBaseUrl).toString();
+  }
+
+  private generateQuizUrl(): string {
+    return new URL("/generate-quiz", env.aiEngineBaseUrl).toString();
   }
 
   private async readJson(response: Response): Promise<unknown> {

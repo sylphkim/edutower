@@ -1,49 +1,22 @@
-import { mockMemoryItems } from "../mock/memory";
+import { prisma } from "../lib/prisma";
+import type { Memory as MemoryRow } from "../generated/prisma/client";
 import type {
   CreateMemoryInput,
   DailySummaryInput,
-  MemoryImportance,
   MemoryItem,
-  MemoryType,
   UpdateMemoryInput
 } from "../types/memory";
 import { AppError } from "../utils/errors";
 
-const VALID_MEMORY_TYPES: MemoryType[] = [
+const VALID_MEMORY_TYPES = [
   "weakness",
   "daily_summary",
   "progress",
   "preference",
   "note"
 ];
-const VALID_IMPORTANCE: MemoryImportance[] = ["low", "medium", "high"];
+const VALID_IMPORTANCE = ["low", "medium", "high"];
 
-// 先用内存数组保存长期记忆，以后可以替换成数据库查询。
-const memoryItems: MemoryItem[] = mockMemoryItems.map((item) => ({
-  ...item,
-  relatedMaterialIds: [...item.relatedMaterialIds],
-  relatedSkillIds: [...item.relatedSkillIds],
-  relatedQuizIds: [...item.relatedQuizIds],
-  relatedWrongbookIds: [...item.relatedWrongbookIds]
-}));
-let nextMemoryNumber = memoryItems.length + 1;
-
-function createMemoryId(): string {
-  const id = `mem-${String(nextMemoryNumber).padStart(3, "0")}`;
-  nextMemoryNumber += 1;
-  return id;
-}
-
-// 找不到 id 时直接抛错，避免调用方静默失败。
-function findIndexById(id: string): number {
-  const index = memoryItems.findIndex((item) => item.id === id);
-
-  if (index === -1) {
-    throw new AppError("INVALID_REQUEST", "Memory item not found.", 404);
-  }
-
-  return index;
-}
 
 function ensureStringArray(value: string[], fieldName: string): void {
   if (!Array.isArray(value)) {
@@ -81,7 +54,7 @@ function ensureValidCreateInput(input: CreateMemoryInput): void {
   if (!input.content || typeof input.content !== "string" || !input.content.trim()) {
     throw new AppError(
       "INVALID_REQUEST",
-      "content is required and must be a non-empty string.",
+      "content must be a non-empty string.",
       400
     );
   }
@@ -147,123 +120,110 @@ function ensureValidDailySummaryInput(input: DailySummaryInput): void {
       400
     );
   }
-
-  if (input.planId !== undefined && typeof input.planId !== "string") {
-    throw new AppError("INVALID_REQUEST", "planId must be a string.", 400);
-  }
-
-  ensureOptionalStringArray(input.learnedSkillIds, "learnedSkillIds");
-  ensureOptionalStringArray(input.completedTaskIds, "completedTaskIds");
-  ensureOptionalStringArray(input.wrongbookIds, "wrongbookIds");
-  ensureOptionalStringArray(input.weaknesses, "weaknesses");
-  ensureOptionalStringArray(input.nextSuggestions, "nextSuggestions");
 }
 
-function buildDailySummaryContent(input: DailySummaryInput): string {
-  const parts = [`Summary: ${input.summary.trim()}`];
-
-  if (input.weaknesses?.length) {
-    parts.push(`Weaknesses: ${input.weaknesses.join(", ")}`);
-  }
-
-  if (input.nextSuggestions?.length) {
-    parts.push(`Next suggestions: ${input.nextSuggestions.join(", ")}`);
-  }
-
-  return parts.join("\n");
+function toMemoryItem(row: MemoryRow): MemoryItem {
+  return {
+    id: row.id,
+    type: row.type as MemoryItem["type"],
+    title: row.title,
+    content: row.content,
+    relatedMaterialIds: JSON.parse(row.relatedMaterialIds),
+    relatedSkillIds: JSON.parse(row.relatedSkillIds),
+    relatedQuizIds: JSON.parse(row.relatedQuizIds),
+    relatedWrongbookIds: JSON.parse(row.relatedWrongbookIds),
+    importance: row.importance as MemoryItem["importance"],
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
+  };
 }
 
 export const memoryService = {
-  list(): { items: MemoryItem[] } {
-    return {
-      items: memoryItems
-    };
+  async list(): Promise<{ items: MemoryItem[] }> {
+    const rows = await prisma.memory.findMany();
+    return {items: rows.map(toMemoryItem)};
   },
 
-  getById(id: string): MemoryItem {
-    return memoryItems[findIndexById(id)];
+  async getById(id: string): Promise<MemoryItem> {
+    const row = await prisma.memory.findUnique({ where: { id } });
+
+    if (!row) {
+      throw new AppError("INVALID_REQUEST", "Memory item not found.", 404);
+    }
+    return toMemoryItem(row);
   },
 
-  create(input: CreateMemoryInput): MemoryItem {
+  async create(input: CreateMemoryInput): Promise<MemoryItem> {
     ensureValidCreateInput(input);
 
-    const now = new Date().toISOString();
-    const item: MemoryItem = {
-      id: createMemoryId(),
-      type: input.type,
-      title: input.title.trim(),
-      content: input.content.trim(),
-      relatedMaterialIds: input.relatedMaterialIds ? [...input.relatedMaterialIds] : [],
-      relatedSkillIds: input.relatedSkillIds ? [...input.relatedSkillIds] : [],
-      relatedQuizIds: input.relatedQuizIds ? [...input.relatedQuizIds] : [],
-      relatedWrongbookIds: input.relatedWrongbookIds ? [...input.relatedWrongbookIds] : [],
-      importance: input.importance ?? "medium",
-      createdAt: now,
-      updatedAt: now
-    };
+    const row = await prisma.memory.create({
+      data: {
+        type: input.type,
+        title: input.title.trim(),
+        content: input.content.trim(),
+        relatedMaterialIds: JSON.stringify(input.relatedMaterialIds ?? []),
+        relatedSkillIds: JSON.stringify(input.relatedSkillIds ?? []),
+        relatedQuizIds: JSON.stringify(input.relatedQuizIds ?? []),
+        relatedWrongbookIds: JSON.stringify(input.relatedWrongbookIds ?? []),
+        importance: input.importance ?? "medium"
+      }
+    });
 
-    memoryItems.push(item);
-    return item;
+    return toMemoryItem(row);
   },
 
-  update(id: string, input: UpdateMemoryInput): MemoryItem {
+  async update(id: string, input: UpdateMemoryInput): Promise<MemoryItem> {
     ensureValidUpdateInput(input);
 
-    const index = findIndexById(id);
-    const currentItem = memoryItems[index];
-    const updatedItem: MemoryItem = {
-      ...currentItem,
-      type: input.type ?? currentItem.type,
-      title: input.title !== undefined ? input.title.trim() : currentItem.title,
-      content: input.content !== undefined ? input.content.trim() : currentItem.content,
-      relatedMaterialIds:
-        input.relatedMaterialIds !== undefined
-          ? [...input.relatedMaterialIds]
-          : currentItem.relatedMaterialIds,
-      relatedSkillIds:
-        input.relatedSkillIds !== undefined
-          ? [...input.relatedSkillIds]
-          : currentItem.relatedSkillIds,
-      relatedQuizIds:
-        input.relatedQuizIds !== undefined ? [...input.relatedQuizIds] : currentItem.relatedQuizIds,
-      relatedWrongbookIds:
-        input.relatedWrongbookIds !== undefined
-          ? [...input.relatedWrongbookIds]
-          : currentItem.relatedWrongbookIds,
-      importance: input.importance ?? currentItem.importance,
-      updatedAt: new Date().toISOString()
-    };
+    const row = await prisma.memory.update({
+      where: { id },
+      data: {
+        type: input.type,
+        title: input.title?.trim(),
+        content: input.content?.trim(),
+        relatedMaterialIds: input.relatedMaterialIds !== undefined
+          ? JSON.stringify(input.relatedMaterialIds)
+          : undefined,
+        relatedSkillIds: input.relatedSkillIds !== undefined
+          ? JSON.stringify(input.relatedSkillIds)
+          : undefined,
+        relatedQuizIds: input.relatedQuizIds !== undefined
+          ? JSON.stringify(input.relatedQuizIds)
+          : undefined,
+        relatedWrongbookIds: input.relatedWrongbookIds !== undefined
+          ? JSON.stringify(input.relatedWrongbookIds)
+          : undefined,
+        importance: input.importance
+      }
+    });
 
-    memoryItems[index] = updatedItem;
-    return updatedItem;
+    return toMemoryItem(row);
   },
 
-  remove(id: string): MemoryItem {
-    const index = findIndexById(id);
-    const [removedItem] = memoryItems.splice(index, 1);
+  async remove(id: string): Promise<void> {
+    const existing = await prisma.memory.findUnique({ where: { id } });
 
-    return removedItem;
+    if (!existing) {
+      throw new AppError("INVALID_REQUEST", "Memory item not found.", 404);
+    }
+
+    await prisma.memory.delete({ where: { id } });
   },
 
-  createDailySummary(input: DailySummaryInput): MemoryItem {
+  async findByTitle(title: string): Promise<MemoryItem | null> {
+    const row = await prisma.memory.findFirst({
+      where: { title: title.trim() }
+    });
+    return row ? toMemoryItem(row) : null;
+  },
+
+  async createDailySummary(input: DailySummaryInput): Promise<MemoryItem> {
     ensureValidDailySummaryInput(input);
 
-    const now = new Date().toISOString();
-    const item: MemoryItem = {
-      id: createMemoryId(),
+    return memoryService.create({
       type: "daily_summary",
-      title: "Daily Summary",
-      content: buildDailySummaryContent(input),
-      relatedMaterialIds: [],
-      relatedSkillIds: input.learnedSkillIds ? [...input.learnedSkillIds] : [],
-      relatedQuizIds: [],
-      relatedWrongbookIds: input.wrongbookIds ? [...input.wrongbookIds] : [],
-      importance: "medium",
-      createdAt: now,
-      updatedAt: now
-    };
-
-    memoryItems.push(item);
-    return item;
+      title: `Daily Summary - ${new Date().toISOString().slice(0, 10)}`,
+      content: input.summary
+    });
   }
 };

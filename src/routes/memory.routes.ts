@@ -5,6 +5,7 @@ import {
   deleteMemoryItem,
   getMemoryItem,
   listMemoryItems,
+  summarizeMemories,
   updateMemoryItem
 } from "../controllers/memory.controller";
 
@@ -12,6 +13,7 @@ const router = Router();
 
 router.get("/", listMemoryItems);
 router.post("/daily-summary", createDailySummary);
+router.post("/summarize", summarizeMemories);
 router.get("/:id", getMemoryItem);
 router.post("/", createMemoryItem);
 router.patch("/:id", updateMemoryItem);
