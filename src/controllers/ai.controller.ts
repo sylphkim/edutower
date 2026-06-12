@@ -49,6 +49,7 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
 
     chatPersistenceService.saveChatExchange({
       sessionId,
+      conversationId: readConversationId(req.body),
       userMessage: message,
       aiReply: cleanReply,
       engine: "fastapi"
@@ -109,6 +110,23 @@ function readSessionId(body: unknown): string {
         : "default";
 
   return rawSessionId.trim() || "default";
+}
+
+function readConversationId(body: unknown): string | undefined {
+  if (!isRecordLike(body)) {
+    return undefined;
+  }
+
+  const raw =
+    typeof body.conversationId === "string"
+      ? body.conversationId
+      : typeof body.conversation_id === "string"
+        ? body.conversation_id
+        : undefined;
+
+  const trimmed = raw?.trim();
+
+  return trimmed ? trimmed : undefined;
 }
 
 function isRecordLike(value: unknown): value is Record<string, unknown> {

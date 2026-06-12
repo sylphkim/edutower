@@ -51,5 +51,33 @@ export const conversationsRepository = {
       },
       include: messagesInclude
     });
+  },
+
+  async appendExchangeForUser(input: {
+    conversationId: string;
+    userId: string;
+    userMessage: string;
+    aiReply: string;
+  }): Promise<void> {
+    await prisma.conversation.update({
+      where: {
+        id: input.conversationId,
+        userId: input.userId
+      },
+      data: {
+        messages: {
+          create: [
+            {
+              role: "user",
+              content: input.userMessage
+            },
+            {
+              role: "assistant",
+              content: input.aiReply
+            }
+          ]
+        }
+      }
+    });
   }
 };
