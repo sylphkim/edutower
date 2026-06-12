@@ -182,9 +182,12 @@ export const projectsRepository = {
       }
 
       if (input.tasks) {
+        // Legacy plan API only manages day-based tasks. Daily task sheets own
+        // their tasks via dailyTaskSheetId and must survive legacy plan updates.
         await tx.studyTask.deleteMany({
           where: {
-            projectId: id
+            projectId: id,
+            dailyTaskSheetId: null
           }
         });
 
