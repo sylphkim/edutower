@@ -21,6 +21,13 @@ export interface AiEngineQuizParams {
   count: number;
 }
 
+export interface AiEngineSummaryParams {
+  project: { title: string; subject: string; goal: string };
+  localDate: string;
+  studyData: string;
+  conversationDigest?: string | null;
+}
+
 type RecordLike = Record<string, unknown>;
 
 export class AiEngineService {
@@ -147,6 +154,67 @@ export class AiEngineService {
     }
   }
 
+  /**
+   * 出总结：优先转发给 FastAPI AI Engine 的 /generate-summary（仿照 chat：
+   * 不可达 / 返回异常时回退本地 llmService）。两条路都拿不到文本时返回 null，
+   * 由上层退回确定性模板。
+   */
+  async generateSummary(params: AiEngineSummaryParams): Promise<string | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), env.aiEngineTimeoutMs);
+
+    try {
+      const response = await fetch(this.generateSummaryUrl(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          project: {
+            title: params.project.title,
+            subject: params.project.subject,
+            goal: params.project.goal
+          },
+          date: params.localDate,
+          study_data: params.studyData,
+          conversation_excerpts: params.conversationDigest ?? ""
+        }),
+        signal: controller.signal
+      });
+
+      const data = await this.readJson(response);
+
+      if (
+        response.ok &&
+        isRecordLike(data) &&
+        typeof data.summary === "string" &&
+        data.summary.trim()
+      ) {
+        return data.summary.trim();
+      }
+
+      logger.warn("AI engine summary returned non-ok response, falling back to local LLM.", {
+        status: response.status,
+        baseURL: env.aiEngineBaseUrl
+      });
+    } catch (error) {
+      const reason =
+        error instanceof Error && error.name === "AbortError"
+          ? "timeout"
+          : error instanceof Error
+            ? error.message
+            : String(error);
+
+      logger.warn(`AI engine summary unreachable (${reason}), falling back to local LLM.`, {
+        baseURL: env.aiEngineBaseUrl
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    return this.fallbackSummary(params);
+  }
+
   // ── 降级逻辑：本地 LLM ──────────────────────────────────────
 
   private async fallbackChat(
@@ -182,6 +250,43 @@ export class AiEngineService {
         502,
         error
       );
+    }
+  }
+
+  private async fallbackSummary(params: AiEngineSummaryParams): Promise<string | null> {
+    if (!env.llmApiKey) {
+      // 没有本地 LLM key：交给上层退回确定性模板。
+      return null;
+    }
+
+    try {
+      const result = await llmService.generateText({
+        systemPrompt: [
+          "你是一名学习助教，请根据学习数据为学生写一段当日学习总结。",
+          "要求：3-5 句中文，先肯定完成情况，再指出问题，最后给出明天的建议。",
+          "若提供了当日对话摘录，请结合学生实际问到的内容来写，使总结更具体。",
+          "只输出总结正文，不要输出标题、列表符号或额外说明。"
+        ].join("\n"),
+        userPrompt: [
+          `学习项目：${params.project.title}（学科：${params.project.subject}，目标：${
+            params.project.goal || "未填写"
+          }）`,
+          "当日学习数据：",
+          params.studyData,
+          ...(params.conversationDigest
+            ? ["", "今日学习对话摘录（学生与助教）：", params.conversationDigest]
+            : [])
+        ].join("\n"),
+        temperature: 0.4,
+        maxOutputTokens: 600
+      });
+      const text = result.text.trim();
+
+      return text ? text.slice(0, 2000) : null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`Daily summary local LLM fallback failed (${message}); using template.`);
+      return null;
     }
   }
 
@@ -280,6 +385,10 @@ export class AiEngineService {
 
   private generateQuizUrl(): string {
     return new URL("/generate-quiz", env.aiEngineBaseUrl).toString();
+  }
+
+  private generateSummaryUrl(): string {
+    return new URL("/generate-summary", env.aiEngineBaseUrl).toString();
   }
 
   private async readJson(response: Response): Promise<unknown> {
