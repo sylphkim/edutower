@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { getEffectiveLlmConfig } from "../config/llmRuntime";
 import { env } from "../config/env";
 import { ChatParams, GenerateTextParams, LLMMessage, LLMResult, LLMUsage } from "../types/llm";
 import { AppError, ErrorCode } from "../utils/errors";
@@ -12,6 +13,10 @@ type RecordLike = Record<string, unknown>;
 
 export class LLMService {
   private client?: OpenAI;
+
+  resetClient(): void {
+    this.client = undefined;
+  }
 
   async generateText(params: GenerateTextParams): Promise<LLMResult> {
     const userPrompt = params.userPrompt?.trim();
@@ -59,7 +64,9 @@ export class LLMService {
   }
 
   private getClient(): OpenAI {
-    if (!env.llmApiKey) {
+    const llmConfig = getEffectiveLlmConfig();
+
+    if (!llmConfig.apiKey) {
       throw new AppError(
         "MISSING_API_KEY",
         "LLM_API_KEY is not configured. You can also set OPENAI_API_KEY for legacy compatibility.",
@@ -69,8 +76,8 @@ export class LLMService {
 
     if (!this.client) {
       this.client = new OpenAI({
-        apiKey: env.llmApiKey,
-        baseURL: env.llmBaseUrl,
+        apiKey: llmConfig.apiKey,
+        baseURL: llmConfig.baseUrl,
         timeout: env.llmTimeoutMs,
         maxRetries: 0
       });
@@ -85,9 +92,10 @@ export class LLMService {
     maxOutputTokens?: number;
   }): Promise<LLMResult> {
     try {
+      const llmConfig = getEffectiveLlmConfig();
       const response = await this.getClient().chat.completions.create(
         {
-          model: env.llmModel,
+          model: llmConfig.model,
           messages: params.messages as ChatCompletionMessageParam[],
           temperature: this.normalizeTemperature(params.temperature),
           max_tokens: this.normalizeMaxOutputTokens(params.maxOutputTokens)
@@ -99,7 +107,7 @@ export class LLMService {
 
       return {
         text: this.extractText(response),
-        model: this.extractModel(response) ?? env.llmModel,
+        model: this.extractModel(response) ?? getEffectiveLlmConfig().model,
         provider: env.llmProvider,
         usage: this.extractUsage(response),
         raw: response

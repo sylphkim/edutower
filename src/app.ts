@@ -7,6 +7,7 @@ import { isAppError } from "./utils/errors";
 import { logger } from "./utils/logger";
 import aiRoutes from "./routes/ai.routes";
 import agentPanelRoutes from "./routes/agentPanel.routes";
+import dailyTasksRoutes from "./routes/dailyTasks.routes";
 import healthRoutes from "./routes/health.routes";
 import llmRoutes from "./routes/llm.routes";
 import materialFoldersRoutes from "./routes/materialFolders.routes";
@@ -15,6 +16,7 @@ import memoryRoutes from "./routes/memory.routes";
 import planRoutes from "./routes/plan.routes";
 import quizRoutes from "./routes/quiz.routes";
 import skillsRoutes from "./routes/skills.routes";
+import settingsRoutes from "./routes/settings.routes";
 import wrongbookRoutes from "./routes/wrongbook.routes";
 
 const app = express();
@@ -36,8 +38,10 @@ app.use("/api/llm", llmRoutes);
 app.use("/api/material-folders", materialFoldersRoutes);
 app.use("/api/materials", materialsRoutes);
 app.use("/api/plan", planRoutes);
+app.use("/api/daily", dailyTasksRoutes);
 app.use("/api/skills", skillsRoutes);
 app.use("/api/quiz", quizRoutes);
+app.use("/api/settings", settingsRoutes);
 app.use("/api/wrongbook", wrongbookRoutes);
 app.use("/api/memory", memoryRoutes);
 

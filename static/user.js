@@ -1,16 +1,33 @@
 /**
- * EduTower — 轻量本地用户（昵称登录，无后端鉴权）
+ * EduTower — 轻量本地用户（昵称登录 + 首次 API 配置向导）
  */
 (function () {
   "use strict";
 
   var STORAGE_KEY = "edutower_user_profile";
+  var ONBOARDING_KEY = "edutower_onboarding_complete";
 
   var loginScreen = document.getElementById("loginScreen");
   var appRoot = document.getElementById("appRoot");
   var loginForm = document.getElementById("loginForm");
   var loginNameInput = document.getElementById("loginName");
   var loginErrorEl = document.getElementById("loginError");
+  var loginStepName = document.getElementById("loginStepName");
+  var loginStepApi = document.getElementById("loginStepApi");
+  var loginApiForm = document.getElementById("loginApiForm");
+  var loginApiKeyInput = document.getElementById("loginApiKey");
+  var loginApiBaseUrlInput = document.getElementById("loginApiBaseUrl");
+  var loginApiModelInput = document.getElementById("loginApiModel");
+  var loginApiErrorEl = document.getElementById("loginApiError");
+  var loginApiSuccessEl = document.getElementById("loginApiSuccess");
+  var loginApiSkipBtn = document.getElementById("loginApiSkipBtn");
+  var loginApiTestBtn = document.getElementById("loginApiTestBtn");
+  var apiBusy = false;
+
+  var DEFAULT_API = {
+    baseUrl: "https://api.deepseek.com",
+    model: "deepseek-chat",
+  };
 
   function readProfile() {
     try {
@@ -40,6 +57,14 @@
 
   function clearProfile() {
     localStorage.removeItem(STORAGE_KEY);
+  }
+
+  function isOnboardingComplete() {
+    return localStorage.getItem(ONBOARDING_KEY) === "1";
+  }
+
+  function markOnboardingComplete() {
+    localStorage.setItem(ONBOARDING_KEY, "1");
   }
 
   function formatDisplayName(rawName) {
@@ -109,6 +134,27 @@
     loginErrorEl.textContent = message;
   }
 
+  function showApiMessage(errorMessage, successMessage) {
+    if (loginApiErrorEl) {
+      if (errorMessage) {
+        loginApiErrorEl.hidden = false;
+        loginApiErrorEl.textContent = errorMessage;
+      } else {
+        loginApiErrorEl.hidden = true;
+        loginApiErrorEl.textContent = "";
+      }
+    }
+    if (loginApiSuccessEl) {
+      if (successMessage) {
+        loginApiSuccessEl.hidden = false;
+        loginApiSuccessEl.textContent = successMessage;
+      } else {
+        loginApiSuccessEl.hidden = true;
+        loginApiSuccessEl.textContent = "";
+      }
+    }
+  }
+
   function showApp(runAppRefresh) {
     if (loginScreen) {
       loginScreen.classList.add("is-hidden");
@@ -133,7 +179,7 @@
     }
   }
 
-  function showLogin() {
+  function showLoginStep(step) {
     if (loginScreen) {
       loginScreen.classList.remove("is-hidden");
       loginScreen.setAttribute("aria-hidden", "false");
@@ -142,11 +188,83 @@
       appRoot.classList.add("is-hidden");
       appRoot.setAttribute("aria-hidden", "true");
     }
-    showLoginError("");
-    if (loginNameInput) {
+
+    if (loginStepName) {
+      var showName = step === "name";
+      loginStepName.classList.toggle("is-hidden", !showName);
+      loginStepName.setAttribute("aria-hidden", showName ? "false" : "true");
+    }
+
+    if (loginStepApi) {
+      var showApi = step === "api";
+      loginStepApi.classList.toggle("is-hidden", !showApi);
+      loginStepApi.setAttribute("aria-hidden", showApi ? "false" : "true");
+    }
+
+    if (step === "name" && loginNameInput) {
       loginNameInput.value = getProfileName();
       loginNameInput.focus();
     }
+
+    if (step === "api") {
+      showApiMessage("", "");
+      prefillApiForm();
+      if (loginApiKeyInput) {
+        loginApiKeyInput.focus();
+      }
+    }
+  }
+
+  function showLogin() {
+    showLoginError("");
+    showLoginStep("name");
+  }
+
+  function showApiSetup() {
+    showLoginStep("api");
+  }
+
+  function prefillApiForm() {
+    if (loginApiBaseUrlInput && !loginApiBaseUrlInput.value) {
+      loginApiBaseUrlInput.value = DEFAULT_API.baseUrl;
+    }
+    if (loginApiModelInput && !loginApiModelInput.value) {
+      loginApiModelInput.value = DEFAULT_API.model;
+    }
+
+    if (!window.EduTowerApi) return;
+
+    window.EduTowerApi.get("/api/settings/llm/status")
+      .then(function (status) {
+        if (!status) return;
+        if (status.baseUrl && loginApiBaseUrlInput) {
+          loginApiBaseUrlInput.value = status.baseUrl;
+        }
+        if (status.model && loginApiModelInput) {
+          loginApiModelInput.value = status.model;
+        }
+        if (status.configured && status.maskedKey) {
+          showApiMessage(
+            "",
+            "当前已配置 Key：" + status.maskedKey + "。重新填写将覆盖原配置。"
+          );
+        }
+      })
+      .catch(function () {
+        /* ignore */
+      });
+  }
+
+  function readApiPayload() {
+    return {
+      apiKey: loginApiKeyInput ? loginApiKeyInput.value.trim() : "",
+      baseUrl: loginApiBaseUrlInput
+        ? loginApiBaseUrlInput.value.trim() || DEFAULT_API.baseUrl
+        : DEFAULT_API.baseUrl,
+      model: loginApiModelInput
+        ? loginApiModelInput.value.trim() || DEFAULT_API.model
+        : DEFAULT_API.model,
+    };
   }
 
   function validateName(name) {
@@ -159,6 +277,13 @@
     return "";
   }
 
+  function finishLoginFlow() {
+    markOnboardingComplete();
+    showLoginError("");
+    showApiMessage("", "");
+    showApp(true);
+  }
+
   function handleLoginSubmit(event) {
     event.preventDefault();
     var name = loginNameInput ? loginNameInput.value : "";
@@ -167,9 +292,83 @@
       showLoginError(error);
       return;
     }
+
     saveProfile(name);
     showLoginError("");
+
+    if (!isOnboardingComplete()) {
+      showApiSetup();
+      return;
+    }
+
     showApp(true);
+  }
+
+  async function handleApiTest() {
+    if (apiBusy || !window.EduTowerApi) return;
+
+    var payload = readApiPayload();
+    if (!payload.apiKey) {
+      showApiMessage("请填写 API Key。", "");
+      return;
+    }
+
+    apiBusy = true;
+    showApiMessage("", "正在测试连接…");
+    if (loginApiTestBtn) loginApiTestBtn.disabled = true;
+
+    try {
+      var result = await window.EduTowerApi.post("/api/settings/llm/test", payload);
+      showApiMessage(
+        "",
+        "连接成功（模型：" + (result.model || payload.model) + "）。"
+      );
+    } catch (err) {
+      showApiMessage(
+        "测试失败：" + (window.EduTowerApi.networkError ? window.EduTowerApi.networkError(err) : err.message),
+        ""
+      );
+    } finally {
+      apiBusy = false;
+      if (loginApiTestBtn) loginApiTestBtn.disabled = false;
+    }
+  }
+
+  async function handleApiSave(event) {
+    event.preventDefault();
+    if (apiBusy || !window.EduTowerApi) return;
+
+    var payload = readApiPayload();
+    if (!payload.apiKey) {
+      showApiMessage("请填写 API Key。", "");
+      return;
+    }
+
+    apiBusy = true;
+    showApiMessage("", "正在保存配置…");
+
+    try {
+      await window.EduTowerApi.post("/api/settings/llm", payload);
+      showApiMessage(
+        "",
+        "配置已保存。若 AI 聊天或出题无响应，请重启 FastAPI 服务（在 AI-Agent 目录运行 python main.py）。"
+      );
+      if (isOnboardingComplete()) {
+        return;
+      }
+      finishLoginFlow();
+    } catch (err) {
+      showApiMessage(
+        "保存失败：" + (window.EduTowerApi.networkError ? window.EduTowerApi.networkError(err) : err.message),
+        ""
+      );
+    } finally {
+      apiBusy = false;
+    }
+  }
+
+  function handleApiSkip() {
+    finishLoginFlow();
   }
 
   function handleLogout() {
@@ -184,11 +383,27 @@
     if (loginForm) {
       loginForm.addEventListener("submit", handleLoginSubmit);
     }
+    if (loginApiForm) {
+      loginApiForm.addEventListener("submit", handleApiSave);
+    }
+    if (loginApiSkipBtn) {
+      loginApiSkipBtn.addEventListener("click", handleApiSkip);
+    }
+    if (loginApiTestBtn) {
+      loginApiTestBtn.addEventListener("click", handleApiTest);
+    }
 
     document.querySelectorAll("[data-action='logout']").forEach(function (el) {
       el.addEventListener("click", function (event) {
         event.preventDefault();
         handleLogout();
+      });
+    });
+
+    document.querySelectorAll("[data-action='open-api-setup']").forEach(function (el) {
+      el.addEventListener("click", function (event) {
+        event.preventDefault();
+        showApiSetup();
       });
     });
   }
@@ -210,6 +425,7 @@
     getTimeGreetingPrefix: getTimeGreetingPrefix,
     applyUserToUI: applyUserToUI,
     logout: handleLogout,
+    openApiSetup: showApiSetup,
     isLoggedIn: function () {
       return !!readProfile();
     },

@@ -12,4 +12,5 @@ prisma/dev.db
 uploads/materials/*
 !uploads/materials/.gitkeep
 *.memory-card.json
+data/local-llm-config.json
 /src/generated/prisma
