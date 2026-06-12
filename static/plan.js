@@ -56,9 +56,14 @@
       if (!action) return;
 
       if (action === "plan-view-hub") {
+        leaveTimetableView();
         setViewMode("hub");
         loadHubData();
+      } else if (action === "plan-view-timetable") {
+        setViewMode("timetable");
+        render();
       } else if (action === "plan-view-advanced") {
+        leaveTimetableView();
         setViewMode("advanced");
         render();
       } else if (action === "plan-quick-start") {
@@ -189,6 +194,9 @@
   }
 
   function setViewMode(mode) {
+    if (viewMode === "timetable" && mode !== "timetable") {
+      leaveTimetableView();
+    }
     viewMode = mode;
     pendingDeletePlanId = null;
     clearBanner();
@@ -213,6 +221,12 @@
     );
   }
 
+  function leaveTimetableView() {
+    if (window.EduTowerTimetable && typeof window.EduTowerTimetable.unmount === "function") {
+      window.EduTowerTimetable.unmount();
+    }
+  }
+
   function renderSubnav() {
     if (viewMode === "create" || viewMode === "edit" || viewMode === "tasks") {
       return (
@@ -233,6 +247,9 @@
       '<button type="button" class="module-subnav__item' +
       (viewMode === "hub" ? " module-subnav__item--active" : "") +
       '" data-action="plan-view-hub">今日学习</button>' +
+      '<button type="button" class="module-subnav__item' +
+      (viewMode === "timetable" ? " module-subnav__item--active" : "") +
+      '" data-action="plan-view-timetable">平日课表</button>' +
       '<button type="button" class="module-subnav__item' +
       (viewMode === "advanced" ? " module-subnav__item--active" : "") +
       '" data-action="plan-view-advanced">手动课表</button>' +
@@ -1585,6 +1602,19 @@
 
     if (viewMode === "hub") {
       rootEl.innerHTML = renderHub();
+      return;
+    }
+
+    if (viewMode === "timetable") {
+      rootEl.innerHTML =
+        renderSubnav() + '<div id="planTimetableMount" class="plan-timetable-mount"></div>';
+      var mountEl = document.getElementById("planTimetableMount");
+      if (mountEl && window.EduTowerTimetable && typeof window.EduTowerTimetable.mount === "function") {
+        window.EduTowerTimetable.mount(mountEl);
+      } else if (mountEl) {
+        mountEl.innerHTML =
+          '<p class="module-empty">课表模块加载失败，请刷新页面后重试。</p>';
+      }
       return;
     }
 
