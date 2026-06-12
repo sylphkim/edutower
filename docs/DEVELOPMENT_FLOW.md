@@ -164,7 +164,7 @@ Frontend
 ### 5. AI 生成学习计划和测验
 
 - Plan：整体计划提案落库（`proposals/apply`）和每日任务编排已完成；AI Engine 侧的提案生成 prompt/工具链仍需补齐。
-- Quiz：基于资料 chunks 和 skill 生成题目（当前仍是 mock 规则）。
+- Quiz：按 skill/知识点经 FastAPI AI Engine 出单选题、失败兜底 mock（Express 侧已完成；待 FastAPI 补 `/generate-quiz` 端点）；后续可接资料 chunks/RAG 提升相关性。
 - Wrongbook：继续从 quiz submit 沉淀错题。
 - Memory：把每日总结确认后的记忆写入从内存 mock 换成 Prisma 持久化，再扩展到学习事件和错题。
 - Conversation：把 `/api/ai/chat` 的对话写入 `Conversation/Message`，让当天学习记录的子对话生效。
@@ -240,5 +240,5 @@ Frontend
 4. AI Engine 侧补齐整体计划提案生成，调用 `POST /api/plan/:projectId/proposals/apply`。
 5. 挂载并验收 `/api/material-folders`；设计受控文件下载接口。
 6. 接入文件解析（PDF → DOC/DOCX → 图片 OCR），设计资料 chunks/RAG schema。
-7. 用真实资料上下文替换 demo chat context；Quiz 从 mock 规则换成 AI 生成。
+7. 用真实资料上下文替换 demo chat context（Quiz 已从 mock 规则切换为 LLM 出题 + mock 兜底）。
 8. 引入真实用户和权限隔离。

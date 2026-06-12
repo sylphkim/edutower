@@ -10,6 +10,8 @@ export interface GenerateTextParams {
   userPrompt: string;
   temperature?: number;
   maxOutputTokens?: number;
+  /** 开启后要求服务商只返回合法 JSON 对象（response_format: json_object）。 */
+  jsonMode?: boolean;
 }
 
 export interface ChatParams {

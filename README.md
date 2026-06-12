@@ -37,6 +37,7 @@ Frontend / static
 - 每日学习单（`/api/daily`）闭环：进入项目幂等生成今日任务并持久化，刷新只读取；系统规则限定候选（续排/薄弱点/错题/进行中/当前阶段新知识点），AI 只在候选内排序取舍并解释，失败回退规则。
 - 任务状态流转、用户重排未完成任务；任务全部完成、用户主动结束或 24:00 零点都会结束当天学习。
 - 结束当天生成总结草稿与待确认建议；建议确认后回写技能树（复用自动解锁）、薄弱点和状态事件；零点由系统直接判定并保留判断依据。
+- 测验（`/api/quiz`）AI 出题闭环：按知识点经 FastAPI AI Engine 出单选题（前端→Express→FastAPI→LLM），FastAPI 不可用时 Express 兜底内置 mock；交卷由服务端判分，错题写入 `WrongbookItem` 持久化；取测验响应不下发正确答案，避免交卷前泄题。
 
 仍未完成或后续继续做：
 
@@ -45,7 +46,7 @@ Frontend / static
 - 上传文件的静态访问或下载接口。
 - 聊天对话持久化到 `Conversation`（当天学习记录的子对话目前为空）。
 - Memory 仍是内存 mock；AI Engine 侧的整体计划提案生成链路。
-- Quiz 题目生成仍是 mock 规则。
+- Quiz 出题暂基于知识点标题/说明（未接资料 chunks/RAG）；FastAPI 侧 `/generate-quiz` 端点待补，建好前 Express 出题走 mock 兜底。
 - 技能节点删除策略还未切换为“有历史学习记录则归档”；数据模型已有 `archivedAt`，tree 查询默认隐藏归档节点。
 - 完整自动化测试套件。
 
@@ -218,7 +219,7 @@ seed 会在 `demo-project` 下写入 10 个“高中数学二次函数”技能�
 | Plan Versions | `GET/POST /api/plan/:projectId/versions`, `PATCH /api/plan/:projectId/versions/:versionId`, `POST .../confirm`, `POST .../revise`, `POST /api/plan/:projectId/proposals/apply` |
 | Daily | `GET/POST /api/daily/:projectId/today`, `POST .../today/regenerate`, `POST .../today/close`, `GET /api/daily/:projectId/sheets`, `PATCH /api/daily/:projectId/tasks/:taskId`, `POST /api/daily/:projectId/summaries/:summaryId/decisions` |
 | Skills | `GET /api/skills`, `GET /api/skills/tree`, `POST /api/skills`, `PATCH /api/skills/:id`, `DELETE /api/skills/:id` |
-| Quiz | `GET /api/quiz`, `POST /api/quiz`, `POST /api/quiz/:id/submit`, `DELETE /api/quiz/:id` |
+| Quiz | `GET /api/quiz`, `GET /api/quiz/:id`, `POST /api/quiz`, `POST /api/quiz/:id/submit`, `DELETE /api/quiz/:id` |
 | Wrongbook | `GET /api/wrongbook`, `POST /api/wrongbook`, `PATCH /api/wrongbook/:id`, `DELETE /api/wrongbook/:id` |
 | Memory | `GET /api/memory`, `POST /api/memory`, `POST /api/memory/daily-summary` |
 

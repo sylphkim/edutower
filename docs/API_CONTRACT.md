@@ -78,7 +78,7 @@ Frontend / static
 | `/api/plan` | partial | 旧学习计划 CRUD 已持久化；阶段计划版本与提案接口为 ready |
 | `/api/daily` | ready | 每日学习单：生成、任务状态、重排、结束、总结建议决策、历史查询 |
 | `/api/skills` | partial | 知识点/技能 CRUD 已持久化，仍使用 demo project |
-| `/api/quiz` | partial | Quiz 持久化，题目生成仍是 mock 规则 |
+| `/api/quiz` | partial | Quiz 持久化；题目经 FastAPI AI Engine 出题、失败兜底 mock；取测验不返回正确答案 |
 | `/api/wrongbook` | partial | 错题项持久化，taxonomy 仍是服务端常量 |
 | `/api/memory` | mock | 长期记忆当前为内存 mock |
 | `/api/material-folders` | implemented-not-mounted | 文件夹模块已实现，但当前未在 `app.ts` 挂载 |
@@ -734,13 +734,13 @@ not_started | learning | mastered
 
 ## Quiz
 
-Quiz、Question、Attempt 已接 Prisma；题目生成仍是 mock 规则，不调用真实 LLM。
+Quiz、Question、Attempt 已接 Prisma。出题走 `前端→Express→FastAPI→LLM`：Express 出题器（`src/services/quizGenerator.service.ts`）调用 FastAPI AI Engine 的 `POST /generate-quiz`（入参知识点 + 难度 + 题数），由 FastAPI 内部拼 prompt、调 LLM 出**单项选择题**；Express 负责校验/规整/落库，**不直连 LLM**，FastAPI 不可用或返回不合格时兜底内置 mock 题。难度档位（`pass`/`high_score`）影响出题难易。取测验（list/get/create）响应**不返回** `answer`/`explanation`，正确答案只在 `/submit` 结果里返回。
 
 | Method | Path | Status | 说明 |
 | --- | --- | --- | --- |
-| GET | `/api/quiz` | partial | 查询测验列表 |
-| GET | `/api/quiz/:id` | partial | 查询单个测验 |
-| POST | `/api/quiz` | partial | 创建 mock 测验 |
+| GET | `/api/quiz` | partial | 查询测验列表（题目不含正确答案/解析） |
+| GET | `/api/quiz/:id` | partial | 查询单个测验（题目不含正确答案/解析） |
+| POST | `/api/quiz` | partial | 创建测验（AI 出题，失败兜底 mock；响应不含正确答案） |
 | POST | `/api/quiz/:id/submit` | partial | 提交答案并写入答题记录/错题 |
 | DELETE | `/api/quiz/:id` | partial | 删除测验 |
 
@@ -851,7 +851,7 @@ Memory 当前使用内存 mock，不是 Prisma 持久化。服务重启后会回
 - chat context 使用 `src/mock/demo*` 数据。
 - Agent panel 主要来自 demo chat context，错题复习数量来自 wrongbook 当前数据。
 - Memory 使用内存 mock；每日总结确认后会调用它写入记忆，服务重启即丢失。
-- Quiz 题目生成是 mock 规则，但 Quiz/Question/Attempt 可持久化。
+- Quiz 题目经 FastAPI AI Engine 生成（Express 调用，不直连 LLM；失败兜底 mock），Quiz/Question/Attempt 可持久化；取测验响应不含正确答案。
 - Wrongbook taxonomy 使用服务端常量，WrongbookItem 可持久化。
 - Plan、Daily、Skills、Materials、Wrongbook、Quiz 目前主要依赖 Demo 用户或 Demo project。
 - Daily 的 `conversations` 依赖 `Conversation` 表；聊天链路尚未持久化对话，当前通常为空数组。

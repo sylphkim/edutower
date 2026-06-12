@@ -43,9 +43,7 @@ export const mockQuizItems: QuizItem[] = [
         id: "q-001",
         type: "single_choice",
         prompt: "What does a derivative measure at a point?",
-        options: ["Average value", "Instantaneous rate of change", "Area under a curve"],
-        answer: "Instantaneous rate of change",
-        explanation: "A derivative captures the instantaneous rate of change at a point."
+        options: ["Average value", "Instantaneous rate of change", "Area under a curve"]
       }
     ],
     createdAt: "2026-05-27T00:00:00.000Z"
