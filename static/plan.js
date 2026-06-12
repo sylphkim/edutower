@@ -24,6 +24,7 @@
   var selectedVersionId = null;
   var dependencyEdges = [];
   var suggestionDecisions = {};
+  var DAILY_CONV_STORAGE_KEY = "edutower_daily_conversation_map";
 
   var TASK_STATUS_LABEL = {
     todo: "待开始",
@@ -99,6 +100,10 @@
         revisePlanVersion(target.getAttribute("data-id"));
       } else if (action === "daily-regenerate") {
         regenerateDailyToday();
+      } else if (action === "daily-open-chat") {
+        openDailyChat("");
+      } else if (action === "daily-open-conversation") {
+        openDailyChat(target.getAttribute("data-conversation-id"));
       } else if (action === "daily-close") {
         closeDailyToday();
       } else if (action === "daily-cycle-task") {
@@ -382,12 +387,94 @@
     }
   }
 
+  function readDailyConvMap() {
+    try {
+      var raw = localStorage.getItem(DAILY_CONV_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (_err) {
+      return {};
+    }
+  }
+
+  function writeDailyConvMap(map) {
+    localStorage.setItem(DAILY_CONV_STORAGE_KEY, JSON.stringify(map));
+  }
+
+  function dailyConvCacheKey(projectId, localDate) {
+    return projectId + "|" + localDate;
+  }
+
+  async function ensureTodayConversation() {
+    var projectId = getProjectId();
+    var sheet = dailyRecord && dailyRecord.sheet ? dailyRecord.sheet : null;
+    if (!projectId || !sheet || !sheet.localDate) {
+      return null;
+    }
+
+    if (sheet.status !== "active" && sheet.status !== "generating") {
+      return null;
+    }
+
+    var cacheKey = dailyConvCacheKey(projectId, sheet.localDate);
+    var map = readDailyConvMap();
+    var cachedId = map[cacheKey];
+    var serverConv = null;
+
+    if (dailyRecord.conversations && dailyRecord.conversations.length) {
+      serverConv = dailyRecord.conversations
+        .filter(function (conversation) {
+          return conversation.type === "project_study";
+        })
+        .sort(function (left, right) {
+          return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+        })[0];
+    }
+
+    var conversationId = (serverConv && serverConv.id) || cachedId || null;
+
+    if (!conversationId) {
+      var title = "今日学习 " + sheet.localDate;
+      var created = await api.post("/api/conversations", {
+        projectId: projectId,
+        type: "project_study",
+        title: title,
+      });
+      conversationId = created && created.id ? created.id : null;
+    }
+
+    if (!conversationId) {
+      return null;
+    }
+
+    map[cacheKey] = conversationId;
+    writeDailyConvMap(map);
+
+    if (
+      window.EduTowerChat &&
+      typeof window.EduTowerChat.activateStudyConversation === "function"
+    ) {
+      await window.EduTowerChat.activateStudyConversation({
+        conversationId: conversationId,
+        projectId: projectId,
+        localDate: sheet.localDate,
+        title: (serverConv && serverConv.title) || "今日学习 " + sheet.localDate,
+      });
+    }
+
+    return conversationId;
+  }
+
   async function syncDailyRecord() {
     var projectId = getProjectId();
     if (!projectId) return;
 
     try {
       dailyRecord = await api.post("/api/daily/" + encodeURIComponent(projectId) + "/today", {});
+      try {
+        await ensureTodayConversation();
+      } catch (_convErr) {
+        /* 子对话绑定失败不阻断今日任务 */
+      }
     } catch (err) {
       setBanner("error", "同步今日任务失败：" + api.networkError(err));
     }
@@ -849,6 +936,9 @@
       sheetMeta +
       "</p></div>" +
       '<div class="plan-detail__actions">' +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="daily-open-chat"' +
+      (isBusy ? " disabled" : "") +
+      ">去 AI 答疑</button>" +
       '<button type="button" class="btn btn--ghost btn--compact" data-action="daily-regenerate"' +
       (isBusy ? " disabled" : "") +
       ">重新编排</button>" +
@@ -858,6 +948,7 @@
       '<ul class="plan-task-list">' +
       (tasksHtml || '<li class="module-empty module-empty--inline">' + emptyTasksHint + "</li>") +
       "</ul>" +
+      renderTodayConversations(dailyRecord && dailyRecord.conversations ? dailyRecord.conversations : []) +
       (summary && summary.aiDraft
         ? '<section class="plan-today-summary">' +
           '<h3 class="plan-day__title">今日总结</h3>' +
@@ -896,6 +987,75 @@
     }
   }
 
+  function renderTodayConversations(conversations) {
+    if (!conversations || !conversations.length) {
+      return "";
+    }
+
+    var items = conversations
+      .map(function (conversation) {
+        return (
+          '<li class="plan-today-conversation">' +
+          '<span class="module-badge">' +
+          api.escapeHtml(conversation.type === "project_study" ? "今日学习" : conversation.type) +
+          "</span>" +
+          '<span class="plan-today-conversation__title">' +
+          api.escapeHtml(conversation.title || "学习对话") +
+          "</span>" +
+          '<span class="plan-today-conversation__meta">' +
+          conversation.messageCount +
+          " 条消息</span>" +
+          '<button type="button" class="btn btn--ghost btn--compact" data-action="daily-open-conversation" data-conversation-id="' +
+          api.escapeAttr(conversation.id) +
+          '">查看对话</button></li>'
+        );
+      })
+      .join("");
+
+    return (
+      '<section class="plan-today-conversations">' +
+      '<h3 class="plan-day__title">今日学习对话</h3>' +
+      '<ul class="plan-today-conversation-list">' +
+      items +
+      "</ul></section>"
+    );
+  }
+
+  async function openDailyChat(conversationId) {
+    if (isBusy) return;
+
+    isBusy = true;
+    clearBanner();
+    try {
+      if (conversationId) {
+        var projectId = getProjectId();
+        var sheet = dailyRecord && dailyRecord.sheet ? dailyRecord.sheet : null;
+        if (
+          window.EduTowerChat &&
+          typeof window.EduTowerChat.activateStudyConversation === "function"
+        ) {
+          await window.EduTowerChat.activateStudyConversation({
+            conversationId: conversationId,
+            projectId: projectId,
+            localDate: sheet ? sheet.localDate : null,
+            title: "今日学习对话",
+          });
+        }
+      } else {
+        await ensureTodayConversation();
+      }
+
+      if (window.EduTowerShell && typeof window.EduTowerShell.switchView === "function") {
+        window.EduTowerShell.switchView("chat");
+      }
+    } catch (err) {
+      setBanner("error", "打开学习对话失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
   async function closeDailyToday() {
     var projectId = getProjectId();
     if (!projectId || isBusy) return;
@@ -907,6 +1067,12 @@
         "/api/daily/" + encodeURIComponent(projectId) + "/today/close",
         {}
       );
+      if (
+        window.EduTowerChat &&
+        typeof window.EduTowerChat.clearStudyConversation === "function"
+      ) {
+        window.EduTowerChat.clearStudyConversation();
+      }
       suggestionDecisions = {};
       var needsConfirm =
         dailyRecord &&
@@ -930,6 +1096,7 @@
   var SUGGESTION_TYPE_LABEL = {
     knowledge_status: "掌握度",
     weakness: "薄弱点",
+    weakness_resolved: "建议解决",
     review_suggestion: "复习建议",
   };
 
@@ -1870,6 +2037,7 @@
       return dailyRecord;
     },
     ensureToday: loadDailyToday,
+    ensureTodayConversation: ensureTodayConversation,
     loadTodayTasks: async function () {
       var projectId = getProjectId();
       if (!projectId) {

@@ -1967,6 +1967,44 @@ code {
   margin-top: 10px;
 }
 
+.plan-today-conversations {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.plan-today-conversation-list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plan-today-conversation {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.plan-today-conversation__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.plan-today-conversation__meta {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 .memory-relations {
   display: flex;
   flex-direction: column;
