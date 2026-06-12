@@ -50,7 +50,7 @@ Frontend
 
 - `materials / plan / skills / quiz / wrongbook / memory` 已整理为 routes/controller/service/types 分层。
 - `materials / plan / skills / quiz / wrongbook` 主要通过 Prisma/SQLite 持久化。
-- `memory` 当前仍是内存 mock。
+- `memory` 已接 Prisma 持久化
 - `chat context` 当前仍来自 `src/mock/demo*`。
 - Demo 用户和 Demo project 用于当前开发阶段。
 - Skills 已完成项目内 SQLite 技能树主链路：DAG 前置依赖、学习状态、解锁资格、自动解锁、回退风险提示和归档字段。
@@ -127,7 +127,7 @@ Frontend
 当前未完成：
 
 - 聊天对话尚未写入 `Conversation` 表，当天学习记录中的 `conversations` 通常为空。
-- Memory 仍是内存 mock，总结确认写入的记忆重启即丢。
+- Memory 已接 Prisma 持久化，总结确认写入的记忆不会重启即丢。
 - 每日任务尚未关联具体资料（`materialId` 字段已预留）。
 
 ## 下一阶段真实能力
@@ -166,7 +166,7 @@ Frontend
 - Plan：整体计划提案落库（`proposals/apply`）和每日任务编排已完成；AI Engine 侧的提案生成 prompt/工具链仍需补齐。
 - Quiz：按 skill/知识点经 FastAPI AI Engine 出单选题、失败兜底 mock（Express 侧已完成；待 FastAPI 补 `/generate-quiz` 端点）；后续可接资料 chunks/RAG 提升相关性。
 - Wrongbook：继续从 quiz submit 沉淀错题。
-- Memory：把每日总结确认后的记忆写入从内存 mock 换成 Prisma 持久化，再扩展到学习事件和错题。
+- Memory：把每日总结确认后的记忆写入从内存 mock 换成 Prisma 持久化（已完成），再扩展到学习事件和错题。
 - Conversation：把 `/api/ai/chat` 的对话写入 `Conversation/Message`，让当天学习记录的子对话生效。
 
 ### 6. 用户系统与权限
@@ -236,7 +236,7 @@ Frontend
 
 1. 前端对接 `/api/daily` 今日任务闭环和阶段计划版本接口。
 2. 把 `/api/ai/chat` 对话持久化到 `Conversation/Message`，点亮当天学习记录的子对话。
-3. Memory 从内存 mock 换成 Prisma 持久化。
+3. Memory 从内存 mock 换成 Prisma 持久化（已完成）。
 4. AI Engine 侧补齐整体计划提案生成，调用 `POST /api/plan/:projectId/proposals/apply`。
 5. 挂载并验收 `/api/material-folders`；设计受控文件下载接口。
 6. 接入文件解析（PDF → DOC/DOCX → 图片 OCR），设计资料 chunks/RAG schema。
