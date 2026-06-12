@@ -25,6 +25,16 @@
   var CATEGORY_FILTER_ALL_LABEL = "全部错因";
   var UNCategorized_ID = "uncategorized";
 
+  function renderText(text) {
+    if (
+      window.EduTowerChatRender &&
+      typeof window.EduTowerChatRender.renderRichText === "function"
+    ) {
+      return window.EduTowerChatRender.renderRichText(text);
+    }
+    return api.escapeHtml(text);
+  }
+
   bindEvents();
   refresh();
 
@@ -54,6 +64,8 @@
   function onRootClick(event) {
     var target = event.target;
     if (!(target instanceof HTMLElement)) return;
+
+    var action = target.getAttribute("data-action");
 
     if (target.matches("[data-select-subject]")) {
       enterSubject(target.getAttribute("data-select-subject"));
@@ -130,7 +142,6 @@
       return;
     }
 
-    var action = target.getAttribute("data-action");
     var id = target.getAttribute("data-id");
     if (!action || !id) return;
 
@@ -655,7 +666,7 @@
               '"><span class="wrongbook-options__label">' +
               api.escapeHtml(opt.id) +
               ".</span> " +
-              api.escapeHtml(opt.text) +
+              renderText(opt.text) +
               "</li>"
             );
           })
@@ -664,7 +675,7 @@
     }
 
     var explanation = q.explanation
-      ? '<p class="wrongbook-card__explanation">' + api.escapeHtml(q.explanation) + "</p>"
+      ? '<p class="wrongbook-card__explanation">' + renderText(q.explanation) + "</p>"
       : "";
 
     return (
@@ -687,11 +698,11 @@
       renderSelectField("错因", "set-category", item, categories, categoryId) +
       "</div>" +
       '<p class="wrongbook-card__prompt">' +
-      api.escapeHtml(prompt) +
+      renderText(prompt) +
       "</p>" +
       optionsHtml +
       '<p class="wrongbook-card__answer">你的答案：<strong>' +
-      api.escapeHtml(item.wrongAnswer) +
+      renderText(item.wrongAnswer) +
       "</strong></p>" +
       explanation +
       '<div class="wrongbook-card__actions">' +

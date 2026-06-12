@@ -38,24 +38,55 @@
         </svg>
         <span>EduTower</span>
       </div>
-      <h1 class="login-card__title" id="loginTitle">欢迎来到 EduTower</h1>
-      <p class="login-card__subtitle">轻量登录：输入称呼即可开始学习。无需密码，信息仅保存在本机浏览器。</p>
-      <form id="loginForm" class="login-form" novalidate>
-        <label class="login-form__label" for="loginName">你的称呼</label>
-        <input
-          id="loginName"
-          class="login-form__input"
-          type="text"
-          name="name"
-          maxlength="20"
-          autocomplete="nickname"
-          placeholder="例如：李、小明"
-          required
-        />
-        <p class="login-form__hint">将显示为「李同学」这样的问候语</p>
-        <p id="loginError" class="login-form__error" role="alert" hidden></p>
-        <button type="submit" class="btn btn--primary login-form__submit">进入学习</button>
-      </form>
+      <div id="loginStepName" class="login-step">
+        <h1 class="login-card__title" id="loginTitle">欢迎来到 EduTower</h1>
+        <p class="login-card__subtitle">轻量登录：输入称呼即可开始学习。无需密码，信息仅保存在本机浏览器。</p>
+        <form id="loginForm" class="login-form" novalidate>
+          <label class="login-form__label" for="loginName">你的称呼</label>
+          <input
+            id="loginName"
+            class="login-form__input"
+            type="text"
+            name="name"
+            maxlength="20"
+            autocomplete="nickname"
+            placeholder="例如：李、小明"
+            required
+          />
+          <p class="login-form__hint">将显示为「李同学」这样的问候语</p>
+          <p id="loginError" class="login-form__error" role="alert" hidden></p>
+          <button type="submit" class="btn btn--primary login-form__submit">下一步</button>
+        </form>
+      </div>
+      <div id="loginStepApi" class="login-step is-hidden" aria-hidden="true">
+        <h1 class="login-card__title">配置 AI 接口</h1>
+        <p class="login-card__subtitle">首次使用请填写 LLM API，用于 AI 聊天与智能出题。也可先跳过，稍后在登录页重新配置。</p>
+        <details class="login-tutorial" open>
+          <summary>配置教程（点击展开/收起）</summary>
+          <ol class="login-tutorial__list">
+            <li>向模型服务商（如 DeepSeek、OpenAI 兼容平台）申请 API Key。</li>
+            <li>填写下方三项；保存后会写入项目 <code>data/local-llm-config.json</code> 并同步到 <code>.env</code>。</li>
+            <li>若使用 FastAPI 出题（<code>AI-Agent</code>），保存后请<strong>重启 FastAPI</strong> 以加载新配置。</li>
+            <li>点击「测试连接」确认可用，再「保存并进入」。</li>
+          </ol>
+        </details>
+        <form id="loginApiForm" class="login-form" novalidate>
+          <label class="login-form__label" for="loginApiKey">API Key</label>
+          <input id="loginApiKey" class="login-form__input" type="password" autocomplete="off" placeholder="sk-..." required />
+          <label class="login-form__label" for="loginApiBaseUrl">Base URL</label>
+          <input id="loginApiBaseUrl" class="login-form__input" type="url" placeholder="https://api.deepseek.com" />
+          <p class="login-form__hint">OpenAI 兼容接口地址，DeepSeek 示例：https://api.deepseek.com</p>
+          <label class="login-form__label" for="loginApiModel">模型名称</label>
+          <input id="loginApiModel" class="login-form__input" type="text" placeholder="deepseek-chat" />
+          <p id="loginApiError" class="login-form__error" role="alert" hidden></p>
+          <p id="loginApiSuccess" class="login-form__success" role="status" hidden></p>
+          <div class="login-form__actions">
+            <button type="button" class="btn btn--ghost" id="loginApiSkipBtn">稍后配置</button>
+            <button type="button" class="btn btn--ghost" id="loginApiTestBtn">测试连接</button>
+            <button type="submit" class="btn btn--primary">保存并进入</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
   <div class="app is-hidden" id="appRoot" aria-hidden="true">
@@ -129,7 +160,7 @@
                   学以立塔，志以行远。从下方入口开始今天的复习，Agent 会同步你的学习进度与薄弱点。
                 </p>
                 <div class="home-hero__actions">
-                  <button type="button" class="btn btn--primary home-hero__cta" data-go-view="chat">开始 AI 复习</button>
+                  <button type="button" class="btn btn--primary home-hero__cta" id="homePrimaryCta" data-go-view="chat">开始 AI 复习</button>
                   <button type="button" class="btn btn--ghost home-hero__cta" data-go-view="materials">录入学习资料</button>
                 </div>
               </div>
@@ -188,7 +219,7 @@
                   <div id="homeProgressCard" class="home-overview-card__body"></div>
                 </article>
                 <article class="home-overview-card">
-                  <h3 class="home-overview-card__title">复习清单</h3>
+                  <h3 class="home-overview-card__title">今日任务</h3>
                   <div id="homeChecklistCard" class="home-overview-card__body"></div>
                 </article>
               </div>
@@ -219,12 +250,15 @@
                 <span class="breadcrumb-sep">|</span>
                 <span class="breadcrumb-current" id="viewBreadcrumb">AI 智能助教</span>
                 <span class="breadcrumb-sep">·</span>
-                <span class="breadcrumb-topic" id="chatTopicLabel">高中数学：二次函数</span>
+                <span class="breadcrumb-topic" id="chatTopicLabel">新对话</span>
               </nav>
             </div>
             <div class="chat-header__actions">
               <button type="button" class="icon-btn" id="chatHistoryBtn" aria-label="历史对话" title="历史对话">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+              </button>
+              <button type="button" class="icon-btn" data-action="open-api-setup" title="配置 AI API" aria-label="配置 AI API">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 15.5a3.5 3.5 0 100-7 3.5 3.5 0 000 7z"/><path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.34 1.7 1.7 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.7 1.7 0 00-1-1.51 1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.7 1.7 0 004.6 15a1.7 1.7 0 00-1.51-1H3a2 2 0 010-4h.09A1.7 1.7 0 004.6 9a1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 012.83-2.83l.06.06A1.7 1.7 0 009 4.6a1.7 1.7 0 001-1.51V3a2 2 0 014 0v.09a1.7 1.7 0 001 1.51 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 012.83 2.83l-.06.06A1.7 1.7 0 0019.4 9c.7 0 1.34.37 1.7.97H21a2 2 0 010 4h-.09c-.7 0-1.34.37-1.7.97z"/></svg>
               </button>
               <button type="button" class="user-avatar" aria-label="用户菜单" data-action="logout" title="切换账号">
                 <span class="avatar-inner" data-user-avatar>学</span>
@@ -288,7 +322,7 @@
           <header class="module-header">
             <div class="module-header__titles">
               <h1 class="module-header__title">学习计划</h1>
-              <p class="module-header__subtitle">查看后端生成的学习路径，点击任务圆圈切换状态</p>
+              <p class="module-header__subtitle">默认展示今天要学的任务；平日课表与手动课表在顶部切换</p>
             </div>
           </header>
           <div class="module-body" id="planRoot"></div>
@@ -354,7 +388,8 @@
               <section class="info-page__section">
                 <h2>学习计划与练习</h2>
                 <ul>
-                  <li>在「学习计划」中创建计划，通过「管理任务」安排每日任务。</li>
+                  <li>打开「学习计划」→ 点击「一键启用」即可开始；日常只看「今日学习」。</li>
+                  <li>需要自定义课表时，再进入「手动课表」编辑。</li>
                   <li>练习类任务请关联「技能」，才能在「练习测验」的「按计划任务」下拉框中选用。</li>
                   <li>生成练习后答题提交，错题会自动进入错题本。</li>
                 </ul>
@@ -748,13 +783,12 @@
 
           <div class="panel-card panel-card--checklist">
             <div class="panel-card__header">
-              <h2 class="panel-title">今日复习清单</h2>
-              <button type="button" class="btn btn--ghost btn--compact" id="checklistEditToggle" aria-expanded="false" aria-controls="checklistEditor">
-                编辑清单
-              </button>
+              <div>
+                <h2 class="panel-title">今日任务</h2>
+                <p class="panel-card__hint">来自学习计划，点击勾选同步进度</p>
+              </div>
             </div>
             <ul id="agentChecklistDisplay" class="checklist"></ul>
-            <div id="checklistEditor" class="checklist-editor is-hidden" aria-label="今日复习清单编辑"></div>
           </div>
         </aside>
 
@@ -811,6 +845,7 @@
       ];
       var localScripts = [
         "api.js",
+        "skills-model.js",
         "user.js",
         "shell.js",
         "quotes.js",
@@ -823,6 +858,7 @@
         "chat-history.js",
         "materials.js",
         "wrongbook.js",
+        "timetable.js",
         "plan.js",
         "skills.js",
         "quiz.js",
