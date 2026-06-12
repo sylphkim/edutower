@@ -22,22 +22,28 @@ function parseAndSaveMemoryUpdates(reply: string): string {
     if (Array.isArray(updates)) {
       for (const item of updates) {
         Promise.resolve(
-          memoryService.create({
-            type: item.type,
-            title: item.title,
-            content: item.content,
-            importance: item.importance
-          })
+          (async () => {
+            // 按 title 查重：已存在的跳过
+            const existing = await memoryService.findByTitle(item.title);
+            if (existing) {
+              return;
+            }
+            await memoryService.create({
+              type: item.type,
+              title: item.title,
+              content: item.content,
+              importance: item.importance
+            });
+          })()
         ).catch(() => {});
       }
     }
   } catch {
-    // 解析失败时静默忽略，不影响回复
+    // 解析失败时静默忽略
   }
 
   return reply.replace(MEMORY_UPDATES_RE, "").trim();
 }
-
 export async function chat(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const message = readMessage(req.body);

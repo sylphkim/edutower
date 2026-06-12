@@ -1,23 +1,27 @@
+<<<<<<< HEAD
 import { memoryRepository, type MemoryRecord } from "../repositories/memory.repository";
+=======
+import { prisma } from "../lib/prisma";
+import type { Memory as MemoryRow } from "../generated/prisma/client";
+>>>>>>> 3a9e1b9d584f6dc27ea3fea40b3a0daffa11a429
 import type {
   CreateMemoryInput,
   DailySummaryInput,
-  MemoryImportance,
   MemoryItem,
-  MemoryType,
   UpdateMemoryInput
 } from "../types/memory";
 import { AppError } from "../utils/errors";
 
-const VALID_MEMORY_TYPES: MemoryType[] = [
+const VALID_MEMORY_TYPES = [
   "weakness",
   "daily_summary",
   "progress",
   "preference",
   "note"
 ];
-const VALID_IMPORTANCE: MemoryImportance[] = ["low", "medium", "high"];
+const VALID_IMPORTANCE = ["low", "medium", "high"];
 
+<<<<<<< HEAD
 function ensureMemoryExists(record: MemoryRecord | null): MemoryRecord {
   if (!record) {
     throw new AppError("INVALID_REQUEST", "Memory item not found.", 404);
@@ -25,6 +29,8 @@ function ensureMemoryExists(record: MemoryRecord | null): MemoryRecord {
 
   return record;
 }
+=======
+>>>>>>> 3a9e1b9d584f6dc27ea3fea40b3a0daffa11a429
 
 function ensureStringArray(value: string[], fieldName: string): void {
   if (!Array.isArray(value)) {
@@ -62,7 +68,7 @@ function ensureValidCreateInput(input: CreateMemoryInput): void {
   if (!input.content || typeof input.content !== "string" || !input.content.trim()) {
     throw new AppError(
       "INVALID_REQUEST",
-      "content is required and must be a non-empty string.",
+      "content must be a non-empty string.",
       400
     );
   }
@@ -128,30 +134,22 @@ function ensureValidDailySummaryInput(input: DailySummaryInput): void {
       400
     );
   }
-
-  if (input.planId !== undefined && typeof input.planId !== "string") {
-    throw new AppError("INVALID_REQUEST", "planId must be a string.", 400);
-  }
-
-  ensureOptionalStringArray(input.learnedSkillIds, "learnedSkillIds");
-  ensureOptionalStringArray(input.completedTaskIds, "completedTaskIds");
-  ensureOptionalStringArray(input.wrongbookIds, "wrongbookIds");
-  ensureOptionalStringArray(input.weaknesses, "weaknesses");
-  ensureOptionalStringArray(input.nextSuggestions, "nextSuggestions");
 }
 
-function buildDailySummaryContent(input: DailySummaryInput): string {
-  const parts = [`Summary: ${input.summary.trim()}`];
-
-  if (input.weaknesses?.length) {
-    parts.push(`Weaknesses: ${input.weaknesses.join(", ")}`);
-  }
-
-  if (input.nextSuggestions?.length) {
-    parts.push(`Next suggestions: ${input.nextSuggestions.join(", ")}`);
-  }
-
-  return parts.join("\n");
+function toMemoryItem(row: MemoryRow): MemoryItem {
+  return {
+    id: row.id,
+    type: row.type as MemoryItem["type"],
+    title: row.title,
+    content: row.content,
+    relatedMaterialIds: JSON.parse(row.relatedMaterialIds),
+    relatedSkillIds: JSON.parse(row.relatedSkillIds),
+    relatedQuizIds: JSON.parse(row.relatedQuizIds),
+    relatedWrongbookIds: JSON.parse(row.relatedWrongbookIds),
+    importance: row.importance as MemoryItem["importance"],
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString()
+  };
 }
 
 function toApiMemory(record: MemoryRecord): MemoryItem {
@@ -172,6 +170,7 @@ function toApiMemory(record: MemoryRecord): MemoryItem {
 
 export const memoryService = {
   async list(): Promise<{ items: MemoryItem[] }> {
+<<<<<<< HEAD
     const records = await memoryRepository.list();
 
     return { items: records.map(toApiMemory) };
@@ -181,11 +180,25 @@ export const memoryService = {
     const record = ensureMemoryExists(await memoryRepository.findById(id));
 
     return toApiMemory(record);
+=======
+    const rows = await prisma.memory.findMany();
+    return {items: rows.map(toMemoryItem)};
+  },
+
+  async getById(id: string): Promise<MemoryItem> {
+    const row = await prisma.memory.findUnique({ where: { id } });
+
+    if (!row) {
+      throw new AppError("INVALID_REQUEST", "Memory item not found.", 404);
+    }
+    return toMemoryItem(row);
+>>>>>>> 3a9e1b9d584f6dc27ea3fea40b3a0daffa11a429
   },
 
   async create(input: CreateMemoryInput): Promise<MemoryItem> {
     ensureValidCreateInput(input);
 
+<<<<<<< HEAD
     const record = await memoryRepository.create({
       type: input.type,
       title: input.title.trim(),
@@ -198,12 +211,29 @@ export const memoryService = {
     });
 
     return toApiMemory(record);
+=======
+    const row = await prisma.memory.create({
+      data: {
+        type: input.type,
+        title: input.title.trim(),
+        content: input.content.trim(),
+        relatedMaterialIds: JSON.stringify(input.relatedMaterialIds ?? []),
+        relatedSkillIds: JSON.stringify(input.relatedSkillIds ?? []),
+        relatedQuizIds: JSON.stringify(input.relatedQuizIds ?? []),
+        relatedWrongbookIds: JSON.stringify(input.relatedWrongbookIds ?? []),
+        importance: input.importance ?? "medium"
+      }
+    });
+
+    return toMemoryItem(row);
+>>>>>>> 3a9e1b9d584f6dc27ea3fea40b3a0daffa11a429
   },
 
   async update(id: string, input: UpdateMemoryInput): Promise<MemoryItem> {
     ensureValidUpdateInput(input);
     ensureMemoryExists(await memoryRepository.findById(id));
 
+<<<<<<< HEAD
     const record = await memoryRepository.update(id, {
       type: input.type,
       title: input.title !== undefined ? input.title.trim() : undefined,
@@ -241,5 +271,57 @@ export const memoryService = {
     });
 
     return toApiMemory(record);
+=======
+    const row = await prisma.memory.update({
+      where: { id },
+      data: {
+        type: input.type,
+        title: input.title?.trim(),
+        content: input.content?.trim(),
+        relatedMaterialIds: input.relatedMaterialIds !== undefined
+          ? JSON.stringify(input.relatedMaterialIds)
+          : undefined,
+        relatedSkillIds: input.relatedSkillIds !== undefined
+          ? JSON.stringify(input.relatedSkillIds)
+          : undefined,
+        relatedQuizIds: input.relatedQuizIds !== undefined
+          ? JSON.stringify(input.relatedQuizIds)
+          : undefined,
+        relatedWrongbookIds: input.relatedWrongbookIds !== undefined
+          ? JSON.stringify(input.relatedWrongbookIds)
+          : undefined,
+        importance: input.importance
+      }
+    });
+
+    return toMemoryItem(row);
+  },
+
+  async remove(id: string): Promise<void> {
+    const existing = await prisma.memory.findUnique({ where: { id } });
+
+    if (!existing) {
+      throw new AppError("INVALID_REQUEST", "Memory item not found.", 404);
+    }
+
+    await prisma.memory.delete({ where: { id } });
+  },
+
+  async findByTitle(title: string): Promise<MemoryItem | null> {
+    const row = await prisma.memory.findFirst({
+      where: { title: title.trim() }
+    });
+    return row ? toMemoryItem(row) : null;
+  },
+
+  async createDailySummary(input: DailySummaryInput): Promise<MemoryItem> {
+    ensureValidDailySummaryInput(input);
+
+    return memoryService.create({
+      type: "daily_summary",
+      title: `Daily Summary - ${new Date().toISOString().slice(0, 10)}`,
+      content: input.summary
+    });
+>>>>>>> 3a9e1b9d584f6dc27ea3fea40b3a0daffa11a429
   }
 };

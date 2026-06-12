@@ -176,6 +176,13 @@ export interface DayConversationTranscript {
   messages: DayConversationMessage[];
 }
 
+export interface ActiveWeakPoint {
+  id: string;
+  knowledgeNodeId: string;
+  title: string;
+  severity: WeakPointSeverity;
+}
+
 export interface DayEvidence {
   quizAttempts: DayEvidenceQuizAttempt[];
   newWrongbookItems: DayEvidenceWrongbookItem[];
@@ -833,6 +840,24 @@ export const dailyTaskSheetsRepository = {
       }));
   },
 
+  // 取项目当前所有 active 薄弱点，作为「今日战况」薄弱点 delta 的基线
+  // （结束今日那一刻，今天的建议还没确认，所以这就是「今天之前」的状态）。
+  async collectActiveWeakPoints(projectId: string): Promise<ActiveWeakPoint[]> {
+    return prisma.weakPoint.findMany({
+      where: {
+        projectId,
+        status: "active"
+      },
+      select: {
+        id: true,
+        knowledgeNodeId: true,
+        title: true,
+        severity: true
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }]
+    });
+  },
+
   async closeSheet(input: CloseSheetInput): Promise<CloseSheetResult> {
     return prisma.$transaction(async (tx) => {
       const sheet = await tx.dailyTaskSheet.findFirst({
@@ -1107,6 +1132,21 @@ export const dailyTaskSheetsRepository = {
               }
             });
           }
+        }
+
+        if (suggestion.type === "weakness_resolved" && suggestion.knowledgeNodeId) {
+          // 接受「建议解决」：把该节点当前 active 的薄弱点置为已解决。
+          await tx.weakPoint.updateMany({
+            where: {
+              projectId: input.projectId,
+              knowledgeNodeId: suggestion.knowledgeNodeId,
+              status: "active"
+            },
+            data: {
+              status: "resolved",
+              resolvedAt: input.decidedAt
+            }
+          });
         }
       }
 

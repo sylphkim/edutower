@@ -340,7 +340,7 @@ Quiz 题目经 FastAPI AI Engine 生成（Express 调用 `/generate-quiz`，不�
 - 有待决策建议时总结为 `awaiting_confirmation`；全部建议决策完成（或没有建议）后变为 `confirmed`。
 - `confirmationSource` 区分用户确认（`user`）、任务全部完成时的系统确认（`system`）和零点强制确认（`system_forced`）。
 - `SummarySuggestion.decisionSource` 区分用户决策与系统强制决策；`modifiedContent` 保存用户修改后的内容。
-- 总结确认后会写入每日总结型长期记忆（当前 Memory 仍是内存 mock）。
+- 总结确认后会写入每日总结型长期记忆（当前 Memory 模型已落库）。
 
 ### WeakPoint / KnowledgeStateEvent
 
@@ -381,7 +381,7 @@ Quiz 题目经 FastAPI AI Engine 生成（Express 调用 `/generate-quiz`，不�
 | `QuizQuestion` | `QuizQuestion` + `QuizOption` |
 | `SubmitQuizInput` | `QuizAttempt` |
 | `WrongbookItem` | `WrongbookItem` |
-| `MemoryItem` | 当前不落 Prisma，仍是内存 mock |
+| `MemoryItem` | `Memory` |
 
 时间字段在 Prisma 中是 `DateTime`，返回 API 前统一转为 ISO 字符串。
 

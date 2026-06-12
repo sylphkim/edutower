@@ -4,6 +4,7 @@ import type {
 } from "../generated/prisma/client";
 import {
   dailyTaskSheetsRepository,
+  type ActiveWeakPoint,
   type CreateSuggestionRecordInput,
   type DailyTaskSheetWithRelations,
   type DailySummaryWithSuggestions,
@@ -148,7 +149,8 @@ async function loadActiveNodes(projectId: string): Promise<Map<string, ActiveNod
 function buildRuleSuggestions(
   sheet: DailyTaskSheetWithRelations,
   activeNodes: Map<string, ActiveNodeInfo>,
-  nodeEvidence: Map<string, NodeDayEvidence>
+  nodeEvidence: Map<string, NodeDayEvidence>,
+  baselineWeakPoints: ActiveWeakPoint[]
 ): CreateSuggestionRecordInput[] {
   const suggestions: CreateSuggestionRecordInput[] = [];
   const tasks = sheet.tasks.filter((task) => task.status !== "cancelled");
@@ -248,6 +250,31 @@ function buildRuleSuggestions(
     });
   }
 
+  // 基线薄弱点里今日表现明显改善的（≥2 题且正确率 ≥80%），提一条「建议解决」待确认。
+  for (const weakPoint of baselineWeakPoints) {
+    const evidence = nodeEvidence.get(weakPoint.knowledgeNodeId);
+
+    if (
+      !evidence ||
+      evidence.accuracy === null ||
+      evidence.attempts < 2 ||
+      evidence.accuracy < 0.8
+    ) {
+      continue;
+    }
+
+    const node = activeNodes.get(weakPoint.knowledgeNodeId);
+    const title = node?.title ?? weakPoint.title;
+
+    suggestions.push({
+      type: "weakness_resolved",
+      knowledgeNodeId: weakPoint.knowledgeNodeId,
+      content: `「${title}」今日测验 ${evidence.attempts} 题正确率 ${formatAccuracy(
+        evidence.accuracy
+      )}，表现明显改善，建议将该薄弱点标记为已解决。`
+    });
+  }
+
   return suggestions;
 }
 
@@ -324,13 +351,76 @@ function buildConversationDigest(transcripts: DayConversationTranscript[]): stri
   return `……（较早对话已省略）\n${digest.slice(digest.length - MAX_CONVERSATION_DIGEST_CHARS)}`;
 }
 
+function isEasedToday(evidence: NodeDayEvidence | undefined): boolean {
+  return (
+    evidence !== undefined &&
+    evidence.accuracy !== null &&
+    evidence.attempts >= 2 &&
+    evidence.accuracy >= 0.8
+  );
+}
+
+/** 对比基线 active 薄弱点与今日信号，给出「新增 / 改善 / 仍需巩固」的变化描述。 */
+function buildWeakPointDelta(
+  baselineWeakPoints: ActiveWeakPoint[],
+  nodeEvidence: Map<string, NodeDayEvidence>,
+  suggestions: CreateSuggestionRecordInput[],
+  activeNodes: Map<string, ActiveNodeInfo>
+): string | null {
+  const baselineNodeIds = new Set(baselineWeakPoints.map((wp) => wp.knowledgeNodeId));
+  const titleOf = (nodeId: string): string =>
+    activeNodes.get(nodeId)?.title ??
+    baselineWeakPoints.find((wp) => wp.knowledgeNodeId === nodeId)?.title ??
+    "未知知识点";
+
+  const newlyFlagged = suggestions
+    .filter(
+      (suggestion) =>
+        suggestion.type === "weakness" &&
+        suggestion.knowledgeNodeId !== undefined &&
+        !baselineNodeIds.has(suggestion.knowledgeNodeId)
+    )
+    .map((suggestion) => suggestion.knowledgeNodeId as string);
+
+  const eased = baselineWeakPoints
+    .filter((wp) => isEasedToday(nodeEvidence.get(wp.knowledgeNodeId)))
+    .map((wp) => wp.knowledgeNodeId);
+  const easedSet = new Set(eased);
+
+  const stillWeak = baselineWeakPoints
+    .filter((wp) => !easedSet.has(wp.knowledgeNodeId))
+    .map((wp) => wp.knowledgeNodeId);
+
+  if (newlyFlagged.length === 0 && eased.length === 0 && stillWeak.length === 0) {
+    return null;
+  }
+
+  const parts: string[] = [];
+
+  if (newlyFlagged.length > 0) {
+    parts.push(`新增 ${newlyFlagged.length} 个（${newlyFlagged.map(titleOf).join("、")}）`);
+  }
+
+  if (eased.length > 0) {
+    parts.push(`今日改善 ${eased.length} 个（${eased.map(titleOf).join("、")}）`);
+  }
+
+  if (stillWeak.length > 0) {
+    parts.push(`仍需巩固 ${stillWeak.length} 个（${stillWeak.map(titleOf).join("、")}）`);
+  }
+
+  return `薄弱点变化：${parts.join("；")}。`;
+}
+
 async function buildSummaryDraft(
   project: OwnedProjectSummary,
   sheet: DailyTaskSheetWithRelations,
   evidence: DayEvidence,
-  conversationDigest: string | null
+  conversationDigest: string | null,
+  weakPointDeltaText: string | null
 ): Promise<string> {
   const template = buildTemplateSummary(project, sheet, evidence);
+  const studyData = weakPointDeltaText ? `${template}\n${weakPointDeltaText}` : template;
 
   // 优先经 FastAPI AI Engine 出总结；FastAPI 不可用时内部回退本地 LLM，
   // 两条路都拿不到文本（含未配置 key）时返回 null，这里再退回确定性模板。
@@ -341,11 +431,11 @@ async function buildSummaryDraft(
       goal: project.goal
     },
     localDate: sheet.localDate,
-    studyData: template,
+    studyData,
     conversationDigest
   });
 
-  return aiText ?? template;
+  return aiText ?? studyData;
 }
 
 function confirmationSourceForReason(
@@ -683,15 +773,29 @@ export const dailySummariesService = {
     const userId = await getDemoUserId();
     const dayStart = getLocalDayStart(sheet.localDate);
     const dayEnd = getLocalDayEnd(sheet.localDate);
-    const [evidence, activeNodes, conversationTranscripts] = await Promise.all([
-      dailyTaskSheetsRepository.collectDayEvidence(projectId, dayStart, dayEnd),
-      loadActiveNodes(projectId),
-      dailyTaskSheetsRepository.collectDayConversationMessages(projectId, dayStart, dayEnd)
-    ]);
+    const [evidence, activeNodes, conversationTranscripts, baselineWeakPoints] =
+      await Promise.all([
+        dailyTaskSheetsRepository.collectDayEvidence(projectId, dayStart, dayEnd),
+        loadActiveNodes(projectId),
+        dailyTaskSheetsRepository.collectDayConversationMessages(projectId, dayStart, dayEnd),
+        dailyTaskSheetsRepository.collectActiveWeakPoints(projectId)
+      ]);
     const nodeEvidence = buildNodeEvidence(evidence);
-    const suggestions = buildRuleSuggestions(sheet, activeNodes, nodeEvidence);
+    const suggestions = buildRuleSuggestions(sheet, activeNodes, nodeEvidence, baselineWeakPoints);
     const conversationDigest = buildConversationDigest(conversationTranscripts);
-    const aiDraft = await buildSummaryDraft(project, sheet, evidence, conversationDigest);
+    const weakPointDeltaText = buildWeakPointDelta(
+      baselineWeakPoints,
+      nodeEvidence,
+      suggestions,
+      activeNodes
+    );
+    const aiDraft = await buildSummaryDraft(
+      project,
+      sheet,
+      evidence,
+      conversationDigest,
+      weakPointDeltaText
+    );
     const weaknessLines = suggestions
       .filter((suggestion) => suggestion.type === "weakness")
       .map((suggestion) => suggestion.content);

@@ -41,7 +41,7 @@ EduTower 使用 Express 作为面向前端的主后端，使用 FastAPI 作为 A
 - Materials、Plan、DailyTasks、Skills、Quiz、Wrongbook 主要使用 Prisma/SQLite。
 - Skills 的节点、DAG 前置依赖、学习状态、解锁资格和归档字段都由 Express 后端通过 Prisma/SQLite 管理。
 - MaterialFolders 已实现完整分层，但当前未在 `src/app.ts` 挂载为公开 API。
-- Memory 仍使用内存 mock；每日总结确认后写入的记忆同样落在 mock 中。
+- Memory 使用 Prisma/SQLite；每日总结确认后写入的记忆同样落在持久化存储中。
 - Chat Context 仍使用 demo mock，不直接从数据库/RAG 读取。
 
 Skills 分层边界：
