@@ -680,6 +680,7 @@ enum DailySummaryConfirmationSource {
 enum SummarySuggestionType {
   knowledge_status
   weakness
+  weakness_resolved
   review_suggestion
 }
 

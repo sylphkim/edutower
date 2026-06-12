@@ -7,6 +7,7 @@ import { isAppError } from "./utils/errors";
 import { logger } from "./utils/logger";
 import aiRoutes from "./routes/ai.routes";
 import agentPanelRoutes from "./routes/agentPanel.routes";
+import conversationsRoutes from "./routes/conversations.routes";
 import dailyTasksRoutes from "./routes/dailyTasks.routes";
 import healthRoutes from "./routes/health.routes";
 import llmRoutes from "./routes/llm.routes";
@@ -15,8 +16,8 @@ import materialsRoutes from "./routes/materials.routes";
 import memoryRoutes from "./routes/memory.routes";
 import planRoutes from "./routes/plan.routes";
 import quizRoutes from "./routes/quiz.routes";
-import skillsRoutes from "./routes/skills.routes";
 import settingsRoutes from "./routes/settings.routes";
+import skillsRoutes from "./routes/skills.routes";
 import wrongbookRoutes from "./routes/wrongbook.routes";
 
 const app = express();
@@ -33,6 +34,7 @@ app.post("/chat", legacyChat);
 
 app.use("/api/health", healthRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/conversations", conversationsRoutes);
 app.use("/api/agent", agentPanelRoutes);
 app.use("/api/llm", llmRoutes);
 app.use("/api/material-folders", materialFoldersRoutes);

@@ -144,6 +144,16 @@ PATCH 前置节点为 mastered
 -> 下次 GET tree 立即读到新 isUnlocked/unlockedAt
 ```
 
+### 与每日任务模块的关系
+
+每日总结的 `knowledge_status` 建议被接受后，也会修改节点的 `learningState/mastery`。该路径与 `PATCH /api/skills/:id` 复用同一个状态变更与自动解锁函数（`knowledgeNodes.repository` 导出的事务内实现），规则完全一致：
+
+- 锁定节点不会被建议改状态。
+- 建议把节点改为 `mastered` 时，同一事务内自动解锁满足条件的直接后续节点。
+- 每次生效都会写入 `KnowledgeStateEvent` 审计记录，来源为 `user_confirmation` 或零点强制的 `system_forced`。
+
+技能树是学习进度的唯一权威；整体计划（`PlanPhase`）只引用节点做路线展示，每日任务的候选规则按节点的 `learningState/isUnlocked` 实时计算。
+
 ## 风险提示
 
 风险只在 `GET /api/skills/tree` 中派生，不持久化。

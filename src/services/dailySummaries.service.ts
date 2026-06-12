@@ -1,13 +1,14 @@
-import { env } from "../config/env";
 import type {
   KnowledgeNodeLearningState,
   WeakPointSeverity
 } from "../generated/prisma/client";
 import {
   dailyTaskSheetsRepository,
+  type ActiveWeakPoint,
   type CreateSuggestionRecordInput,
   type DailyTaskSheetWithRelations,
   type DailySummaryWithSuggestions,
+  type DayConversationTranscript,
   type DayEvidence,
   type OwnedProjectSummary,
   type SuggestionDecisionRecord
@@ -27,8 +28,8 @@ import {
   toDailySheetItem,
   toDailySummaryItem
 } from "./dailyTaskMappers";
+import { aiEngineService } from "./aiEngine.service";
 import { getDemoUserId } from "./demoUser.service";
-import { llmService } from "./llm.service";
 import { memoryService } from "./memory.service";
 
 type CloseReason = "all_tasks_done" | "user" | "midnight";
@@ -148,7 +149,8 @@ async function loadActiveNodes(projectId: string): Promise<Map<string, ActiveNod
 function buildRuleSuggestions(
   sheet: DailyTaskSheetWithRelations,
   activeNodes: Map<string, ActiveNodeInfo>,
-  nodeEvidence: Map<string, NodeDayEvidence>
+  nodeEvidence: Map<string, NodeDayEvidence>,
+  baselineWeakPoints: ActiveWeakPoint[]
 ): CreateSuggestionRecordInput[] {
   const suggestions: CreateSuggestionRecordInput[] = [];
   const tasks = sheet.tasks.filter((task) => task.status !== "cancelled");
@@ -248,6 +250,31 @@ function buildRuleSuggestions(
     });
   }
 
+  // 基线薄弱点里今日表现明显改善的（≥2 题且正确率 ≥80%），提一条「建议解决」待确认。
+  for (const weakPoint of baselineWeakPoints) {
+    const evidence = nodeEvidence.get(weakPoint.knowledgeNodeId);
+
+    if (
+      !evidence ||
+      evidence.accuracy === null ||
+      evidence.attempts < 2 ||
+      evidence.accuracy < 0.8
+    ) {
+      continue;
+    }
+
+    const node = activeNodes.get(weakPoint.knowledgeNodeId);
+    const title = node?.title ?? weakPoint.title;
+
+    suggestions.push({
+      type: "weakness_resolved",
+      knowledgeNodeId: weakPoint.knowledgeNodeId,
+      content: `「${title}」今日测验 ${evidence.attempts} 题正确率 ${formatAccuracy(
+        evidence.accuracy
+      )}，表现明显改善，建议将该薄弱点标记为已解决。`
+    });
+  }
+
   return suggestions;
 }
 
@@ -281,6 +308,10 @@ function buildTemplateSummary(
     lines.push(`新增错题 ${evidence.newWrongbookItems.length} 道。`);
   }
 
+  if (evidence.conversations.length > 0) {
+    lines.push(`今日进行了 ${evidence.conversations.length} 段学习对话。`);
+  }
+
   if (unfinishedTasks.length > 0) {
     lines.push(
       `未完成任务 ${unfinishedTasks.length} 个，将在明日优先续排：${unfinishedTasks
@@ -294,40 +325,117 @@ function buildTemplateSummary(
   return lines.join("\n");
 }
 
+const MAX_CONVERSATION_DIGEST_CHARS = 3000;
+
+function buildConversationDigest(transcripts: DayConversationTranscript[]): string | null {
+  if (transcripts.length === 0) {
+    return null;
+  }
+
+  const blocks = transcripts.map((transcript) => {
+    const header = transcript.title ? `【对话：${transcript.title}】` : "【学习对话】";
+    const lines = transcript.messages.map(
+      (message) => `${message.role === "user" ? "学生" : "助教"}：${message.content}`
+    );
+
+    return [header, ...lines].join("\n");
+  });
+
+  const digest = blocks.join("\n\n");
+
+  if (digest.length <= MAX_CONVERSATION_DIGEST_CHARS) {
+    return digest;
+  }
+
+  // 超长时保留最近的部分（末尾），并标注前文已省略。
+  return `……（较早对话已省略）\n${digest.slice(digest.length - MAX_CONVERSATION_DIGEST_CHARS)}`;
+}
+
+function isEasedToday(evidence: NodeDayEvidence | undefined): boolean {
+  return (
+    evidence !== undefined &&
+    evidence.accuracy !== null &&
+    evidence.attempts >= 2 &&
+    evidence.accuracy >= 0.8
+  );
+}
+
+/** 对比基线 active 薄弱点与今日信号，给出「新增 / 改善 / 仍需巩固」的变化描述。 */
+function buildWeakPointDelta(
+  baselineWeakPoints: ActiveWeakPoint[],
+  nodeEvidence: Map<string, NodeDayEvidence>,
+  suggestions: CreateSuggestionRecordInput[],
+  activeNodes: Map<string, ActiveNodeInfo>
+): string | null {
+  const baselineNodeIds = new Set(baselineWeakPoints.map((wp) => wp.knowledgeNodeId));
+  const titleOf = (nodeId: string): string =>
+    activeNodes.get(nodeId)?.title ??
+    baselineWeakPoints.find((wp) => wp.knowledgeNodeId === nodeId)?.title ??
+    "未知知识点";
+
+  const newlyFlagged = suggestions
+    .filter(
+      (suggestion) =>
+        suggestion.type === "weakness" &&
+        suggestion.knowledgeNodeId !== undefined &&
+        !baselineNodeIds.has(suggestion.knowledgeNodeId)
+    )
+    .map((suggestion) => suggestion.knowledgeNodeId as string);
+
+  const eased = baselineWeakPoints
+    .filter((wp) => isEasedToday(nodeEvidence.get(wp.knowledgeNodeId)))
+    .map((wp) => wp.knowledgeNodeId);
+  const easedSet = new Set(eased);
+
+  const stillWeak = baselineWeakPoints
+    .filter((wp) => !easedSet.has(wp.knowledgeNodeId))
+    .map((wp) => wp.knowledgeNodeId);
+
+  if (newlyFlagged.length === 0 && eased.length === 0 && stillWeak.length === 0) {
+    return null;
+  }
+
+  const parts: string[] = [];
+
+  if (newlyFlagged.length > 0) {
+    parts.push(`新增 ${newlyFlagged.length} 个（${newlyFlagged.map(titleOf).join("、")}）`);
+  }
+
+  if (eased.length > 0) {
+    parts.push(`今日改善 ${eased.length} 个（${eased.map(titleOf).join("、")}）`);
+  }
+
+  if (stillWeak.length > 0) {
+    parts.push(`仍需巩固 ${stillWeak.length} 个（${stillWeak.map(titleOf).join("、")}）`);
+  }
+
+  return `薄弱点变化：${parts.join("；")}。`;
+}
+
 async function buildSummaryDraft(
   project: OwnedProjectSummary,
   sheet: DailyTaskSheetWithRelations,
-  evidence: DayEvidence
+  evidence: DayEvidence,
+  conversationDigest: string | null,
+  weakPointDeltaText: string | null
 ): Promise<string> {
   const template = buildTemplateSummary(project, sheet, evidence);
+  const studyData = weakPointDeltaText ? `${template}\n${weakPointDeltaText}` : template;
 
-  if (!env.llmApiKey) {
-    return template;
-  }
+  // 优先经 FastAPI AI Engine 出总结；FastAPI 不可用时内部回退本地 LLM，
+  // 两条路都拿不到文本（含未配置 key）时返回 null，这里再退回确定性模板。
+  const aiText = await aiEngineService.generateSummary({
+    project: {
+      title: project.title,
+      subject: project.subject,
+      goal: project.goal
+    },
+    localDate: sheet.localDate,
+    studyData,
+    conversationDigest
+  });
 
-  try {
-    const result = await llmService.generateText({
-      systemPrompt: [
-        "你是一名学习助教，请根据学习数据为学生写一段当日学习总结。",
-        "要求：3-5 句中文，先肯定完成情况，再指出问题，最后给出明天的建议。",
-        "只输出总结正文，不要输出标题、列表符号或额外说明。"
-      ].join("\n"),
-      userPrompt: [
-        `学习项目：${project.title}（学科：${project.subject}，目标：${project.goal || "未填写"}）`,
-        "当日学习数据：",
-        template
-      ].join("\n"),
-      temperature: 0.4,
-      maxOutputTokens: 600
-    });
-    const text = result.text.trim();
-
-    return text ? text.slice(0, 2000) : template;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.warn(`Daily summary AI draft failed (${message}); using template summary.`);
-    return template;
-  }
+  return aiText ?? studyData;
 }
 
 function confirmationSourceForReason(
@@ -346,8 +454,9 @@ function writeDailySummaryMemory(params: {
   completedTaskIds: string[];
   learnedSkillIds: string[];
 }): void {
-  try {
-    memoryService.createDailySummary({
+  // 记忆写入是结束流程的副作用：异步进行、失败只告警，不阻塞 close。
+  void memoryService
+    .createDailySummary({
       summary: params.content,
       weaknesses: params.weaknesses
         ? params.weaknesses.split("\n").filter(Boolean)
@@ -358,11 +467,10 @@ function writeDailySummaryMemory(params: {
       learnedSkillIds: params.learnedSkillIds.length
         ? params.learnedSkillIds
         : undefined
+    })
+    .catch((error) => {
+      logger.warn("Failed to write daily summary memory.", error);
     });
-  } catch (error) {
-    // Memory is currently an in-memory mock; failures must not break the close flow.
-    logger.warn("Failed to write daily summary memory.", error);
-  }
 }
 
 async function buildDailyRecord(
@@ -665,13 +773,29 @@ export const dailySummariesService = {
     const userId = await getDemoUserId();
     const dayStart = getLocalDayStart(sheet.localDate);
     const dayEnd = getLocalDayEnd(sheet.localDate);
-    const [evidence, activeNodes] = await Promise.all([
-      dailyTaskSheetsRepository.collectDayEvidence(projectId, dayStart, dayEnd),
-      loadActiveNodes(projectId)
-    ]);
+    const [evidence, activeNodes, conversationTranscripts, baselineWeakPoints] =
+      await Promise.all([
+        dailyTaskSheetsRepository.collectDayEvidence(projectId, dayStart, dayEnd),
+        loadActiveNodes(projectId),
+        dailyTaskSheetsRepository.collectDayConversationMessages(projectId, dayStart, dayEnd),
+        dailyTaskSheetsRepository.collectActiveWeakPoints(projectId)
+      ]);
     const nodeEvidence = buildNodeEvidence(evidence);
-    const suggestions = buildRuleSuggestions(sheet, activeNodes, nodeEvidence);
-    const aiDraft = await buildSummaryDraft(project, sheet, evidence);
+    const suggestions = buildRuleSuggestions(sheet, activeNodes, nodeEvidence, baselineWeakPoints);
+    const conversationDigest = buildConversationDigest(conversationTranscripts);
+    const weakPointDeltaText = buildWeakPointDelta(
+      baselineWeakPoints,
+      nodeEvidence,
+      suggestions,
+      activeNodes
+    );
+    const aiDraft = await buildSummaryDraft(
+      project,
+      sheet,
+      evidence,
+      conversationDigest,
+      weakPointDeltaText
+    );
     const weaknessLines = suggestions
       .filter((suggestion) => suggestion.type === "weakness")
       .map((suggestion) => suggestion.content);
