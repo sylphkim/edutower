@@ -1,5 +1,8 @@
 import { conceptsRepository } from "../repositories/concepts.repository";
-import { knowledgeNodesRepository } from "../repositories/knowledgeNodes.repository";
+import {
+  knowledgeNodesRepository,
+  type PrelightNodeUpdate
+} from "../repositories/knowledgeNodes.repository";
 import { projectsRepository } from "../repositories/projects.repository";
 import { AppError } from "../utils/errors";
 
@@ -134,5 +137,45 @@ export const conceptMappingService = {
     }
 
     return { recorded };
+  },
+
+  /**
+   * 新项目生成技能树后调用：按概念去账本里查，命中（在别处学过）的节点预点亮——
+   * mastered→标掌握并解锁后继；learning→解锁并带上掌握度。其余保持默认。
+   */
+  async prelightProjectTree(
+    userId: string,
+    projectId: string
+  ): Promise<{ prelit: number }> {
+    const project = await projectsRepository.findByIdForUser(projectId, userId);
+    const subject = project?.subject ?? null;
+    const nodes = await knowledgeNodesRepository.listTreeByProject(projectId, false);
+
+    const updates: PrelightNodeUpdate[] = [];
+
+    for (const node of nodes) {
+      const conceptId = await this.mapNode(userId, { id: node.id, title: node.title }, subject);
+
+      if (!conceptId) {
+        continue;
+      }
+
+      const mastery = await conceptsRepository.getMasteryByConcept(conceptId);
+
+      if (!mastery) {
+        continue;
+      }
+
+      updates.push({
+        nodeId: node.id,
+        learningState: mastery.state,
+        mastery: Math.max(node.mastery, mastery.mastery),
+        isUnlocked: true
+      });
+    }
+
+    await knowledgeNodesRepository.prelightNodes(projectId, updates);
+
+    return { prelit: updates.length };
   }
 };

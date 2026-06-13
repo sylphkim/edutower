@@ -2,6 +2,8 @@ import { planProposalsRepository } from "../repositories/planProposals.repositor
 import { planVersionsRepository } from "../repositories/planVersions.repository";
 import type { ApplyPlanProposalResult } from "../types/planProposal";
 import { AppError } from "../utils/errors";
+import { logger } from "../utils/logger";
+import { conceptMappingService } from "./conceptMapping.service";
 import { getDemoUserId } from "./demoUser.service";
 import { hashPlanProposal, normalizePlanProposal } from "./planProposalValidation";
 import { toPlanVersionItem } from "./planVersions.service";
@@ -53,6 +55,14 @@ async function buildResult(
   };
 }
 
+async function prelightTreeSafely(projectId: string, userId: string): Promise<void> {
+  try {
+    await conceptMappingService.prelightProjectTree(userId, projectId);
+  } catch (error) {
+    logger.warn("Failed to pre-light project tree from concept ledger.", error);
+  }
+}
+
 export const planProposalsService = {
   async apply(projectId: unknown, input: unknown): Promise<ApplyPlanProposalResult> {
     const normalizedProjectId = requiredProjectId(projectId);
@@ -71,6 +81,10 @@ export const planProposalsService = {
       switch (result.status) {
         case "success":
         case "replay":
+          if (result.status === "success") {
+            await prelightTreeSafely(normalizedProjectId, userId);
+          }
+
           return buildResult(
             normalizedProjectId,
             result.versionId,
