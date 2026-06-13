@@ -65,7 +65,8 @@
           <summary>配置教程（点击展开/收起）</summary>
           <ol class="login-tutorial__list">
             <li>向模型服务商（如 DeepSeek、OpenAI 兼容平台）申请 API Key。</li>
-            <li>填写下方三项；保存后会写入项目 <code>data/local-llm-config.json</code> 并同步到 <code>.env</code>。</li>
+            <li>填写下方三项；保存后会写入项目 <code>data/local-llm-config.json</code> 与根目录 <code>.env</code>，供 FastAPI AI Engine 读取。</li>
+            <li>保存后请重启 FastAPI（<code>AI-Agent</code> 目录运行 <code>python main.py</code>），Express 不会直连大模型。</li>
             <li>若使用 FastAPI 出题（<code>AI-Agent</code>），保存后请<strong>重启 FastAPI</strong> 以加载新配置。</li>
             <li>点击「测试连接」确认可用，再「保存并进入」。</li>
           </ol>
