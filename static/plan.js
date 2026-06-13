@@ -13,11 +13,18 @@
   var skills = [];
   var selectedId = null;
   var isBusy = false;
-  var viewMode = "browse";
+  var viewMode = "hub";
   var banner = { type: "", message: "" };
   var pendingDeletePlanId = null;
   var draftDays = [];
   var editingDays = [];
+  var dailyRecord = null;
+  var planVersions = [];
+  var currentPlanVersion = null;
+  var selectedVersionId = null;
+  var dependencyEdges = [];
+  var suggestionDecisions = {};
+  var DAILY_CONV_STORAGE_KEY = "edutower_daily_conversation_map";
 
   var TASK_STATUS_LABEL = {
     todo: "待开始",
@@ -49,9 +56,19 @@
       var action = target.getAttribute("data-action");
       if (!action) return;
 
-      if (action === "plan-view-browse") {
-        setViewMode("browse");
+      if (action === "plan-view-hub") {
+        leaveTimetableView();
+        setViewMode("hub");
+        loadHubData();
+      } else if (action === "plan-view-timetable") {
+        setViewMode("timetable");
         render();
+      } else if (action === "plan-view-advanced") {
+        leaveTimetableView();
+        setViewMode("advanced");
+        render();
+      } else if (action === "plan-quick-start") {
+        quickStartPlan();
       } else if (action === "plan-view-create") {
         draftDays = [emptyDay(1)];
         setViewMode("create");
@@ -69,6 +86,38 @@
         }
         setViewMode("tasks");
         render();
+      } else if (action === "plan-view-today" || action === "plan-view-phases") {
+        setViewMode("hub");
+        loadHubData();
+      } else if (action === "phase-select-version") {
+        selectedVersionId = target.getAttribute("data-id");
+        render();
+      } else if (action === "phase-apply-tree") {
+        applyTreeProposal();
+      } else if (action === "phase-confirm") {
+        confirmPlanVersion(target.getAttribute("data-id"));
+      } else if (action === "phase-revise") {
+        revisePlanVersion(target.getAttribute("data-id"));
+      } else if (action === "daily-regenerate") {
+        regenerateDailyToday();
+      } else if (action === "daily-open-chat") {
+        openDailyChat("");
+      } else if (action === "daily-open-conversation") {
+        openDailyChat(target.getAttribute("data-conversation-id"));
+      } else if (action === "daily-close") {
+        closeDailyToday();
+      } else if (action === "daily-cycle-task") {
+        updateDailyTaskStatus(
+          target.getAttribute("data-task-id"),
+          target.getAttribute("data-next-status")
+        );
+      } else if (action === "daily-decide-suggestion") {
+        decideSuggestion(
+          target.getAttribute("data-suggestion-id"),
+          target.getAttribute("data-decision")
+        );
+      } else if (action === "daily-submit-decisions") {
+        submitSummaryDecisions();
       } else if (action === "select-plan") {
         selectedId = target.getAttribute("data-id");
         render();
@@ -150,6 +199,9 @@
   }
 
   function setViewMode(mode) {
+    if (viewMode === "timetable" && mode !== "timetable") {
+      leaveTimetableView();
+    }
     viewMode = mode;
     pendingDeletePlanId = null;
     clearBanner();
@@ -174,23 +226,48 @@
     );
   }
 
+  function leaveTimetableView() {
+    if (window.EduTowerTimetable && typeof window.EduTowerTimetable.unmount === "function") {
+      window.EduTowerTimetable.unmount();
+    }
+  }
+
   function renderSubnav() {
+    if (viewMode === "create" || viewMode === "edit" || viewMode === "tasks") {
+      return (
+        '<nav class="module-subnav" aria-label="计划视图">' +
+        '<button type="button" class="module-subnav__item" data-action="plan-view-hub">← 返回今日学习</button>' +
+        '<span class="module-subnav__hint">' +
+        (viewMode === "create"
+          ? "新建手动课表"
+          : viewMode === "edit"
+            ? "编辑计划信息"
+            : "编辑手动课表") +
+        "</span></nav>"
+      );
+    }
+
     return (
       '<nav class="module-subnav" aria-label="计划视图">' +
       '<button type="button" class="module-subnav__item' +
-      (viewMode === "browse" ? " module-subnav__item--active" : "") +
-      '" data-action="plan-view-browse">计划列表</button>' +
+      (viewMode === "hub" ? " module-subnav__item--active" : "") +
+      '" data-action="plan-view-hub">今日学习</button>' +
       '<button type="button" class="module-subnav__item' +
-      (viewMode === "create" ? " module-subnav__item--active" : "") +
-      '" data-action="plan-view-create">新建计划</button>' +
-      (viewMode === "edit"
-        ? '<button type="button" class="module-subnav__item module-subnav__item--active" data-action="plan-view-edit">编辑计划</button>'
-        : "") +
-      (viewMode === "tasks"
-        ? '<button type="button" class="module-subnav__item module-subnav__item--active" data-action="plan-view-tasks">管理任务</button>'
-        : "") +
+      (viewMode === "timetable" ? " module-subnav__item--active" : "") +
+      '" data-action="plan-view-timetable">平日课表</button>' +
+      '<button type="button" class="module-subnav__item' +
+      (viewMode === "advanced" ? " module-subnav__item--active" : "") +
+      '" data-action="plan-view-advanced">手动课表</button>' +
       "</nav>"
     );
+  }
+
+  function getProjectId() {
+    var active =
+      plans.find(function (p) {
+        return p.status === "active";
+      }) || getSelectedPlan();
+    return active ? active.id : "";
   }
 
   async function loadMaterials() {
@@ -202,25 +279,45 @@
     }
 
     try {
-      var skillData = await api.get("/api/skills");
-      skills = skillData && Array.isArray(skillData.items) ? skillData.items : [];
+      var model = window.EduTowerSkillsModel;
+      var projectId = getProjectId();
+      var query = model
+        ? model.buildTreeQuery({ projectId: projectId || undefined })
+        : projectId
+          ? "?projectId=" + encodeURIComponent(projectId)
+          : "";
+      var skillData = await api.get("/api/skills/tree" + query);
+      if (model) {
+        var normalized = model.normalizeTreeResponse(skillData);
+        skills = normalized.flatSkills;
+        dependencyEdges = normalized.dependencyEdges;
+      } else {
+        skills = skillData && Array.isArray(skillData.items) ? skillData.items : [];
+        dependencyEdges =
+          skillData && Array.isArray(skillData.dependencyEdges) ? skillData.dependencyEdges : [];
+      }
     } catch (_err) {
       skills = [];
+      dependencyEdges = [];
     }
   }
 
   function skillOptions(selectedId) {
+    var model = window.EduTowerSkillsModel;
     return (
       '<option value="">不关联技能</option>' +
       skills
         .map(function (s) {
+          var label = model ? model.formatSkillOptionLabel(s) : s.title;
+          var disabled = s.isUnlocked === false ? " disabled" : "";
           return (
             '<option value="' +
             api.escapeAttr(s.id) +
             '"' +
             (selectedId === s.id ? " selected" : "") +
+            disabled +
             ">" +
-            api.escapeHtml(s.title) +
+            api.escapeHtml(label) +
             "</option>"
           );
         })
@@ -238,13 +335,167 @@
       if (!selectedId && plans.length) {
         selectedId = plans[0].id;
       }
-      render();
+      if (viewMode === "hub" || viewMode === "today" || viewMode === "phases") {
+        viewMode = "hub";
+        await loadPlanPhaseMeta();
+        render();
+        await syncDailyRecord();
+        render();
+      } else {
+        render();
+      }
     } catch (err) {
       rootEl.innerHTML =
         renderSubnav() +
         '<p class="module-empty module-empty--error">加载失败：' +
         api.escapeHtml(api.networkError(err)) +
         "</p>";
+    }
+  }
+
+  async function loadPlanPhaseMeta() {
+    var projectId = getProjectId();
+    if (!projectId) {
+      planVersions = [];
+      currentPlanVersion = null;
+      return;
+    }
+
+    try {
+      var versionsData = await api.get(
+        "/api/plan/" + encodeURIComponent(projectId) + "/versions"
+      );
+      planVersions =
+        versionsData && Array.isArray(versionsData.items) ? versionsData.items : [];
+
+      try {
+        currentPlanVersion = await api.get(
+          "/api/plan/" + encodeURIComponent(projectId) + "/versions/current"
+        );
+      } catch (_err) {
+        currentPlanVersion = null;
+      }
+
+      if (!selectedVersionId && planVersions.length) {
+        selectedVersionId = currentPlanVersion
+          ? currentPlanVersion.id
+          : planVersions[0].id;
+      }
+    } catch (_err) {
+      planVersions = [];
+      currentPlanVersion = null;
+    }
+  }
+
+  function readDailyConvMap() {
+    try {
+      var raw = localStorage.getItem(DAILY_CONV_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (_err) {
+      return {};
+    }
+  }
+
+  function writeDailyConvMap(map) {
+    localStorage.setItem(DAILY_CONV_STORAGE_KEY, JSON.stringify(map));
+  }
+
+  function dailyConvCacheKey(projectId, localDate) {
+    return projectId + "|" + localDate;
+  }
+
+  async function ensureTodayConversation() {
+    var projectId = getProjectId();
+    var sheet = dailyRecord && dailyRecord.sheet ? dailyRecord.sheet : null;
+    if (!projectId || !sheet || !sheet.localDate) {
+      return null;
+    }
+
+    if (sheet.status !== "active" && sheet.status !== "generating") {
+      return null;
+    }
+
+    var cacheKey = dailyConvCacheKey(projectId, sheet.localDate);
+    var map = readDailyConvMap();
+    var cachedId = map[cacheKey];
+    var serverConv = null;
+
+    if (dailyRecord.conversations && dailyRecord.conversations.length) {
+      serverConv = dailyRecord.conversations
+        .filter(function (conversation) {
+          return conversation.type === "project_study";
+        })
+        .sort(function (left, right) {
+          return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+        })[0];
+    }
+
+    var conversationId = (serverConv && serverConv.id) || cachedId || null;
+
+    if (!conversationId) {
+      var title = "今日学习 " + sheet.localDate;
+      var created = await api.post("/api/conversations", {
+        projectId: projectId,
+        type: "project_study",
+        title: title,
+      });
+      conversationId = created && created.id ? created.id : null;
+    }
+
+    if (!conversationId) {
+      return null;
+    }
+
+    map[cacheKey] = conversationId;
+    writeDailyConvMap(map);
+
+    if (
+      window.EduTowerChat &&
+      typeof window.EduTowerChat.activateStudyConversation === "function"
+    ) {
+      await window.EduTowerChat.activateStudyConversation({
+        conversationId: conversationId,
+        projectId: projectId,
+        localDate: sheet.localDate,
+        title: (serverConv && serverConv.title) || "今日学习 " + sheet.localDate,
+      });
+    }
+
+    return conversationId;
+  }
+
+  async function syncDailyRecord() {
+    var projectId = getProjectId();
+    if (!projectId) return;
+
+    try {
+      dailyRecord = await api.post("/api/daily/" + encodeURIComponent(projectId) + "/today", {});
+      try {
+        await ensureTodayConversation();
+      } catch (_convErr) {
+        /* 子对话绑定失败不阻断今日任务 */
+      }
+    } catch (err) {
+      setBanner("error", "同步今日任务失败：" + api.networkError(err));
+    }
+  }
+
+  async function loadHubData(showLoading) {
+    if (showLoading !== false) {
+      isBusy = true;
+      clearBanner();
+    }
+
+    try {
+      await loadPlanPhaseMeta();
+      render();
+      await syncDailyRecord();
+      render();
+    } catch (err) {
+      setBanner("error", "加载失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
     }
   }
 
@@ -320,7 +571,7 @@
       dayIndex +
       '" data-task-index="' +
       taskIndex +
-      '" aria-label="删除任务">×</button></div>"
+      '" aria-label="删除任务">×</button></div>'
     );
   }
 
@@ -437,8 +688,8 @@
   function renderCreateForm() {
     return (
       '<section class="module-mini-page">' +
-      '<h2 class="module-mini-page__title">新建学习计划</h2>' +
-      '<p class="module-mini-page__desc">填写目标并安排每日任务。阅读类任务可关联资料；练习/掌握类任务请关联技能，以便在「练习测验」中按计划任务生成题目。</p>' +
+      '<h2 class="module-mini-page__title">新建手动课表</h2>' +
+      '<p class="module-mini-page__desc">可选功能：按「第几天」手动排任务。日常使用建议回到「今日学习」一键启用自动计划。</p>' +
       renderBanner() +
       '<div class="form-row"><label class="form-label" for="planCreateTitle">计划标题</label>' +
       '<input id="planCreateTitle" class="form-input" type="text" maxlength="120" placeholder="例如：期末数学复习" required /></div>' +
@@ -450,7 +701,7 @@
       "</div>" +
       '<button type="button" class="btn btn--ghost btn--compact" data-action="add-plan-day">+ 添加一天</button></div>' +
       '<div class="module-mini-page__actions">' +
-      '<button type="button" class="btn btn--ghost" data-action="plan-view-browse">取消</button>' +
+      '<button type="button" class="btn btn--ghost" data-action="plan-view-advanced">取消</button>' +
       '<button type="button" class="btn btn--primary" data-action="submit-create-plan">创建计划</button></div></section>'
     );
   }
@@ -485,7 +736,7 @@
       "</textarea></div>" +
       '<p class="module-mini-page__desc">任务安排请使用「管理任务」视图。</p>' +
       '<div class="module-mini-page__actions">' +
-      '<button type="button" class="btn btn--ghost" data-action="plan-view-browse">返回列表</button>' +
+      '<button type="button" class="btn btn--ghost" data-action="plan-view-advanced">返回手动课表</button>' +
       '<button type="button" class="btn btn--ghost" data-action="plan-view-tasks">管理任务</button>' +
       deleteBlock +
       '<button type="button" class="btn btn--primary" data-action="submit-edit-plan">保存修改</button></div></section>'
@@ -505,17 +756,872 @@
       "</div>" +
       '<button type="button" class="btn btn--ghost btn--compact" data-action="add-plan-day">+ 添加一天</button>' +
       '<div class="module-mini-page__actions">' +
-      '<button type="button" class="btn btn--ghost" data-action="plan-view-browse">返回列表</button>' +
+      '<button type="button" class="btn btn--ghost" data-action="plan-view-advanced">返回手动课表</button>' +
       '<button type="button" class="btn btn--primary" data-action="submit-save-tasks">保存任务</button></div></section>'
     );
   }
 
-  function renderBrowse() {
+  function nextDailyTaskStatus(current) {
+    if (current === "todo") return "in_progress";
+    if (current === "in_progress") return "done";
+    return "todo";
+  }
+
+  function getCurrentPhasePreview() {
+    if (!currentPlanVersion || !currentPlanVersion.phases || !currentPlanVersion.phases.length) {
+      return null;
+    }
+    return currentPlanVersion.phases[0];
+  }
+
+  function renderDailyTasksHtml() {
+    var sheet = dailyRecord && dailyRecord.sheet ? dailyRecord.sheet : null;
+    var tasks = sheet && Array.isArray(sheet.tasks) ? sheet.tasks : [];
+
+    return tasks
+      .filter(function (task) {
+        return task.status !== "cancelled";
+      })
+      .map(function (task) {
+        var cls = "plan-task plan-task--" + (task.status || "todo");
+        var nextStatus = nextDailyTaskStatus(task.status);
+        var meta =
+          api.escapeHtml(TASK_TYPE_LABEL[task.type] || task.type) +
+          " · " +
+          api.escapeHtml(TASK_STATUS_LABEL[task.status] || task.status);
+        if (task.selectionReason) {
+          meta += " · " + api.escapeHtml(task.selectionReason);
+        }
+        return (
+          '<li class="' +
+          cls +
+          '">' +
+          '<button type="button" class="plan-task__check" data-action="daily-cycle-task" data-task-id="' +
+          api.escapeAttr(task.id) +
+          '" data-next-status="' +
+          api.escapeAttr(nextStatus) +
+          '" aria-label="切换任务状态"></button>' +
+          '<div class="plan-task__body">' +
+          '<span class="plan-task__title">' +
+          api.escapeHtml(task.title) +
+          "</span>" +
+          '<span class="plan-task__meta">' +
+          meta +
+          "</span></div></li>"
+        );
+      })
+      .join("");
+  }
+
+  function renderOnboardingCard() {
+    var draftVersion = planVersions.find(function (v) {
+      return v.status === "draft";
+    });
+
+    if (draftVersion) {
+      return (
+        '<section class="plan-onboarding plan-onboarding--draft">' +
+        '<h3 class="plan-onboarding__title">阶段计划草案已生成</h3>' +
+        '<p class="plan-onboarding__desc">还差一步：确认后系统会按技能掌握度自动编排每日任务。</p>' +
+        '<button type="button" class="btn btn--primary" data-action="phase-confirm" data-id="' +
+        api.escapeAttr(draftVersion.id) +
+        '"' +
+        (isBusy ? " disabled" : "") +
+        ">确认并启用</button></section>"
+      );
+    }
+
+    return (
+      '<section class="plan-onboarding">' +
+      '<h3 class="plan-onboarding__title">一键启用学习计划</h3>' +
+      '<p class="plan-onboarding__desc">系统会根据你的技能树自动生成阶段计划，并编排今天要学的任务。无需手动排课表。</p>' +
+      '<ol class="plan-onboarding__steps">' +
+      "<li>按技能树生成学习阶段</li>" +
+      "<li>确认计划</li>" +
+      "<li>开始今日学习</li>" +
+      "</ol>" +
+      '<div class="plan-onboarding__actions">' +
+      '<button type="button" class="btn btn--primary" data-action="plan-quick-start"' +
+      (isBusy ? " disabled" : "") +
+      ">一键启用</button>" +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="phase-apply-tree"' +
+      (isBusy ? " disabled" : "") +
+      ">仅生成草案</button></div></section>"
+    );
+  }
+
+  function renderPhaseStrip() {
+    if (!currentPlanVersion) {
+      return "";
+    }
+
+    var phase = getCurrentPhasePreview();
+    var nodesHtml = "";
+    if (phase && phase.knowledgeNodeIds && phase.knowledgeNodeIds.length) {
+      nodesHtml =
+        '<div class="plan-hub__phase-nodes">' +
+        phase.knowledgeNodeIds
+          .slice(0, 6)
+          .map(function (nodeId) {
+            return (
+              '<span class="plan-phase__node">' + api.escapeHtml(skillTitleById(nodeId)) + "</span>"
+            );
+          })
+          .join("") +
+        (phase.knowledgeNodeIds.length > 6
+          ? '<span class="plan-phase__node">+' + (phase.knowledgeNodeIds.length - 6) + "</span>"
+          : "") +
+        "</div>";
+    }
+
+    return (
+      '<section class="plan-hub__phase">' +
+      '<div class="plan-hub__phase-head">' +
+      "<div>" +
+      '<h3 class="plan-hub__phase-title">当前学习阶段</h3>' +
+      '<p class="plan-today__meta">已启用 v' +
+      currentPlanVersion.version +
+      " · " +
+      (phase ? api.escapeHtml(phase.title) : "按技能进度推进") +
+      "</p>" +
+      (phase && phase.goal
+        ? '<p class="plan-hub__phase-goal">' + api.escapeHtml(phase.goal) + "</p>"
+        : "") +
+      "</div>" +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="phase-revise" data-id="' +
+      api.escapeAttr(currentPlanVersion.id) +
+      '"' +
+      (isBusy ? " disabled" : "") +
+      ">调整阶段</button></div>" +
+      nodesHtml +
+      "</section>"
+    );
+  }
+
+  function renderHub() {
+    var projectId = getProjectId();
+    if (!projectId) {
+      return (
+        renderSubnav() +
+        renderBanner() +
+        '<p class="module-empty">暂无学习项目。请先在「手动课表」中新建计划。</p>'
+      );
+    }
+
+    var sheet = dailyRecord && dailyRecord.sheet ? dailyRecord.sheet : null;
+    var summary = dailyRecord && dailyRecord.summary ? dailyRecord.summary : null;
+    var tasksHtml = renderDailyTasksHtml();
+    var sheetMeta = sheet
+      ? "今天 · " +
+        api.escapeHtml(sheet.localDate) +
+        " · 可用 " +
+        sheet.availableMinutes +
+        " 分钟"
+      : "正在同步今日任务…";
+
+    var emptyTasksHint = currentPlanVersion
+      ? "今日暂无任务。可点击下方「重新编排」，或先去练习/错题本积累学习信号。"
+      : "启用学习计划后，这里会显示今天要完成的任务。";
+
+    return (
+      renderSubnav() +
+      renderBanner() +
+      '<section class="plan-hub">' +
+      (!currentPlanVersion ? renderOnboardingCard() : renderPhaseStrip()) +
+      '<section class="plan-hub__today">' +
+      '<header class="plan-detail__header">' +
+      "<div>" +
+      '<h2 class="plan-detail__title">今天要学什么</h2>' +
+      '<p class="plan-today__meta">' +
+      sheetMeta +
+      "</p></div>" +
+      '<div class="plan-detail__actions">' +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="daily-open-chat"' +
+      (isBusy ? " disabled" : "") +
+      ">去 AI 答疑</button>" +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="daily-regenerate"' +
+      (isBusy ? " disabled" : "") +
+      ">重新编排</button>" +
+      '<button type="button" class="btn btn--primary btn--compact" data-action="daily-close"' +
+      (isBusy ? " disabled" : "") +
+      ">结束今日学习</button></div></header>" +
+      '<ul class="plan-task-list">' +
+      (tasksHtml || '<li class="module-empty module-empty--inline">' + emptyTasksHint + "</li>") +
+      "</ul>" +
+      renderTodayConversations(dailyRecord && dailyRecord.conversations ? dailyRecord.conversations : []) +
+      (summary && summary.aiDraft
+        ? '<section class="plan-today-summary">' +
+          '<h3 class="plan-day__title">今日总结</h3>' +
+          '<p class="plan-today-summary__text">' +
+          api.escapeHtml(summary.confirmedContent || summary.aiDraft) +
+          "</p></section>"
+        : "") +
+      renderSummaryDecisions(summary) +
+      "</section></section>"
+    );
+  }
+
+  async function loadDailyToday() {
+    viewMode = "hub";
+    await loadHubData();
+  }
+
+  async function regenerateDailyToday() {
+    var projectId = getProjectId();
+    if (!projectId || isBusy) return;
+
+    isBusy = true;
+    clearBanner();
+    try {
+      dailyRecord = await api.post(
+        "/api/daily/" + encodeURIComponent(projectId) + "/today/regenerate",
+        {}
+      );
+      setBanner("success", "已重排今日未完成任务。");
+      render();
+    } catch (err) {
+      setBanner("error", "重排失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  function renderTodayConversations(conversations) {
+    if (!conversations || !conversations.length) {
+      return "";
+    }
+
+    var items = conversations
+      .map(function (conversation) {
+        return (
+          '<li class="plan-today-conversation">' +
+          '<span class="module-badge">' +
+          api.escapeHtml(conversation.type === "project_study" ? "今日学习" : conversation.type) +
+          "</span>" +
+          '<span class="plan-today-conversation__title">' +
+          api.escapeHtml(conversation.title || "学习对话") +
+          "</span>" +
+          '<span class="plan-today-conversation__meta">' +
+          conversation.messageCount +
+          " 条消息</span>" +
+          '<button type="button" class="btn btn--ghost btn--compact" data-action="daily-open-conversation" data-conversation-id="' +
+          api.escapeAttr(conversation.id) +
+          '">查看对话</button></li>'
+        );
+      })
+      .join("");
+
+    return (
+      '<section class="plan-today-conversations">' +
+      '<h3 class="plan-day__title">今日学习对话</h3>' +
+      '<ul class="plan-today-conversation-list">' +
+      items +
+      "</ul></section>"
+    );
+  }
+
+  async function openDailyChat(conversationId) {
+    if (isBusy) return;
+
+    isBusy = true;
+    clearBanner();
+    try {
+      if (conversationId) {
+        var projectId = getProjectId();
+        var sheet = dailyRecord && dailyRecord.sheet ? dailyRecord.sheet : null;
+        if (
+          window.EduTowerChat &&
+          typeof window.EduTowerChat.activateStudyConversation === "function"
+        ) {
+          await window.EduTowerChat.activateStudyConversation({
+            conversationId: conversationId,
+            projectId: projectId,
+            localDate: sheet ? sheet.localDate : null,
+            title: "今日学习对话",
+          });
+        }
+      } else {
+        await ensureTodayConversation();
+      }
+
+      if (window.EduTowerShell && typeof window.EduTowerShell.switchView === "function") {
+        window.EduTowerShell.switchView("chat");
+      }
+    } catch (err) {
+      setBanner("error", "打开学习对话失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  async function closeDailyToday() {
+    var projectId = getProjectId();
+    if (!projectId || isBusy) return;
+
+    isBusy = true;
+    clearBanner();
+    try {
+      dailyRecord = await api.post(
+        "/api/daily/" + encodeURIComponent(projectId) + "/today/close",
+        {}
+      );
+      if (
+        window.EduTowerChat &&
+        typeof window.EduTowerChat.clearStudyConversation === "function"
+      ) {
+        window.EduTowerChat.clearStudyConversation();
+      }
+      suggestionDecisions = {};
+      var needsConfirm =
+        dailyRecord &&
+        dailyRecord.summary &&
+        dailyRecord.summary.status === "awaiting_confirmation";
+      setBanner(
+        "success",
+        needsConfirm
+          ? "今日学习已结束，请确认下方 AI 建议后提交。"
+          : "今日学习已结束，总结已生成。"
+      );
+      render();
+    } catch (err) {
+      setBanner("error", "结束失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  var SUGGESTION_TYPE_LABEL = {
+    knowledge_status: "掌握度",
+    weakness: "薄弱点",
+    weakness_resolved: "建议解决",
+    review_suggestion: "复习建议",
+  };
+
+  var VERSION_STATUS_LABEL = {
+    draft: "草案",
+    confirmed: "已确认",
+    superseded: "已替代",
+  };
+
+  function renderSummaryDecisions(summary) {
+    if (!summary || summary.status !== "awaiting_confirmation") return "";
+
+    var pending = (summary.suggestions || []).filter(function (s) {
+      return s.status === "pending";
+    });
+    if (!pending.length) return "";
+
+    var itemsHtml = pending
+      .map(function (suggestion) {
+        var decided = suggestionDecisions[suggestion.id];
+        var decidedLabel = "";
+        if (decided === "accept") decidedLabel = " · 已选：采纳";
+        if (decided === "reject") decidedLabel = " · 已选：拒绝";
+        var skillTitle = "";
+        if (suggestion.knowledgeNodeId) {
+          var model = window.EduTowerSkillsModel;
+          skillTitle = model
+            ? model.findSkillTitle(skills, suggestion.knowledgeNodeId)
+            : suggestion.knowledgeNodeId;
+        }
+
+        return (
+          '<li class="plan-suggestion">' +
+          '<div class="plan-suggestion__header">' +
+          '<span class="module-badge">' +
+          api.escapeHtml(SUGGESTION_TYPE_LABEL[suggestion.type] || suggestion.type) +
+          "</span>" +
+          (skillTitle
+            ? '<span class="plan-suggestion__skill">' + api.escapeHtml(skillTitle) + "</span>"
+            : "") +
+          "</div>" +
+          '<p class="plan-suggestion__content">' +
+          api.escapeHtml(suggestion.content) +
+          decidedLabel +
+          "</p>" +
+          '<div class="plan-suggestion__actions">' +
+          '<button type="button" class="btn btn--ghost btn--compact' +
+          (decided === "accept" ? " btn--primary" : "") +
+          '" data-action="daily-decide-suggestion" data-suggestion-id="' +
+          api.escapeAttr(suggestion.id) +
+          '" data-decision="accept">采纳</button>' +
+          '<button type="button" class="btn btn--ghost btn--compact' +
+          (decided === "reject" ? " btn--primary" : "") +
+          '" data-action="daily-decide-suggestion" data-suggestion-id="' +
+          api.escapeAttr(suggestion.id) +
+          '" data-decision="reject">拒绝</button></div></li>'
+        );
+      })
+      .join("");
+
+    var allDecided = pending.every(function (s) {
+      return suggestionDecisions[s.id] === "accept" || suggestionDecisions[s.id] === "reject";
+    });
+
+    return (
+      '<section class="plan-suggestions">' +
+      '<h3 class="plan-day__title">待确认建议</h3>' +
+      '<p class="module-intro">结束今日学习后，请逐条确认 AI 生成的掌握度与复习建议。</p>' +
+      '<ul class="plan-suggestion-list">' +
+      itemsHtml +
+      "</ul>" +
+      '<button type="button" class="btn btn--primary btn--compact" data-action="daily-submit-decisions"' +
+      (isBusy || !allDecided ? " disabled" : "") +
+      ">提交确认</button></section>"
+    );
+  }
+
+  function decideSuggestion(suggestionId, decision) {
+    if (!suggestionId || !decision) return;
+    suggestionDecisions[suggestionId] = decision;
+    render();
+  }
+
+  async function submitSummaryDecisions() {
+    var projectId = getProjectId();
+    var summary =
+      dailyRecord && dailyRecord.summary ? dailyRecord.summary : null;
+    if (!projectId || !summary || isBusy) return;
+
+    var pending = (summary.suggestions || []).filter(function (s) {
+      return s.status === "pending";
+    });
+    var decisions = pending
+      .map(function (s) {
+        var action = suggestionDecisions[s.id];
+        if (action !== "accept" && action !== "reject") return null;
+        return { suggestionId: s.id, action: action };
+      })
+      .filter(Boolean);
+
+    if (!decisions.length || decisions.length !== pending.length) {
+      setBanner("error", "请先为每条建议选择采纳或拒绝。");
+      render();
+      return;
+    }
+
+    isBusy = true;
+    clearBanner();
+    try {
+      var result = await api.post(
+        "/api/daily/" +
+          encodeURIComponent(projectId) +
+          "/summaries/" +
+          encodeURIComponent(summary.id) +
+          "/decisions",
+        {
+          decisions: decisions,
+          confirmedContent: summary.confirmedContent || summary.aiDraft || undefined,
+        }
+      );
+      suggestionDecisions = {};
+      dailyRecord = {
+        sheet: result.sheet,
+        summary: result.summary,
+        conversations: dailyRecord ? dailyRecord.conversations : [],
+      };
+      setBanner("success", "建议已确认，今日学习已完结。");
+      render();
+    } catch (err) {
+      setBanner("error", "提交失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  function skillTitleById(id) {
+    var model = window.EduTowerSkillsModel;
+    return model ? model.findSkillTitle(skills, id) : id;
+  }
+
+  function renderPhases() {
+    var projectId = getProjectId();
+    if (!projectId) {
+      return (
+        renderSubnav() +
+        renderBanner() +
+        '<p class="module-empty">请先创建或选择一个学习计划项目。</p>'
+      );
+    }
+
+    var selected =
+      planVersions.find(function (v) {
+        return v.id === selectedVersionId;
+      }) ||
+      currentPlanVersion ||
+      planVersions[0] ||
+      null;
+
+    var versionTabs = planVersions
+      .map(function (version) {
+        var active = selected && version.id === selected.id ? " plan-tab--active" : "";
+        return (
+          '<button type="button" class="plan-tab' +
+          active +
+          '" data-action="phase-select-version" data-id="' +
+          api.escapeAttr(version.id) +
+          '">v' +
+          version.version +
+          " · " +
+          api.escapeHtml(VERSION_STATUS_LABEL[version.status] || version.status) +
+          "</button>"
+        );
+      })
+      .join("");
+
+    var phasesHtml = "";
+    if (selected && selected.phases && selected.phases.length) {
+      phasesHtml = selected.phases
+        .map(function (phase, index) {
+          var nodesHtml = (phase.knowledgeNodeIds || [])
+            .map(function (nodeId) {
+              return (
+                '<span class="plan-phase__node">' + api.escapeHtml(skillTitleById(nodeId)) + "</span>"
+              );
+            })
+            .join("");
+          return (
+            '<article class="plan-phase-card">' +
+            '<h3 class="plan-phase-card__title">阶段 ' +
+            (index + 1) +
+            " · " +
+            api.escapeHtml(phase.title) +
+            "</h3>" +
+            '<p class="plan-phase-card__goal">' +
+            api.escapeHtml(phase.goal) +
+            "</p>" +
+            (phase.description
+              ? '<p class="plan-phase-card__desc">' + api.escapeHtml(phase.description) + "</p>"
+              : "") +
+            (phase.completionCriteria
+              ? '<p class="plan-phase-card__criteria">完成标准：' +
+                api.escapeHtml(phase.completionCriteria) +
+                "</p>"
+              : "") +
+            (nodesHtml
+              ? '<div class="plan-phase-card__nodes">' + nodesHtml + "</div>"
+              : '<p class="module-empty module-empty--inline">未关联技能节点</p>') +
+            "</article>"
+          );
+        })
+        .join("");
+    } else {
+      phasesHtml =
+        '<p class="module-empty">暂无阶段计划。可从技能树一键生成草案，确认后每日任务将据此编排。</p>';
+    }
+
+    var actionHtml = "";
+    if (selected) {
+      if (selected.status === "draft") {
+        actionHtml +=
+          '<button type="button" class="btn btn--primary btn--compact" data-action="phase-confirm" data-id="' +
+          api.escapeAttr(selected.id) +
+          '"' +
+          (isBusy ? " disabled" : "") +
+          ">确认此版本</button>";
+      } else if (selected.status === "confirmed") {
+        actionHtml +=
+          '<button type="button" class="btn btn--ghost btn--compact" data-action="phase-revise" data-id="' +
+          api.escapeAttr(selected.id) +
+          '"' +
+          (isBusy ? " disabled" : "") +
+          ">基于此版本修订</button>";
+      }
+    }
+
+    return (
+      renderSubnav() +
+      renderBanner() +
+      '<section class="plan-phases">' +
+      '<header class="plan-detail__header">' +
+      "<div>" +
+      '<h2 class="plan-detail__title">阶段学习计划</h2>' +
+      '<p class="module-intro">阶段计划驱动「今日学习」任务生成。需先确认一版阶段计划，系统才会按掌握度编排每日任务。</p>' +
+      (currentPlanVersion
+        ? '<p class="plan-today__meta">当前生效：v' +
+          currentPlanVersion.version +
+          "（" +
+          api.escapeHtml(
+            VERSION_STATUS_LABEL[currentPlanVersion.status] || currentPlanVersion.status
+          ) +
+          "）</p>"
+        : '<p class="plan-today__meta">尚未确认阶段计划</p>') +
+      "</div>" +
+      '<div class="plan-detail__actions">' +
+      '<button type="button" class="btn btn--primary btn--compact" data-action="phase-apply-tree"' +
+      (isBusy ? " disabled" : "") +
+      ">从技能树生成草案</button>" +
+      actionHtml +
+      "</div></header>" +
+      (versionTabs ? '<div class="plan-tabs" role="tablist">' + versionTabs + "</div>" : "") +
+      '<div class="plan-phase-list">' +
+      phasesHtml +
+      "</div></section>"
+    );
+  }
+
+  function buildProposalFromSkills() {
+    var unlocked = skills.filter(function (skill) {
+      return skill.isUnlocked !== false && !skill.archivedAt;
+    });
+    if (!unlocked.length) {
+      return null;
+    }
+
+    var nodes = unlocked.map(function (skill) {
+      var node = {
+        key: "node_" + skill.id,
+        title: skill.title,
+      };
+      if (skill.description) node.description = skill.description;
+      if (skill.parentId) node.parentKey = "node_" + skill.parentId;
+      return node;
+    });
+
+    var edges = (dependencyEdges || [])
+      .filter(function (edge) {
+        return edge && edge.sourceId && edge.targetId;
+      })
+      .map(function (edge) {
+        return {
+          prerequisiteKey: "node_" + edge.sourceId,
+          nodeKey: "node_" + edge.targetId,
+        };
+      });
+
+    var phaseCount = Math.min(3, Math.max(1, Math.ceil(unlocked.length / 4)));
+    var chunkSize = Math.ceil(unlocked.length / phaseCount);
+    var phases = [];
+
+    for (var i = 0; i < phaseCount; i++) {
+      var chunk = unlocked.slice(i * chunkSize, (i + 1) * chunkSize);
+      if (!chunk.length) continue;
+      phases.push({
+        title: "第 " + (i + 1) + " 阶段",
+        goal: "掌握 " + chunk.map(function (s) { return s.title; }).slice(0, 3).join("、") +
+          (chunk.length > 3 ? " 等技能" : ""),
+        nodeKeys: chunk.map(function (s) {
+          return "node_" + s.id;
+        }),
+      });
+    }
+
+    return {
+      proposalId: "ui_tree_" + Date.now(),
+      metadata: {
+        provider: "ui",
+        model: "skills-tree",
+        generatedAt: new Date().toISOString(),
+      },
+      nodes: nodes,
+      prerequisiteEdges: edges,
+      phases: phases,
+    };
+  }
+
+  async function loadPlanPhases() {
+    viewMode = "hub";
+    await loadHubData();
+  }
+
+  async function quickStartPlan() {
+    var projectId = getProjectId();
+    if (!projectId || isBusy) return;
+
+    var proposal = buildProposalFromSkills();
+    if (!proposal) {
+      setBanner("error", "技能树为空或全部未解锁。请先在「技能图谱」中解锁一些技能。");
+      render();
+      return;
+    }
+
+    isBusy = true;
+    clearBanner();
+    rootEl.innerHTML =
+      renderSubnav() +
+      '<p class="module-empty module-empty--loading">正在启用学习计划…</p>';
+
+    try {
+      await loadMaterials();
+      var result = await api.post(
+        "/api/plan/" + encodeURIComponent(projectId) + "/proposals/apply",
+        proposal
+      );
+
+      var versionId =
+        result && result.planVersion && result.planVersion.id
+          ? result.planVersion.id
+          : selectedVersionId;
+
+      if (result && result.planVersion && result.planVersion.status === "draft" && versionId) {
+        await api.post(
+          "/api/plan/" +
+            encodeURIComponent(projectId) +
+            "/versions/" +
+            encodeURIComponent(versionId) +
+            "/confirm",
+          {}
+        );
+      }
+
+      await loadHubData(false);
+      setBanner("success", "学习计划已启用，今日任务已更新。");
+      render();
+    } catch (err) {
+      setBanner("error", "启用失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  async function applyTreeProposal() {
+    var projectId = getProjectId();
+    if (!projectId || isBusy) return;
+
+    var proposal = buildProposalFromSkills();
+    if (!proposal) {
+      setBanner("error", "技能树为空或全部未解锁，无法生成阶段计划。");
+      render();
+      return;
+    }
+
+    isBusy = true;
+    clearBanner();
+    try {
+      var result = await api.post(
+        "/api/plan/" + encodeURIComponent(projectId) + "/proposals/apply",
+        proposal
+      );
+      if (result && result.planVersion) {
+        selectedVersionId = result.planVersion.id;
+      }
+      viewMode = "hub";
+      await loadHubData(false);
+      setBanner(
+        "success",
+        result && result.idempotentReplay
+          ? "已存在相同草案，请点击「确认并启用」。"
+          : "草案已生成，请点击「确认并启用」。"
+      );
+      render();
+    } catch (err) {
+      setBanner("error", "生成失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  async function confirmPlanVersion(versionId) {
+    var projectId = getProjectId();
+    if (!projectId || !versionId || isBusy) return;
+
+    isBusy = true;
+    clearBanner();
+    try {
+      await api.post(
+        "/api/plan/" +
+          encodeURIComponent(projectId) +
+          "/versions/" +
+          encodeURIComponent(versionId) +
+          "/confirm",
+        {}
+      );
+      viewMode = "hub";
+      await loadHubData(false);
+      setBanner("success", "学习计划已启用，今日任务将据此编排。");
+      render();
+    } catch (err) {
+      setBanner("error", "确认失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  async function revisePlanVersion(versionId) {
+    var projectId = getProjectId();
+    if (!projectId || !versionId || isBusy) return;
+
+    isBusy = true;
+    clearBanner();
+    try {
+      var revised = await api.post(
+        "/api/plan/" +
+          encodeURIComponent(projectId) +
+          "/versions/" +
+          encodeURIComponent(versionId) +
+          "/revise",
+        {}
+      );
+      if (revised && revised.id) {
+        selectedVersionId = revised.id;
+      }
+      viewMode = "hub";
+      await loadHubData(false);
+      setBanner("success", "已创建修订草案，请确认后生效。");
+      render();
+    } catch (err) {
+      setBanner("error", "修订失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  async function updateDailyTaskStatus(taskId, nextStatus) {
+    var projectId = getProjectId();
+    if (!projectId || !taskId || !nextStatus || isBusy) return;
+
+    isBusy = true;
+    clearBanner();
+    try {
+      var result = await api.patch(
+        "/api/daily/" +
+          encodeURIComponent(projectId) +
+          "/tasks/" +
+          encodeURIComponent(taskId),
+        { status: nextStatus }
+      );
+      dailyRecord = {
+        sheet: result.sheet,
+        summary: result.summary,
+        conversations: dailyRecord ? dailyRecord.conversations : [],
+      };
+      if (result.autoClosed) {
+        suggestionDecisions = {};
+        var needsConfirm =
+          result.summary && result.summary.status === "awaiting_confirmation";
+        setBanner(
+          "success",
+          needsConfirm
+            ? "全部任务已完成，请确认下方 AI 建议。"
+            : "全部任务已完成，今日学习已自动结束。"
+        );
+      }
+      render();
+    } catch (err) {
+      setBanner("error", "更新任务失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  function renderAdvanced() {
     if (!plans.length) {
       return (
         renderSubnav() +
         renderBanner() +
-        '<p class="module-empty">暂无学习计划，点击「新建计划」创建第一条。</p>'
+        '<section class="plan-advanced-empty">' +
+        '<p class="module-empty">手动课表用于自定义「第几天做什么」。日常使用请回到「今日学习」。</p>' +
+        '<button type="button" class="btn btn--primary btn--compact" data-action="plan-view-create">新建手动课表</button>' +
+        '<button type="button" class="btn btn--ghost btn--compact" data-action="plan-view-hub">返回今日学习</button></section>'
       );
     }
 
@@ -621,11 +1727,14 @@
       '<div class="plan-detail__actions">' +
       statusBadge +
       activateBtn +
-      '<button type="button" class="btn btn--ghost btn--compact" data-action="plan-view-tasks">管理任务</button>' +
-      '<button type="button" class="btn btn--ghost btn--compact" data-action="plan-view-edit">编辑</button>' +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="plan-view-tasks">编辑课表</button>' +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="plan-view-edit">编辑信息</button>' +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="plan-view-create">新建课表</button>' +
       "</div></header>" +
+      '<p class="module-intro plan-advanced__hint">这是可选的手动课表，与「今日学习」的自动编排相互独立。大多数情况只需使用「今日学习」。</p>' +
       '<div class="plan-days">' +
-      (daysHtml || '<p class="module-empty">该计划还没有安排每日任务，点击「管理任务」开始添加。</p>') +
+      (daysHtml ||
+        '<p class="module-empty">还没有手动安排日程。点击「编辑课表」添加，或返回「今日学习」使用自动计划。</p>') +
       "</div>"
     );
   }
@@ -639,8 +1748,8 @@
     if (viewMode === "edit") {
       var plan = getSelectedPlan();
       if (!plan) {
-        setViewMode("browse");
-        rootEl.innerHTML = renderBrowse();
+        setViewMode("advanced");
+        rootEl.innerHTML = renderAdvanced();
         return;
       }
       rootEl.innerHTML = renderSubnav() + renderEditForm(plan);
@@ -650,15 +1759,38 @@
     if (viewMode === "tasks") {
       var taskPlan = getSelectedPlan();
       if (!taskPlan) {
-        setViewMode("browse");
-        rootEl.innerHTML = renderBrowse();
+        setViewMode("advanced");
+        rootEl.innerHTML = renderAdvanced();
         return;
       }
       rootEl.innerHTML = renderSubnav() + renderTasksForm(taskPlan);
       return;
     }
 
-    rootEl.innerHTML = renderBrowse();
+    if (viewMode === "hub") {
+      rootEl.innerHTML = renderHub();
+      return;
+    }
+
+    if (viewMode === "timetable") {
+      rootEl.innerHTML =
+        renderSubnav() + '<div id="planTimetableMount" class="plan-timetable-mount"></div>';
+      var mountEl = document.getElementById("planTimetableMount");
+      if (mountEl && window.EduTowerTimetable && typeof window.EduTowerTimetable.mount === "function") {
+        window.EduTowerTimetable.mount(mountEl);
+      } else if (mountEl) {
+        mountEl.innerHTML =
+          '<p class="module-empty">课表模块加载失败，请刷新页面后重试。</p>';
+      }
+      return;
+    }
+
+    if (viewMode === "advanced" || viewMode === "browse") {
+      rootEl.innerHTML = renderAdvanced();
+      return;
+    }
+
+    rootEl.innerHTML = renderHub();
   }
 
   function syncDraftFromDom() {
@@ -742,7 +1874,7 @@
       if (created && created.id) {
         selectedId = created.id;
       }
-      setViewMode("browse");
+      setViewMode("advanced");
       setBanner("success", "已创建计划：" + title);
       render();
     } catch (err) {
@@ -779,7 +1911,7 @@
         goal: goal,
       });
       await refresh();
-      setViewMode("browse");
+      setViewMode("advanced");
       setBanner("success", "已更新计划：" + title);
       render();
     } catch (err) {
@@ -807,7 +1939,7 @@
         materialIds: collectMaterialIdsFromDays(days),
       });
       await refresh();
-      setViewMode("browse");
+      setViewMode("advanced");
       setBanner("success", "任务已保存。");
       render();
     } catch (err) {
@@ -829,7 +1961,7 @@
       pendingDeletePlanId = null;
       selectedId = null;
       await refresh();
-      setViewMode("browse");
+      setViewMode("advanced");
       setBanner("success", "计划已删除。");
       render();
     } catch (err) {
@@ -900,6 +2032,44 @@
 
   window.EduTowerPlan = {
     refresh: refresh,
+    getProjectId: getProjectId,
+    getDailyRecord: function () {
+      return dailyRecord;
+    },
+    ensureToday: loadDailyToday,
+    ensureTodayConversation: ensureTodayConversation,
+    loadTodayTasks: async function () {
+      var projectId = getProjectId();
+      if (!projectId) {
+        try {
+          await refresh();
+        } catch (_refreshErr) {
+          /* ignore */
+        }
+        projectId = getProjectId();
+      }
+      if (!projectId) {
+        return { projectId: "", tasks: [] };
+      }
+
+      try {
+        await loadDailyToday();
+      } catch (_dailyErr) {
+        /* ignore */
+      }
+
+      var sheet = dailyRecord && dailyRecord.sheet ? dailyRecord.sheet : null;
+      var tasks =
+        sheet && Array.isArray(sheet.tasks)
+          ? sheet.tasks.filter(function (task) {
+              return task.status !== "cancelled";
+            })
+          : [];
+
+      return { projectId: projectId, tasks: tasks };
+    },
+    nextDailyTaskStatus: nextDailyTaskStatus,
+    updateDailyTaskStatus: updateDailyTaskStatus,
     getActivePlanTasks: function () {
       var active =
         plans.find(function (p) {

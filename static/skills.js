@@ -8,21 +8,17 @@
   if (!rootEl) return;
 
   var api = window.EduTowerApi;
+  var model = window.EduTowerSkillsModel;
   var viewMode = "list";
   var treeData = [];
+  var dependencyEdges = [];
   var flatSkills = [];
+  var includeArchived = false;
   var formMode = null;
   var editingId = null;
   var pendingDeleteId = null;
   var banner = { type: "", message: "" };
   var isBusy = false;
-
-  var STATUS_LABEL = {
-    locked: "未解锁",
-    available: "可学习",
-    in_progress: "学习中",
-    mastered: "已掌握",
-  };
 
   bindEvents();
   refresh();
@@ -51,21 +47,30 @@
         render();
       } else if (action === "skills-confirm-delete") {
         deleteSkill(target.getAttribute("data-id"));
+      } else if (action === "skills-set-state") {
+        updateLearningState(target.getAttribute("data-id"), target.getAttribute("data-state"));
       }
+    });
+
+    rootEl.addEventListener("change", function (event) {
+      var target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (target.getAttribute("data-action") !== "skills-toggle-archived") return;
+      includeArchived = target.checked;
+      refresh();
     });
   }
 
-  function flattenTree(nodes, list) {
-    (nodes || []).forEach(function (node) {
-      list.push(node);
-      if (node.children && node.children.length) {
-        flattenTree(node.children, list);
-      }
-    });
+  function getNodeCssKey(node) {
+    return model ? model.getNodeCssKey(node) : "available";
+  }
+
+  function getNodeBadgeLabel(node) {
+    return model ? model.getNodeBadgeLabel(node) : node.learningState || "";
   }
 
   function setBanner(type, message) {
-    banner = { type: type, message: message };
+    banner = { type: type, message: message || "" };
   }
 
   function clearBanner() {
@@ -112,10 +117,25 @@
     rootEl.innerHTML = '<p class="module-empty module-empty--loading">正在加载技能图谱…</p>';
 
     try {
-      var data = await api.get("/api/skills/tree");
-      treeData = data && Array.isArray(data.items) ? data.items : [];
-      flatSkills = [];
-      flattenTree(treeData, flatSkills);
+      var query = model ? model.buildTreeQuery({ includeArchived: includeArchived }) : "";
+      var data = await api.get("/api/skills/tree" + query);
+      if (model) {
+        var normalized = model.normalizeTreeResponse(data);
+        treeData = normalized.items;
+        dependencyEdges = normalized.dependencyEdges;
+        flatSkills = normalized.flatSkills;
+      } else {
+        treeData = data && Array.isArray(data.items) ? data.items : [];
+        dependencyEdges =
+          data && Array.isArray(data.dependencyEdges) ? data.dependencyEdges : [];
+        flatSkills = [];
+        (function flatten(nodes) {
+          (nodes || []).forEach(function (node) {
+            flatSkills.push(node);
+            flatten(node.children);
+          });
+        })(treeData);
+      }
       render();
     } catch (err) {
       rootEl.innerHTML =
@@ -143,7 +163,7 @@
         '"' +
         (selectedId === skill.id ? " selected" : "") +
         ">" +
-        api.escapeHtml(skill.title) +
+        api.escapeHtml(model ? model.formatSkillOptionLabel(skill) : skill.title) +
         "</option>";
     });
     return html;
@@ -163,15 +183,16 @@
           '"' +
           (checked ? " checked" : "") +
           " /> " +
-          api.escapeHtml(skill.title) +
+          api.escapeHtml(model ? model.formatSkillOptionLabel(skill) : skill.title) +
           "</label>"
         );
       })
       .join("");
   }
 
-  function statusOptions(selected) {
-    return Object.keys(STATUS_LABEL)
+  function learningStateOptions(selected) {
+    var labels = model ? model.LEARNING_STATE_LABEL : { not_started: "未开始", learning: "学习中", mastered: "已掌握" };
+    return Object.keys(labels)
       .map(function (key) {
         return (
           '<option value="' +
@@ -179,7 +200,7 @@
           '"' +
           (selected === key ? " selected" : "") +
           ">" +
-          api.escapeHtml(STATUS_LABEL[key]) +
+          api.escapeHtml(labels[key]) +
           "</option>"
         );
       })
@@ -199,7 +220,30 @@
       return "";
     }
 
-    var title = formMode === "edit" ? "编辑技能" : "新建技能";
+    var title = formMode === "edit" ? "更新学习状态" : "新建技能";
+    var isEdit = formMode === "edit";
+    var fieldDisabled = isEdit ? " disabled" : "";
+    var metaLines = "";
+
+    if (isEdit && skill) {
+      if (skill.isUnlocked && skill.unlockedAt) {
+        metaLines +=
+          '<p class="skill-node__meta">解锁时间：' +
+          api.escapeHtml(api.formatDate(skill.unlockedAt)) +
+          "</p>";
+      }
+      if (skill.prerequisiteRisk && skill.riskPrerequisiteIds && skill.riskPrerequisiteIds.length) {
+        metaLines +=
+          '<p class="skill-node__prereq skill-node__prereq--risk">风险前置：' +
+          skill.riskPrerequisiteIds
+            .map(function (id) {
+              return api.escapeHtml(model ? model.findSkillTitle(flatSkills, id) : id);
+            })
+            .join("、") +
+          "</p>";
+      }
+    }
+
     var deleteBlock =
       formMode === "edit" && pendingDeleteId === skill.id
         ? '<div class="module-inline-confirm">' +
@@ -223,29 +267,45 @@
       title +
       "</h2>" +
       renderBanner() +
+      metaLines +
       '<div class="form-row"><label class="form-label" for="skillFormTitle">名称</label>' +
       '<input id="skillFormTitle" class="form-input" type="text" maxlength="120" value="' +
       api.escapeAttr(skill ? skill.title : "") +
-      '" required /></div>' +
+      '"' +
+      fieldDisabled +
+      " required /></div>" +
       '<div class="form-row"><label class="form-label" for="skillFormDesc">说明（可选）</label>' +
-      '<textarea id="skillFormDesc" class="form-textarea" rows="2">' +
+      '<textarea id="skillFormDesc" class="form-textarea" rows="2"' +
+      fieldDisabled +
+      ">" +
       api.escapeHtml(skill && skill.description ? skill.description : "") +
       "</textarea></div>" +
       '<div class="form-row form-row--inline">' +
       '<div><label class="form-label" for="skillFormParent">父级技能</label>' +
-      '<select id="skillFormParent" class="form-input">' +
+      '<select id="skillFormParent" class="form-input"' +
+      fieldDisabled +
+      ">" +
       parentOptions(skill ? skill.parentId : "", skill ? skill.id : "") +
       "</select></div>" +
-      '<div><label class="form-label" for="skillFormStatus">状态</label>' +
-      '<select id="skillFormStatus" class="form-input">' +
-      statusOptions(skill ? skill.status : "available") +
+      '<div><label class="form-label" for="skillFormLearningState">学习状态</label>' +
+      '<select id="skillFormLearningState" class="form-input"' +
+      (formMode === "edit" && skill && skill.isUnlocked === false ? " disabled" : "") +
+      ">" +
+      learningStateOptions(skill ? skill.learningState || "not_started" : "not_started") +
       "</select></div>" +
       '<div><label class="form-label" for="skillFormMastery">掌握度 %</label>' +
       '<input id="skillFormMastery" class="form-input" type="number" min="0" max="100" value="' +
       api.escapeAttr(String(skill ? skill.mastery || 0 : 0)) +
-      '" /></div></div>' +
+      '"' +
+      fieldDisabled +
+      ' /></div></div>' +
+      (isEdit
+        ? '<p class="module-empty module-empty--inline">编辑模式下只能修改学习状态；结构字段请通过新建/删除管理。</p>'
+        : "") +
       '<div class="form-row"><span class="form-label">前置技能</span>' +
-      '<div class="skills-prereq-list" id="skillFormPrereqs">' +
+      '<div class="skills-prereq-list" id="skillFormPrereqs"' +
+      (isEdit ? ' aria-disabled="true"' : "") +
+      ">" +
       (flatSkills.length
         ? prerequisiteOptions(skill ? skill.prerequisites : [], skill ? skill.id : "")
         : '<p class="module-empty module-empty--inline">暂无其他技能可选。</p>') +
@@ -254,7 +314,7 @@
       '<button type="button" class="btn btn--ghost" data-action="skills-cancel-form">取消</button>' +
       deleteBlock +
       '<button type="button" class="btn btn--primary" data-action="skills-submit-form">' +
-      (formMode === "edit" ? "保存修改" : "创建技能") +
+      (formMode === "edit" ? "保存状态" : "创建技能") +
       "</button></div></section>"
     );
   }
@@ -266,10 +326,14 @@
       '<h2 class="skills-toolbar__title">技能与考点</h2>' +
       '<p class="skills-toolbar__desc">' +
       (activeMode === "graph"
-        ? "力导向知识图谱：拖拽节点时关联考点会弹性跟随，松手后自然回弹稳定。"
-        : "管理技能树、掌握度与先修关系。前置技能解锁后，后续节点才会开放。") +
+        ? "DAG 先修关系图谱：灰色虚线表示未解锁，橙色描边表示前置风险。"
+        : "管理技能树、掌握度与先修关系。前置全部掌握后，后续节点会自动解锁。") +
       "</p></div>" +
       '<div class="skills-toolbar__actions">' +
+      '<label class="skills-toolbar__filter">' +
+      '<input type="checkbox" data-action="skills-toggle-archived"' +
+      (includeArchived ? " checked" : "") +
+      " /> 显示归档节点</label>" +
       '<button type="button" class="btn btn--primary btn--compact" data-action="skills-new">+ 新建技能</button>' +
       '<div class="skills-view-toggle" role="tablist" aria-label="视图切换">' +
       '<button type="button" class="skills-view-toggle__btn' +
@@ -325,7 +389,8 @@
       treeData.length && typeof window.EduTowerGraphData.buildGraphFromSkillTree === "function"
         ? window.EduTowerGraphData.buildGraphFromSkillTree(treeData, {
             title: "技能知识图谱",
-            subtitle: "来自当前技能树的先修关系与掌握度",
+            subtitle: "来自后端 dependencyEdges 的真实先修关系",
+            dependencyEdges: dependencyEdges,
           })
         : window.EduTowerGraphData.buildDemoGraph();
 
@@ -342,8 +407,8 @@
       " · 共 " +
       graph.nodes.length +
       " 个考点，" +
-      graph.links.length +
-      " 条关联</p></div>" +
+      (dependencyEdges.length || graph.links.length) +
+      " 条先修边</p></div>" +
       '<button type="button" class="btn btn--ghost btn--compact" data-action="relayout-graph">重置布局</button></header>' +
       '<div class="knowledge-graph-panel__body" id="knowledgeGraphMount"></div></section>';
 
@@ -384,6 +449,37 @@
     }
   }
 
+  function renderQuickStateActions(node) {
+    if (!node.isUnlocked || node.archivedAt) return "";
+    var states = [
+      { key: "not_started", label: "未开始" },
+      { key: "learning", label: "学习中" },
+      { key: "mastered", label: "已掌握" },
+    ];
+    return (
+      '<div class="skill-node__quick-states">' +
+      states
+        .map(function (state) {
+          var active = node.learningState === state.key;
+          return (
+            '<button type="button" class="btn btn--ghost btn--compact skill-node__state-btn' +
+            (active ? " is-active" : "") +
+            '" data-action="skills-set-state" data-id="' +
+            api.escapeAttr(node.id) +
+            '" data-state="' +
+            api.escapeAttr(state.key) +
+            '"' +
+            (active ? " disabled" : "") +
+            ">" +
+            api.escapeHtml(state.label) +
+            "</button>"
+          );
+        })
+        .join("") +
+      "</div>"
+    );
+  }
+
   function renderNode(node) {
     var mastery = Math.min(100, Math.max(0, Number(node.mastery) || 0));
     var children =
@@ -393,21 +489,37 @@
 
     var prereqHint =
       node.prerequisites && node.prerequisites.length
-        ? '<p class="skill-node__prereq">前置：' +
+        ? '<p class="skill-node__prereq">直接前置：' +
           node.prerequisites
             .map(function (id) {
-              var p = flatSkills.find(function (s) {
-                return s.id === id;
-              });
-              return p ? api.escapeHtml(p.title) : api.escapeHtml(id);
+              return api.escapeHtml(model ? model.findSkillTitle(flatSkills, id) : id);
             })
             .join("、") +
           "</p>"
         : "";
 
+    var riskHint = "";
+    if (node.prerequisiteRisk && node.isUnlocked && node.riskPrerequisiteIds && node.riskPrerequisiteIds.length) {
+      riskHint =
+        '<p class="skill-node__prereq skill-node__prereq--risk">前置风险：' +
+        node.riskPrerequisiteIds
+          .map(function (id) {
+            return api.escapeHtml(model ? model.findSkillTitle(flatSkills, id) : id);
+          })
+          .join("、") +
+        " 尚未全部掌握</p>";
+    }
+
+    var unlockHint =
+      node.isUnlocked && node.unlockedAt
+        ? '<p class="skill-node__meta">解锁于 ' + api.escapeHtml(api.formatDate(node.unlockedAt)) + "</p>"
+        : "";
+
+    var cssKey = getNodeCssKey(node);
+
     return (
       '<li class="skill-node skill-node--' +
-      api.escapeAttr(node.status || "available") +
+      api.escapeAttr(cssKey) +
       '">' +
       '<div class="skill-node__card">' +
       '<div class="skill-node__header">' +
@@ -415,14 +527,16 @@
       api.escapeHtml(node.title) +
       "</h3>" +
       '<span class="module-badge module-badge--skill-' +
-      api.escapeAttr(node.status || "available") +
+      api.escapeAttr(cssKey) +
       '">' +
-      api.escapeHtml(STATUS_LABEL[node.status] || node.status) +
+      api.escapeHtml(getNodeBadgeLabel(node)) +
       "</span></div>" +
       (node.description
         ? '<p class="skill-node__desc">' + api.escapeHtml(node.description) + "</p>"
         : "") +
       prereqHint +
+      riskHint +
+      unlockHint +
       '<div class="skill-node__progress">' +
       '<div class="progress-bar" role="progressbar" aria-valuenow="' +
       mastery +
@@ -432,10 +546,11 @@
       '<span class="skill-node__mastery">' +
       mastery +
       "%</span></div>" +
+      renderQuickStateActions(node) +
       '<div class="skill-node__actions">' +
       '<button type="button" class="btn btn--ghost btn--compact" data-action="skills-edit" data-id="' +
       api.escapeAttr(node.id) +
-      '">编辑</button></div></div>' +
+      '">详细编辑</button></div></div>' +
       children +
       "</li>"
     );
@@ -445,14 +560,14 @@
     var titleInput = document.getElementById("skillFormTitle");
     var descInput = document.getElementById("skillFormDesc");
     var parentSelect = document.getElementById("skillFormParent");
-    var statusSelect = document.getElementById("skillFormStatus");
+    var learningStateSelect = document.getElementById("skillFormLearningState");
     var masteryInput = document.getElementById("skillFormMastery");
     var prereqRoot = document.getElementById("skillFormPrereqs");
 
     var title = titleInput ? titleInput.value.trim() : "";
     var description = descInput ? descInput.value.trim() : "";
     var parentId = parentSelect ? parentSelect.value : "";
-    var status = statusSelect ? statusSelect.value : "available";
+    var learningState = learningStateSelect ? learningStateSelect.value : "not_started";
     var mastery = masteryInput ? parseInt(masteryInput.value, 10) : 0;
     var prerequisites = [];
 
@@ -466,10 +581,28 @@
       title: title,
       description: description || undefined,
       parentId: parentId || undefined,
-      status: status,
+      learningState: learningState,
       mastery: Number.isFinite(mastery) ? Math.min(100, Math.max(0, mastery)) : 0,
       prerequisites: prerequisites,
     };
+  }
+
+  async function updateLearningState(id, learningState) {
+    if (isBusy || !id || !learningState) return;
+
+    isBusy = true;
+    clearBanner();
+
+    try {
+      await api.patch("/api/skills/" + encodeURIComponent(id), { learningState: learningState });
+      setBanner("success", "已更新学习状态。");
+      await refresh();
+    } catch (err) {
+      setBanner("error", "更新失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
   }
 
   async function submitForm() {
@@ -490,10 +623,10 @@
         await api.post("/api/skills", payload);
         setBanner("success", "已创建技能：" + payload.title);
       } else if (formMode === "edit" && editingId) {
-        var updatePayload = Object.assign({}, payload);
-        updatePayload.parentId = payload.parentId || null;
-        await api.patch("/api/skills/" + encodeURIComponent(editingId), updatePayload);
-        setBanner("success", "已更新技能：" + payload.title);
+        await api.patch("/api/skills/" + encodeURIComponent(editingId), {
+          learningState: payload.learningState,
+        });
+        setBanner("success", "已更新学习状态：" + payload.title);
       }
       formMode = null;
       editingId = null;
@@ -533,6 +666,9 @@
         viewMode = mode;
         render();
       }
+    },
+    getFlatSkills: function () {
+      return flatSkills.slice();
     },
   };
 })();

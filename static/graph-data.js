@@ -158,7 +158,8 @@
 
   var ALL_KNOWLEDGE_POINTS = QUADRATIC_POINTS.concat(CALCULUS_POINTS, PHYSICS_POINTS);
 
-  function masteryColor(mastery) {
+  function masteryColor(mastery, point) {
+    if (point && point.isUnlocked === false) return "#9aa3ad";
     var value = Number(mastery);
     if (Number.isNaN(value)) return "#8a9bab";
     if (value >= 0.7) return "#4d7c5f";
@@ -166,7 +167,12 @@
     return "#b85c4a";
   }
 
-  function masteryLabel(mastery) {
+  function masteryLabel(mastery, point) {
+    if (point && point.isUnlocked === false) return "未解锁";
+    if (point && point.archivedAt) return "已归档";
+    if (point && point.prerequisiteRisk) return "前置风险";
+    if (point && point.learningState === "mastered") return "已掌握";
+    if (point && point.learningState === "learning") return "学习中";
     var pct = Math.round((Number(mastery) || 0) * 100);
     if (pct >= 70) return "掌握良好";
     if (pct >= 50) return "需要巩固";
@@ -206,12 +212,18 @@
         description: point.description,
         mastery: point.mastery,
         masteryPct: Math.round((Number(point.mastery) || 0) * 100),
-        masteryLabel: masteryLabel(point.mastery),
-        color: masteryColor(point.mastery),
+        masteryLabel: masteryLabel(point.mastery, point),
+        color: masteryColor(point.mastery, point),
         weight: Math.max(1, degree + 1),
         degree: degree,
         group: point.subjectId || "general",
         subjectLabel: subjectLabelMap[point.subjectId] || "综合",
+        learningState: point.learningState,
+        isUnlocked: point.isUnlocked !== false,
+        prerequisiteRisk: !!point.prerequisiteRisk,
+        riskPrerequisiteIds: point.riskPrerequisiteIds || [],
+        unlockedAt: point.unlockedAt,
+        archivedAt: point.archivedAt,
       };
     });
 
@@ -242,6 +254,9 @@
     meta = meta || {};
     var subjectLabels = {};
     var points = [];
+    var pointMap = {};
+    var dependencyEdges = Array.isArray(meta.dependencyEdges) ? meta.dependencyEdges : [];
+    var skillsModel = window.EduTowerSkillsModel;
 
     function walk(node, rootId, rootLabel) {
       if (!node || !node.id) return;
@@ -252,14 +267,30 @@
         subjectLabels[groupId] = groupLabel;
       }
 
-      points.push({
+      var prerequisiteIds =
+        dependencyEdges.length && skillsModel
+          ? skillsModel.buildPrerequisiteIdsFromEdges(node.id, dependencyEdges)
+          : Array.isArray(node.prerequisites)
+            ? node.prerequisites.slice()
+            : [];
+
+      var point = {
         id: node.id,
         subjectId: groupId,
         title: node.title || node.id,
         description: node.description || "",
         mastery: normalizeMastery(node.mastery),
-        prerequisiteIds: Array.isArray(node.prerequisites) ? node.prerequisites.slice() : [],
-      });
+        prerequisiteIds: prerequisiteIds,
+        learningState: node.learningState,
+        isUnlocked: node.isUnlocked !== false,
+        prerequisiteRisk: !!node.prerequisiteRisk,
+        riskPrerequisiteIds: node.riskPrerequisiteIds || [],
+        unlockedAt: node.unlockedAt,
+        archivedAt: node.archivedAt,
+      };
+
+      points.push(point);
+      pointMap[node.id] = point;
 
       (node.children || []).forEach(function (child) {
         walk(child, groupId, groupLabel);
@@ -270,19 +301,37 @@
       walk(root, root.id, root.title);
     });
 
+    if (dependencyEdges.length) {
+      dependencyEdges.forEach(function (edge) {
+        if (!edge || !edge.targetId || !edge.sourceId || !pointMap[edge.targetId]) return;
+        var ids = pointMap[edge.targetId].prerequisiteIds;
+        if (ids.indexOf(edge.sourceId) === -1) {
+          ids.push(edge.sourceId);
+        }
+      });
+      points.forEach(function (point) {
+        point.prerequisiteIds.sort();
+      });
+    }
+
     if (!points.length) {
       return buildKnowledgeGraph(ALL_KNOWLEDGE_POINTS, meta);
     }
+
+    var edgeCount = dependencyEdges.length || points.reduce(function (sum, point) {
+      return sum + (point.prerequisiteIds ? point.prerequisiteIds.length : 0);
+    }, 0);
 
     return buildKnowledgeGraph(points, {
       title: meta.title || "技能知识图谱",
       subtitle:
         meta.subtitle ||
-        "来自技能树的先修关系与掌握度 · 共 " + points.length + " 个节点",
+        "来自技能树 DAG 先修关系 · 共 " + points.length + " 个节点",
       subjectLabels: subjectLabels,
       subjects: Object.keys(subjectLabels).map(function (id) {
         return { id: id, label: subjectLabels[id] };
       }),
+      edgeCount: edgeCount,
     });
   }
 

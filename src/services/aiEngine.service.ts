@@ -66,7 +66,7 @@ export class AiEngineService {
       const data = await this.readJson(response);
 
       if (response.ok && isRecordLike(data) && typeof data.reply === "string") {
-        return { reply: data.reply };
+        return { reply: data.reply.trim() };
       }
 
       logger.warn("AI engine returned non-ok response.", {
@@ -93,7 +93,7 @@ export class AiEngineService {
     }
 
     // FastAPI 不可用：友好降级，不直连 LLM。
-    return { reply: this.unavailableReply() };
+    return { reply: this.unavailableChatReply(message) };
   }
 
   /**
@@ -229,14 +229,16 @@ export class AiEngineService {
 
   // ── FastAPI 不可用时的降级（不直连 LLM）──────────────────────
 
-  private unavailableReply(): string {
+  private unavailableChatReply(message: string): string {
     return (
-      "抱歉，AI 助教引擎当前暂时不可用，请稍后再试。\n" +
-      "（你的提问我已收到，服务恢复后可以再问我一次。）"
+      "AI 引擎暂时不可用，Express 不会直连大模型。\n\n" +
+      "请确认：\n" +
+      "1. FastAPI AI Engine（默认 http://127.0.0.1:8000）已启动\n" +
+      "2. 已在设置页保存 LLM 配置（写入 .env）\n" +
+      "3. 保存后已重启 FastAPI，使新配置生效\n\n" +
+      `你刚才说：「${message}」`
     );
   }
-
-  // ── 工具方法 ──────────────────────────────────────────────
 
   private chatUrl(): string {
     return new URL("/chat", env.aiEngineBaseUrl).toString();

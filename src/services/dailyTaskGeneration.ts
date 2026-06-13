@@ -5,10 +5,8 @@ import type {
 } from "../repositories/dailyTaskSheets.repository";
 
 /**
- * Daily task generation follows a strict split of responsibilities:
- * deterministic system rules build the candidate pool (which knowledge points
- * are even allowed today), and the AI may only rank, pick and explain within
- * that pool. Any invalid AI output falls back to the rule-based selection.
+ * Daily task generation uses deterministic rules only on Express.
+ * LLM ranking, if added later, must go through FastAPI — never direct LLM here.
  */
 
 export const MAX_DAILY_TASKS = 8;

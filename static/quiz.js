@@ -14,13 +14,25 @@
   var activeQuiz = null;
   var answers = {};
   var isBusy = false;
+  var isCreating = false;
   var pendingDeleteQuizId = null;
   var banner = { type: "", message: "" };
+  var lastSubmittedAnswers = {};
 
   var DIFFICULTY_LABEL = {
     pass: "及格练",
     high_score: "高分练",
   };
+
+  function renderText(text) {
+    if (
+      window.EduTowerChatRender &&
+      typeof window.EduTowerChatRender.renderRichText === "function"
+    ) {
+      return window.EduTowerChatRender.renderRichText(text);
+    }
+    return api.escapeHtml(text);
+  }
 
   bindEvents();
   refresh();
@@ -43,6 +55,8 @@
         submitQuiz();
       } else if (action === "create-quiz") {
         createQuiz();
+      } else if (action === "quick-create-quiz") {
+        quickCreateTodayQuiz();
       } else if (action === "delete-quiz") {
         pendingDeleteQuizId = target.getAttribute("data-id");
         renderList();
@@ -58,7 +72,11 @@
       var target = event.target;
       if (!(target instanceof HTMLElement)) return;
 
-      if (target instanceof HTMLInputElement && target.name === "quiz-answer") {
+      if (
+        target instanceof HTMLInputElement &&
+        target.name &&
+        target.name.indexOf("quiz-answer") === 0
+      ) {
         answers[target.getAttribute("data-question-id") || ""] = target.value;
         return;
       }
@@ -103,13 +121,61 @@
 
   async function loadTargetOptions() {
     try {
-      var skillData = await api.get("/api/skills");
-      skills = skillData && Array.isArray(skillData.items) ? skillData.items : [];
+      var model = window.EduTowerSkillsModel;
+      var projectId =
+        window.EduTowerPlan && typeof window.EduTowerPlan.getProjectId === "function"
+          ? window.EduTowerPlan.getProjectId()
+          : "";
+      var query = model
+        ? model.buildTreeQuery({ projectId: projectId || undefined })
+        : projectId
+          ? "?projectId=" + encodeURIComponent(projectId)
+          : "";
+      var skillData = await api.get("/api/skills/tree" + query);
+      if (model) {
+        skills = model.normalizeTreeResponse(skillData).flatSkills;
+      } else {
+        skills = skillData && Array.isArray(skillData.items) ? skillData.items : [];
+      }
     } catch (_err) {
       skills = [];
     }
 
     planTasks = [];
+
+    var projectId =
+      window.EduTowerPlan && typeof window.EduTowerPlan.getProjectId === "function"
+        ? window.EduTowerPlan.getProjectId()
+        : "";
+
+    if (projectId) {
+      try {
+        var daily = await api.post(
+          "/api/daily/" + encodeURIComponent(projectId) + "/today",
+          {}
+        );
+        var dailyTasks =
+          daily && daily.sheet && Array.isArray(daily.sheet.tasks) ? daily.sheet.tasks : [];
+        dailyTasks.forEach(function (task) {
+          if (task.status === "cancelled" || !isQuizRelevantTask(task)) return;
+          if (!task.knowledgeNodeId && task.type !== "practice_quiz") return;
+          planTasks.push({
+            id: task.id,
+            title: task.title,
+            type: task.type,
+            skillId: task.knowledgeNodeId || "",
+            planTitle: "今日学习",
+            day: 0,
+          });
+        });
+      } catch (_dailyErr) {
+        /* fallback to legacy plan tasks */
+      }
+    }
+
+    if (planTasks.length) {
+      return;
+    }
 
     try {
       var planData = await api.get("/api/plan");
@@ -169,13 +235,18 @@
   }
 
   function renderCreateForm() {
+    var model = window.EduTowerSkillsModel;
     var skillOptions = skills
       .map(function (skill) {
+        var label = model ? model.formatSkillOptionLabel(skill) : skill.title;
+        var disabled = skill.isUnlocked === false ? " disabled" : "";
         return (
           '<option value="' +
           api.escapeAttr(skill.id) +
-          '">' +
-          api.escapeHtml(skill.title) +
+          '"' +
+          disabled +
+          ">" +
+          api.escapeHtml(label) +
           "</option>"
         );
       })
@@ -213,6 +284,13 @@
       .join("");
 
     var hasTarget = skills.length > 0 || quizReadyTasks.length > 0;
+    var firstTask = getFirstQuizReadyTask();
+    var quickBtn =
+      '<button type="button" class="btn btn--primary quiz-create__quick" data-action="quick-create-quiz"' +
+      (firstTask && !isCreating ? "" : " disabled") +
+      ">" +
+      (isCreating ? "生成中…" : "一键生成今日练习") +
+      "</button>";
     var planHint =
       planTasks.length && !quizReadyTasks.length
         ? '<p class="quiz-create__hint">学习计划里已有任务，但尚未关联技能。请到「学习计划 → 管理任务」，在任务行选择「关联技能」后保存。</p>'
@@ -222,7 +300,15 @@
 
     return (
       '<section class="quiz-create">' +
+      '<div class="quiz-create__hero">' +
       '<h3 class="module-subtitle">生成新练习</h3>' +
+      quickBtn +
+      "</div>" +
+      (firstTask
+        ? '<p class="quiz-create__hint">将基于今日任务「' +
+          api.escapeHtml(firstTask.title) +
+          "」自动生成 3 道及格练。</p>"
+        : '<p class="quiz-create__hint">今日暂无可练习任务，请先在「学习计划」启用今日学习。</p>') +
       '<div class="quiz-create__row">' +
       '<label class="quiz-create__label" for="quizDifficulty">难度</label>' +
       '<select id="quizDifficulty" class="form-input form-input--compact">' +
@@ -244,14 +330,37 @@
       taskOptions +
       "</select>" +
       '<button type="button" class="btn btn--primary btn--compact" data-action="create-quiz"' +
-      (hasTarget ? "" : " disabled") +
-      ">生成练习</button></div>" +
+      (hasTarget && !isCreating ? "" : " disabled") +
+      ">" +
+      (isCreating ? "生成中…" : "生成练习") +
+      "</button></div>" +
+      (isCreating
+        ? '<p class="module-empty module-empty--loading quiz-create__loading">正在生成练习，AI 出题大约需要几秒，请稍候…</p>'
+        : "") +
       planHint +
       (hasTarget
         ? ""
         : '<p class="module-empty">请先在「技能图谱」创建技能，或在学习计划任务中关联技能。</p>') +
       "</section>"
     );
+  }
+
+  function getFirstQuizReadyTask() {
+    return planTasks.find(function (task) {
+      return task.skillId;
+    });
+  }
+
+  function autoSelectFirstTask() {
+    var firstTask = getFirstQuizReadyTask();
+    var taskSelect = document.getElementById("quizTaskTarget");
+    if (!firstTask || !taskSelect) return;
+
+    taskSelect.value = firstTask.id;
+    var skillSelect = document.getElementById("quizSkillTarget");
+    if (skillSelect) {
+      skillSelect.value = "";
+    }
   }
 
   function renderList() {
@@ -263,6 +372,7 @@
     if (!quizzes.length) {
       rootEl.innerHTML =
         renderBanner() + createForm + '<p class="module-empty">暂无练习，点击上方按钮生成一套。</p>';
+      autoSelectFirstTask();
       return;
     }
 
@@ -314,6 +424,7 @@
       '<ul class="quiz-list">' +
       list +
       "</ul>";
+    autoSelectFirstTask();
   }
 
   async function startQuiz(id) {
@@ -348,13 +459,15 @@
               .map(function (opt) {
                 return (
                   '<label class="quiz-option">' +
-                  '<input type="radio" name="quiz-answer" data-question-id="' +
+                  '<input type="radio" name="quiz-answer-' +
+                  api.escapeAttr(question.id) +
+                  '" data-question-id="' +
                   api.escapeAttr(question.id) +
                   '" value="' +
                   api.escapeAttr(opt.text) +
                   '" />' +
                   "<span>" +
-                  api.escapeHtml(opt.text) +
+                  renderText(opt.text) +
                   "</span></label>"
                 );
               })
@@ -372,7 +485,7 @@
           '<p class="quiz-question__prompt"><span class="quiz-question__num">' +
           (index + 1) +
           ".</span> " +
-          api.escapeHtml(prompt) +
+          renderText(prompt) +
           "</p>" +
           inputHtml +
           "</li>"
@@ -416,7 +529,10 @@
         "/api/quiz/" + encodeURIComponent(activeQuiz.id) + "/submit",
         payload
       );
-      await syncWrongbook(result, payload.answers);
+      lastSubmittedAnswers = {};
+      payload.answers.forEach(function (entry) {
+        lastSubmittedAnswers[entry.questionId] = entry.answer;
+      });
       renderResult(result);
     } catch (err) {
       banner = { type: "error", message: "提交失败：" + api.networkError(err) };
@@ -426,33 +542,51 @@
     }
   }
 
-  async function syncWrongbook(result, submittedAnswers) {
-    if (!result.wrongQuestions || !result.wrongQuestions.length) return;
-
-    var answerMap = {};
-    submittedAnswers.forEach(function (entry) {
-      answerMap[entry.questionId] = entry.answer;
+  function renderResult(result) {
+    var wrongMap = {};
+    (result.wrongQuestions || []).forEach(function (q) {
+      wrongMap[q.id] = q;
     });
 
-    for (var i = 0; i < result.wrongQuestions.length; i++) {
-      var question = result.wrongQuestions[i];
-      try {
-        await api.post("/api/wrongbook", {
-          question: question,
-          wrongAnswer: answerMap[question.id] || "",
-          subject: "math-calculus",
-          category: "uncategorized",
-        });
-      } catch (_err) {
-        /* 单条失败不影响整体 */
-      }
-    }
-  }
+    var reviewQuestions =
+      activeQuiz && Array.isArray(activeQuiz.questions) ? activeQuiz.questions : [];
+    var reviewList = reviewQuestions
+      .map(function (q, index) {
+        var wrong = wrongMap[q.id];
+        var isCorrect = !wrong;
+        var userAnswer = lastSubmittedAnswers[q.id] || "（未作答）";
+        var cls = isCorrect
+          ? "quiz-result__review-item quiz-result__review-item--correct"
+          : "quiz-result__review-item quiz-result__review-item--wrong";
+        var statusLabel = isCorrect ? "正确" : "错误";
+        var correctAnswer = wrong ? wrong.answer || "（无）" : "";
+        var explanation =
+          wrong && wrong.explanation ? renderText(wrong.explanation) : "";
 
-  function renderResult(result) {
-    var wrongList = (result.wrongQuestions || [])
-      .map(function (q) {
-        return "<li>" + api.escapeHtml(api.getQuestionPrompt(q)) + "</li>";
+        return (
+          '<li class="' +
+          cls +
+          '">' +
+          '<p class="quiz-result__wrong-prompt"><span class="quiz-question__num">' +
+          (index + 1) +
+          ".</span> " +
+          renderText(api.getQuestionPrompt(q)) +
+          ' <span class="quiz-result__status">' +
+          statusLabel +
+          "</span></p>" +
+          '<p class="quiz-result__wrong-meta">你的答案：' +
+          renderText(userAnswer) +
+          "</p>" +
+          (!isCorrect
+            ? '<p class="quiz-result__wrong-meta">正确答案：' +
+              renderText(correctAnswer) +
+              "</p>" +
+              (explanation
+                ? '<p class="quiz-result__wrong-meta">解析：' + explanation + "</p>"
+                : "")
+            : "") +
+          "</li>"
+        );
       })
       .join("");
 
@@ -467,8 +601,8 @@
       " / " +
       result.total +
       " 题</p>" +
-      (wrongList
-        ? '<div class="quiz-result__wrong"><h3>错题回顾</h3><ul>' + wrongList + "</ul></div>"
+      (reviewList
+        ? '<div class="quiz-result__wrong"><h3>答题回顾</h3><ul>' + reviewList + "</ul></div>"
         : '<p class="module-empty">全部正确，继续保持！</p>') +
       '<div class="quiz-result__actions">' +
       '<button type="button" class="btn btn--primary" data-action="cancel-quiz">返回练习列表</button>' +
@@ -481,6 +615,43 @@
         }
       });
     });
+  }
+
+  async function quickCreateTodayQuiz() {
+    if (isBusy) return;
+
+    var task = getFirstQuizReadyTask();
+    if (!task || !task.skillId) {
+      banner = {
+        type: "error",
+        message: "今日暂无可练习任务，请先在「学习计划」启用今日学习。",
+      };
+      renderList();
+      return;
+    }
+
+    isBusy = true;
+    isCreating = true;
+    banner = { type: "", message: "" };
+    renderList();
+
+    try {
+      await api.post("/api/quiz", {
+        title: "今日练习 · " + task.title,
+        difficulty: "pass",
+        questionCount: 3,
+        studyTaskId: task.id,
+        skillId: task.skillId,
+      });
+      banner = { type: "success", message: "今日练习已生成。" };
+      await refresh();
+    } catch (err) {
+      banner = { type: "error", message: "生成失败：" + api.networkError(err) };
+      renderList();
+    } finally {
+      isBusy = false;
+      isCreating = false;
+    }
   }
 
   async function createQuiz() {
@@ -519,7 +690,9 @@
     }
 
     isBusy = true;
+    isCreating = true;
     banner = { type: "", message: "" };
+    renderList();
     try {
       await api.post("/api/quiz", payload);
       await refresh();
@@ -528,6 +701,7 @@
       renderList();
     } finally {
       isBusy = false;
+      isCreating = false;
     }
   }
 

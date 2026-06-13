@@ -9,6 +9,7 @@
   const CHAT_API = API_BASE + "/api/ai/chat";
   const SESSIONS_STORAGE_KEY = "edutower_chat_sessions";
   const SESSION_KEY = "edutower_session_id";
+  const CONVERSATION_KEY = "edutower_conversation_id";
 
   const chatMessages = document.getElementById("chat-messages");
   const userInput = document.getElementById("user-input");
@@ -23,6 +24,22 @@
     "你好。我是你的 AI 智能助教，可以帮你梳理考点、讲解错题、出题演练。直接在下方输入问题即可开始。";
 
   const DEFAULT_TOPIC_LABEL = "综合复习";
+  const PENDING_TOPIC_LABEL = "待分类";
+
+  const TOPIC_RULES = [
+    { label: "二次函数", keywords: ["二次函数", "抛物线", "顶点式", "对称轴", "开口方向"] },
+    { label: "导数与积分", keywords: ["导数", "积分", "微分", "定积分", "不定积分", "切线斜率"] },
+    { label: "线性代数", keywords: ["行列式", "矩阵", "向量", "特征值", "线性方程", "秩"] },
+    { label: "三角函数", keywords: ["三角函数", "正弦", "余弦", "正切", "弧度", "诱导公式"] },
+    { label: "概率统计", keywords: ["概率", "统计", "期望", "方差", "分布", "抽样"] },
+    { label: "立体几何", keywords: ["立体几何", "空间向量", "三视图", "体积", "表面积"] },
+    { label: "数列", keywords: ["数列", "等差数列", "等比数列", "递推", "通项公式"] },
+    { label: "英语", keywords: ["英语", "单词", "语法", "阅读理解", "作文", "完形填空"] },
+    { label: "物理", keywords: ["力学", "电磁", "牛顿", "电路", "动量", "能量守恒"] },
+    { label: "化学", keywords: ["化学", "反应方程式", "元素", "摩尔", "有机", "电离"] },
+  ];
+
+  const LEGACY_DEMO_TOPIC_PATTERNS = [/二次函数/, /数学\s*·/, /高中数学/];
 
   if (!chatMessages || !userInput || !sendBtn) {
     console.error("[EduTower] 缺少必要的 DOM 元素");
@@ -40,6 +57,7 @@
   let thinkingTimer = null;
   let thinkingStep = 0;
   let sessionId = sessionStorage.getItem(SESSION_KEY) || "";
+  let conversationId = sessionStorage.getItem(CONVERSATION_KEY) || "";
   let isSending = false;
 
   function createId(prefix) {
@@ -49,12 +67,66 @@
     return prefix + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 9);
   }
 
+  function isLegacyDemoTopic(label) {
+    if (!label) return true;
+    return LEGACY_DEMO_TOPIC_PATTERNS.some(function (pattern) {
+      return pattern.test(label);
+    });
+  }
+
+  function inferTopicFromMessage(text) {
+    const normalized = String(text || "").replace(/\s+/g, " ").trim();
+    if (!normalized) return PENDING_TOPIC_LABEL;
+
+    const lower = normalized.toLowerCase();
+    for (let i = 0; i < TOPIC_RULES.length; i += 1) {
+      const rule = TOPIC_RULES[i];
+      const matched = rule.keywords.some(function (keyword) {
+        return lower.indexOf(keyword.toLowerCase()) >= 0;
+      });
+      if (matched) return rule.label;
+    }
+
+    const shortTitle = normalized.length > 18 ? normalized.slice(0, 18) + "…" : normalized;
+    return shortTitle;
+  }
+
+  function refreshSessionTopic(session) {
+    if (!session) return;
+
+    const firstUser = (session.messages || []).find(function (entry) {
+      return entry.role === "user";
+    });
+
+    if (firstUser) {
+      session.topicLabel = inferTopicFromMessage(firstUser.content);
+      return;
+    }
+
+    if (!session.topicLabel || isLegacyDemoTopic(session.topicLabel)) {
+      session.topicLabel = PENDING_TOPIC_LABEL;
+    }
+  }
+
   function loadStore() {
     try {
       const raw = localStorage.getItem(SESSIONS_STORAGE_KEY);
       if (!raw) return { sessions: [] };
       const parsed = JSON.parse(raw);
-      return parsed && Array.isArray(parsed.sessions) ? parsed : { sessions: [] };
+      if (!parsed || !Array.isArray(parsed.sessions)) return { sessions: [] };
+
+      let migrated = false;
+      parsed.sessions.forEach(function (session) {
+        const before = session.topicLabel;
+        refreshSessionTopic(session);
+        if (before !== session.topicLabel) migrated = true;
+      });
+
+      if (migrated) {
+        localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(parsed));
+      }
+
+      return parsed;
     } catch (_err) {
       return { sessions: [] };
     }
@@ -70,18 +142,89 @@
     return normalized.length > 48 ? normalized.slice(0, 48) + "…" : normalized;
   }
 
-  function resolveTopicLabel() {
-    if (window.EduTowerAgentPanel && typeof window.EduTowerAgentPanel.getProgressTopic === "function") {
-      const topic = window.EduTowerAgentPanel.getProgressTopic();
-      if (topic) return topic;
-    }
-    return DEFAULT_TOPIC_LABEL;
+  function getDateGroup(iso) {
+    const date = new Date(iso || Date.now());
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfYesterday = new Date(startOfToday);
+    startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+    const startOfWeek = new Date(startOfToday);
+    startOfWeek.setDate(startOfWeek.getDate() - 7);
+
+    if (date >= startOfToday) return { key: "today", label: "今天", order: 0 };
+    if (date >= startOfYesterday) return { key: "yesterday", label: "昨天", order: 1 };
+    if (date >= startOfWeek) return { key: "week", label: "最近 7 天", order: 2 };
+    return { key: "older", label: "更早", order: 3 };
   }
 
   function findSession(store, id) {
     return store.sessions.find(function (session) {
       return session.id === id;
     });
+  }
+
+  function findSessionByConversationId(store, convId) {
+    return store.sessions.find(function (session) {
+      return session.conversationId === convId;
+    });
+  }
+
+  function setActiveConversationId(id) {
+    conversationId = id ? String(id).trim() : "";
+    if (conversationId) {
+      sessionStorage.setItem(CONVERSATION_KEY, conversationId);
+    } else {
+      sessionStorage.removeItem(CONVERSATION_KEY);
+    }
+  }
+
+  function getActiveConversationId() {
+    return conversationId || sessionStorage.getItem(CONVERSATION_KEY) || "";
+  }
+
+  async function fetchConversationDetail(convId) {
+    const api = window.EduTowerApi;
+    if (!api || typeof api.get !== "function") {
+      throw new Error("API 模块未就绪");
+    }
+    return api.get("/api/conversations/" + encodeURIComponent(convId));
+  }
+
+  async function syncSessionFromServer(session) {
+    if (!session || !session.conversationId) {
+      return session;
+    }
+
+    try {
+      const detail = await fetchConversationDetail(session.conversationId);
+      if (!detail || !Array.isArray(detail.messages)) {
+        return session;
+      }
+
+      session.messages = detail.messages.map(function (message) {
+        return {
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          createdAt: message.createdAt,
+        };
+      });
+      session.updatedAt = detail.updatedAt || session.updatedAt;
+      if (detail.title) {
+        session.title = detail.title;
+      }
+
+      const lastMessage = session.messages[session.messages.length - 1];
+      if (lastMessage) {
+        session.preview = buildPreview(lastMessage.content);
+      }
+
+      refreshSessionTopic(session);
+    } catch (err) {
+      console.warn("[EduTower] 拉取子对话失败:", err);
+    }
+
+    return session;
   }
 
   function ensureCurrentSession(store) {
@@ -97,7 +240,7 @@
     const now = new Date().toISOString();
     session = {
       id: sessionId,
-      topicLabel: resolveTopicLabel(),
+      topicLabel: PENDING_TOPIC_LABEL,
       title: "新对话",
       preview: "暂无消息",
       messages: [],
@@ -133,6 +276,8 @@
       });
       if (firstUser && firstUser.id === message.id) {
         session.title = buildPreview(content);
+        session.topicLabel = inferTopicFromMessage(content);
+        updateTopicLabelFromSession();
       }
     }
 
@@ -158,7 +303,23 @@
 
     const store = loadStore();
     const session = sessionId ? findSession(store, sessionId) : null;
-    chatTopicEl.textContent = session ? session.topicLabel || DEFAULT_TOPIC_LABEL : DEFAULT_TOPIC_LABEL;
+    if (!session) {
+      chatTopicEl.textContent = "新对话";
+      return;
+    }
+
+    const hasMessages = session.messages && session.messages.length > 0;
+    if (hasMessages && session.title && session.title !== "新对话") {
+      chatTopicEl.textContent = session.title;
+      return;
+    }
+
+    if (session.topicLabel && session.topicLabel !== PENDING_TOPIC_LABEL) {
+      chatTopicEl.textContent = session.topicLabel;
+      return;
+    }
+
+    chatTopicEl.textContent = "新对话";
   }
 
   function getTimestamp(iso) {
@@ -346,13 +507,24 @@
     });
   }
 
-  function loadSession(session) {
+  async function loadSession(session) {
     if (!session || !session.id) return;
 
-    sessionId = session.id;
+    const store = loadStore();
+    let activeSession = findSession(store, session.id) || session;
+
+    if (activeSession.conversationId) {
+      setActiveConversationId(activeSession.conversationId);
+      activeSession = await syncSessionFromServer(activeSession);
+      saveStore(store);
+    } else {
+      setActiveConversationId("");
+    }
+
+    sessionId = activeSession.id;
     sessionStorage.setItem(SESSION_KEY, sessionId);
     updateTopicLabelFromSession();
-    renderSessionMessages(session.messages || []);
+    renderSessionMessages(activeSession.messages || []);
 
     if (window.EduTowerChatHistory && typeof window.EduTowerChatHistory.close === "function") {
       window.EduTowerChatHistory.close();
@@ -380,6 +552,7 @@
   }
 
   function startNewSession() {
+    setActiveConversationId("");
     sessionId = createId("sess");
     sessionStorage.setItem(SESSION_KEY, sessionId);
 
@@ -387,7 +560,7 @@
     const now = new Date().toISOString();
     store.sessions.unshift({
       id: sessionId,
-      topicLabel: resolveTopicLabel(),
+      topicLabel: PENDING_TOPIC_LABEL,
       title: "新对话",
       preview: "暂无消息",
       messages: [],
@@ -422,6 +595,12 @@
       return;
     }
 
+    if (session.conversationId) {
+      setActiveConversationId(session.conversationId);
+    } else {
+      setActiveConversationId("");
+    }
+
     updateTopicLabelFromSession();
     renderSessionMessages(session.messages || []);
   }
@@ -437,19 +616,21 @@
     const groups = {};
 
     store.sessions.forEach(function (session) {
-      const label = session.topicLabel || DEFAULT_TOPIC_LABEL;
-      if (!groups[label]) {
-        groups[label] = [];
+      const group = getDateGroup(session.updatedAt || session.createdAt);
+      if (!groups[group.key]) {
+        groups[group.key] = { topicLabel: group.label, order: group.order, sessions: [] };
       }
-      groups[label].push(session);
+      groups[group.key].sessions.push(session);
     });
 
     return Object.keys(groups)
-      .sort()
-      .map(function (label) {
+      .sort(function (left, right) {
+        return groups[left].order - groups[right].order;
+      })
+      .map(function (key) {
         return {
-          topicLabel: label,
-          sessions: groups[label].sort(function (left, right) {
+          topicLabel: groups[key].topicLabel,
+          sessions: groups[key].sessions.sort(function (left, right) {
             return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
           }),
         };
@@ -464,13 +645,19 @@
   }
 
   async function requestChatReply(message) {
+    const payload = {
+      message: message,
+      session_id: getOrCreateSessionId(),
+    };
+    const activeConversationId = getActiveConversationId();
+    if (activeConversationId) {
+      payload.conversationId = activeConversationId;
+    }
+
     const response = await fetch(CHAT_API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: message,
-        session_id: getOrCreateSessionId(),
-      }),
+      body: JSON.stringify(payload),
     });
 
     let result = null;
@@ -527,6 +714,10 @@
       if (window.EduTowerAgentPanel && typeof window.EduTowerAgentPanel.refreshFromBackend === "function") {
         window.EduTowerAgentPanel.refreshFromBackend();
       }
+
+      if (window.EduTowerMemory && typeof window.EduTowerMemory.refresh === "function") {
+        window.EduTowerMemory.refresh();
+      }
     } catch (err) {
       console.error("[EduTower] /api/ai/chat 请求失败:", err);
       removeThinkingIndicator();
@@ -554,15 +745,85 @@
     }
   });
 
+  async function activateStudyConversation(options) {
+    options = options || {};
+    const convId = options.conversationId ? String(options.conversationId).trim() : "";
+    if (!convId) {
+      return;
+    }
+
+    const store = loadStore();
+    let session = findSessionByConversationId(store, convId);
+    const now = new Date().toISOString();
+
+    if (!session) {
+      sessionId = createId("sess");
+      sessionStorage.setItem(SESSION_KEY, sessionId);
+      session = {
+        id: sessionId,
+        conversationId: convId,
+        conversationType: "project_study",
+        projectId: options.projectId || null,
+        localDate: options.localDate || null,
+        topicLabel: options.title || "今日学习",
+        title: options.title || "今日学习",
+        preview: "暂无消息",
+        messages: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      store.sessions.unshift(session);
+    } else {
+      sessionId = session.id;
+      sessionStorage.setItem(SESSION_KEY, sessionId);
+      if (options.title) {
+        session.title = options.title;
+        session.topicLabel = options.title;
+      }
+    }
+
+    setActiveConversationId(convId);
+    await syncSessionFromServer(session);
+    saveStore(store);
+    updateTopicLabelFromSession();
+    renderSessionMessages(session.messages || []);
+    notifyHistoryChanged();
+  }
+
+  function clearStudyConversation() {
+    const store = loadStore();
+    const session = sessionId ? findSession(store, sessionId) : null;
+    if (session && session.conversationType === "project_study") {
+      setActiveConversationId("");
+    }
+  }
+
+  async function refreshCurrentSessionFromServer() {
+    const store = loadStore();
+    const session = sessionId ? findSession(store, sessionId) : null;
+    if (!session || !session.conversationId) {
+      return;
+    }
+
+    await syncSessionFromServer(session);
+    saveStore(store);
+    renderSessionMessages(session.messages || []);
+    notifyHistoryChanged();
+  }
+
   window.EduTowerChat = {
     getSessionId: function () {
       return sessionId;
     },
+    getConversationId: getActiveConversationId,
     loadSession: loadSession,
     startNewSession: startNewSession,
     deleteSession: deleteSession,
     listSessionsGrouped: listSessionsGrouped,
     showWelcomeMessage: showWelcomeMessage,
+    activateStudyConversation: activateStudyConversation,
+    clearStudyConversation: clearStudyConversation,
+    refreshCurrentSessionFromServer: refreshCurrentSessionFromServer,
   };
 
   setChatDate();

@@ -22,6 +22,7 @@
       { pattern: /\\\[([\s\S]*?)\\\]/g, display: true },
       { pattern: /\$\$([\s\S]*?)\$\$/g, display: true },
       { pattern: /\\\(([\s\S]*?)\\\)/g, display: false },
+      { pattern: /\$([^$\n]+?)\$/g, display: false },
     ];
 
     rules.forEach(function (rule) {
@@ -91,7 +92,15 @@
     return restoreMath(html);
   }
 
+  /** 纯文本 + LaTeX（无 Markdown），用于测验题干、选项等 */
+  function renderRichText(text) {
+    var prepared = extractMath(text);
+    var html = escapeHtml(prepared);
+    return restoreMath(html);
+  }
+
   window.EduTowerChatRender = {
     render: renderMarkdown,
+    renderRichText: renderRichText,
   };
 })();

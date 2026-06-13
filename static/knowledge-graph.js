@@ -43,6 +43,39 @@
       return;
     }
 
+    var statusBits = [nodeData.masteryLabel];
+    if (nodeData.isUnlocked === false) {
+      statusBits = ["未解锁"];
+    } else if (nodeData.prerequisiteRisk) {
+      statusBits.push("前置风险");
+    }
+    if (nodeData.learningState) {
+      var model = window.EduTowerSkillsModel;
+      var stateLabel =
+        model && model.LEARNING_STATE_LABEL
+          ? model.LEARNING_STATE_LABEL[nodeData.learningState]
+          : nodeData.learningState;
+      if (stateLabel && statusBits.indexOf(stateLabel) === -1) {
+        statusBits.push(stateLabel);
+      }
+    }
+
+    var unlockLine =
+      nodeData.isUnlocked !== false && nodeData.unlockedAt
+        ? '<p class="knowledge-graph-detail__unlock">解锁于 ' +
+          escapeHtml(String(nodeData.unlockedAt).slice(0, 10)) +
+          "</p>"
+        : "";
+
+    var riskLine =
+      nodeData.prerequisiteRisk &&
+      nodeData.riskPrerequisiteIds &&
+      nodeData.riskPrerequisiteIds.length
+        ? '<p class="knowledge-graph-detail__risk">风险前置：' +
+          escapeHtml(String(nodeData.riskPrerequisiteIds.length)) +
+          " 个上游节点尚未掌握</p>"
+        : "";
+
     detailEl.classList.remove("is-hidden");
     detailEl.innerHTML =
       '<p class="knowledge-graph-detail__eyebrow">考点详情</p>' +
@@ -53,7 +86,7 @@
       '<span class="knowledge-graph-detail__badge" style="background:' +
       escapeHtml(nodeData.color) +
       '">' +
-      escapeHtml(nodeData.masteryLabel) +
+      escapeHtml(statusBits.join(" · ")) +
       " · " +
       escapeHtml(String(nodeData.masteryPct)) +
       "%</span>" +
@@ -63,6 +96,8 @@
       (nodeData.subjectLabel
         ? '<p class="knowledge-graph-detail__subject">' + escapeHtml(nodeData.subjectLabel) + "</p>"
         : "") +
+      unlockLine +
+      riskLine +
       '<p class="knowledge-graph-detail__desc">' +
       escapeHtml(nodeData.description || "暂无描述") +
       "</p>" +
@@ -234,7 +269,9 @@
     legend.innerHTML =
       '<span><i class="knowledge-graph__dot knowledge-graph__dot--good"></i>掌握良好</span>' +
       '<span><i class="knowledge-graph__dot knowledge-graph__dot--mid"></i>需要巩固</span>' +
-      '<span><i class="knowledge-graph__dot knowledge-graph__dot--weak"></i>薄弱重点</span>';
+      '<span><i class="knowledge-graph__dot knowledge-graph__dot--weak"></i>薄弱重点</span>' +
+      '<span><i class="knowledge-graph__dot knowledge-graph__dot--locked"></i>未解锁</span>' +
+      '<span><i class="knowledge-graph__dot knowledge-graph__dot--risk"></i>前置风险</span>';
 
     container.appendChild(canvasWrap);
     container.appendChild(detailAside);
@@ -306,7 +343,13 @@
       .selectAll("g")
       .data(data.nodes)
       .join("g")
-      .attr("class", "kg-node")
+      .attr("class", function (d) {
+        var cls = "kg-node";
+        if (d.isUnlocked === false) cls += " kg-node--locked";
+        if (d.prerequisiteRisk) cls += " kg-node--risk";
+        if (d.archivedAt) cls += " kg-node--archived";
+        return cls;
+      })
       .style("cursor", "grab")
       .call(bindDrag(simulation))
       .on("click", function (event, d) {
@@ -322,6 +365,19 @@
       })
       .attr("fill", function (d) {
         return d.color;
+      })
+      .attr("stroke", function (d) {
+        if (d.isUnlocked === false) return "#7a828c";
+        if (d.prerequisiteRisk) return "#c27803";
+        return "#ffffff";
+      })
+      .attr("stroke-width", function (d) {
+        if (d.isUnlocked === false) return 2;
+        if (d.prerequisiteRisk) return 3;
+        return 1.5;
+      })
+      .attr("stroke-dasharray", function (d) {
+        return d.isUnlocked === false ? "4 3" : null;
       });
 
     var labelGroups = root

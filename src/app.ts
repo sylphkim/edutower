@@ -16,6 +16,7 @@ import materialsRoutes from "./routes/materials.routes";
 import memoryRoutes from "./routes/memory.routes";
 import planRoutes from "./routes/plan.routes";
 import quizRoutes from "./routes/quiz.routes";
+import settingsRoutes from "./routes/settings.routes";
 import skillsRoutes from "./routes/skills.routes";
 import wrongbookRoutes from "./routes/wrongbook.routes";
 
@@ -42,6 +43,7 @@ app.use("/api/plan", planRoutes);
 app.use("/api/daily", dailyTasksRoutes);
 app.use("/api/skills", skillsRoutes);
 app.use("/api/quiz", quizRoutes);
+app.use("/api/settings", settingsRoutes);
 app.use("/api/wrongbook", wrongbookRoutes);
 app.use("/api/memory", memoryRoutes);
 

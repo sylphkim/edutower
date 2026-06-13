@@ -1,6 +1,6 @@
 /**
- * EduTower — AI 复习历史对话（浏览器本地存储，按主题分组展示）
- * 注：后端 Conversation API 尚未接入，会话数据保存在本机 localStorage。
+ * EduTower — AI 复习历史对话（浏览器本地存储，按时间分组展示）
+ * 今日学习对话会同步服务端子对话；自由问答仍保存在本机 localStorage。
  */
 (function () {
   "use strict";
@@ -34,7 +34,7 @@
     drawerEl.innerHTML =
       '<header class="chat-history-drawer__header">' +
       '<div><h2 class="chat-history-drawer__title">历史对话</h2>' +
-      '<p class="chat-history-drawer__subtitle">按复习主题查看过往会话（保存在本机浏览器）</p></div>' +
+      '<p class="chat-history-drawer__subtitle">按时间查看过往会话；今日学习对话与服务端同步，其余保存在本机浏览器</p></div>' +
       '<button type="button" class="icon-btn chat-history-drawer__close" data-action="close-history" aria-label="关闭">' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 6L6 18M6 6l12 12"/></svg></button></header>' +
       '<div class="chat-history-drawer__toolbar">' +
@@ -83,8 +83,9 @@
       });
 
       if (session) {
-        window.EduTowerChat.loadSession(session);
-        closeDrawer();
+        Promise.resolve(window.EduTowerChat.loadSession(session)).then(function () {
+          closeDrawer();
+        });
       }
       return;
     }
@@ -147,6 +148,15 @@
         : "";
     var activeClass = session.id === activeId ? " chat-history-item--active" : "";
 
+    var studyTag =
+      session.conversationType === "project_study"
+        ? '<span class="chat-history-item__topic">今日学习</span>'
+        : "";
+    var topicTag =
+      session.topicLabel && session.topicLabel !== "待分类"
+        ? '<span class="chat-history-item__topic">' + escapeHtml(session.topicLabel) + "</span>"
+        : "";
+
     return (
       '<div class="chat-history-item-wrap' +
       activeClass +
@@ -156,6 +166,8 @@
       '">' +
       '<span class="chat-history-item__title">' +
       escapeHtml(session.title || "未命名对话") +
+      studyTag +
+      topicTag +
       "</span>" +
       '<span class="chat-history-item__preview">' +
       escapeHtml(session.preview || "暂无消息") +

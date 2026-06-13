@@ -13,7 +13,11 @@
   var viewMode = "list";
   var editingId = null;
   var pendingDeleteId = null;
+  var isBusy = false;
   var banner = { type: "", message: "" };
+  var flatSkills = [];
+  var materials = [];
+  var relationsLoaded = false;
 
   var TYPE_LABEL = {
     weakness: "薄弱点",
@@ -51,14 +55,24 @@
       } else if (action === "memory-view-create") {
         editingId = null;
         setViewMode("create");
-        render();
+        ensureRelationOptions().then(render);
       } else if (action === "memory-edit") {
         editingId = target.getAttribute("data-id");
         pendingDeleteId = null;
         setViewMode("edit");
-        render();
+        ensureRelationOptions().then(render);
       } else if (action === "memory-submit") {
         submitMemoryForm();
+      } else if (action === "memory-view-daily-summary") {
+        editingId = null;
+        setViewMode("daily-summary");
+        render();
+      } else if (action === "memory-submit-daily-summary") {
+        submitDailySummary();
+      } else if (action === "memory-summarize-all") {
+        summarizeMemories("all");
+      } else if (action === "memory-summarize-type") {
+        summarizeMemories(target.getAttribute("data-type") || "");
       } else if (action === "memory-start-delete") {
         pendingDeleteId = target.getAttribute("data-id");
         render();
@@ -104,10 +118,25 @@
       '<button type="button" class="module-subnav__item' +
       (viewMode === "create" || viewMode === "edit" ? " module-subnav__item--active" : "") +
       '" data-action="memory-view-create">新建记忆</button>' +
+      '<button type="button" class="module-subnav__item' +
+      (viewMode === "daily-summary" ? " module-subnav__item--active" : "") +
+      '" data-action="memory-view-daily-summary">每日总结</button>' +
       (viewMode === "edit"
         ? '<span class="module-subnav__hint">编辑中</span>'
         : "") +
       "</nav>"
+    );
+  }
+
+  function renderListToolbar() {
+    return (
+      '<div class="memory-toolbar">' +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="memory-summarize-all"' +
+      (isBusy ? " disabled" : "") +
+      ">整理相似记忆</button>" +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="memory-summarize-type" data-type="weakness"' +
+      (isBusy ? " disabled" : "") +
+      ">合并薄弱点</button></div>"
     );
   }
 
@@ -165,19 +194,125 @@
       .join("");
   }
 
+  async function ensureRelationOptions() {
+    if (relationsLoaded) return;
+
+    try {
+      var model = window.EduTowerSkillsModel;
+      var projectId =
+        window.EduTowerPlan && typeof window.EduTowerPlan.getProjectId === "function"
+          ? window.EduTowerPlan.getProjectId()
+          : "";
+      var query = model
+        ? model.buildTreeQuery({ projectId: projectId || undefined })
+        : projectId
+          ? "?projectId=" + encodeURIComponent(projectId)
+          : "";
+      var skillData = await api.get("/api/skills/tree" + query);
+      if (model) {
+        flatSkills = model.normalizeTreeResponse(skillData).flatSkills;
+      } else {
+        flatSkills = skillData && Array.isArray(skillData.items) ? skillData.items : [];
+      }
+    } catch (_err) {
+      flatSkills = [];
+    }
+
+    try {
+      var materialData = await api.get("/api/materials");
+      materials = materialData && Array.isArray(materialData.items) ? materialData.items : [];
+    } catch (_err) {
+      materials = [];
+    }
+
+    relationsLoaded = true;
+  }
+
+  function renderRelationCheckboxes(fieldName, selectedIds) {
+    var selected = {};
+    (selectedIds || []).forEach(function (id) {
+      selected[id] = true;
+    });
+
+    if (fieldName === "skill") {
+      if (!flatSkills.length) {
+        return '<p class="module-empty module-empty--inline">暂无可关联技能</p>';
+      }
+      return (
+        '<div class="memory-relations">' +
+        flatSkills
+          .map(function (skill) {
+            var model = window.EduTowerSkillsModel;
+            var label = model ? model.formatSkillOptionLabel(skill) : skill.title;
+            return (
+              '<label class="memory-relations__item">' +
+              '<input type="checkbox" name="memory-related-skill" value="' +
+              api.escapeAttr(skill.id) +
+              '"' +
+              (selected[skill.id] ? " checked" : "") +
+              (skill.isUnlocked === false ? " disabled" : "") +
+              " />" +
+              "<span>" +
+              api.escapeHtml(label) +
+              "</span></label>"
+            );
+          })
+          .join("") +
+        "</div>"
+      );
+    }
+
+    if (!materials.length) {
+      return '<p class="module-empty module-empty--inline">暂无可关联资料</p>';
+    }
+
+    return (
+      '<div class="memory-relations">' +
+      materials
+        .map(function (material) {
+          return (
+            '<label class="memory-relations__item">' +
+            '<input type="checkbox" name="memory-related-material" value="' +
+            api.escapeAttr(material.id) +
+            '"' +
+            (selected[material.id] ? " checked" : "") +
+            " />" +
+            "<span>" +
+            api.escapeHtml(material.title) +
+            "</span></label>"
+          );
+        })
+        .join("") +
+      "</div>"
+    );
+  }
+
+  function collectCheckedValues(name) {
+    var inputs = rootEl.querySelectorAll('input[name="' + name + '"]:checked');
+    var values = [];
+    inputs.forEach(function (input) {
+      if (input instanceof HTMLInputElement && input.value) {
+        values.push(input.value);
+      }
+    });
+    return values;
+  }
+
   function renderForm() {
     var item = viewMode === "edit" ? getEditingItem() : null;
     var title = item ? item.title : "";
     var content = item ? item.content : "";
     var type = item ? item.type : "note";
     var importance = item ? item.importance || "medium" : "medium";
+    var relatedSkillIds = item && item.relatedSkillIds ? item.relatedSkillIds : [];
+    var relatedMaterialIds = item && item.relatedMaterialIds ? item.relatedMaterialIds : [];
 
     return (
       '<section class="module-mini-page">' +
       '<h2 class="module-mini-page__title">' +
       (viewMode === "edit" ? "编辑记忆" : "新建记忆") +
       "</h2>" +
-      '<p class="module-mini-page__desc">记忆当前保存在服务端内存中，重启服务后会重置。</p>' +
+      '<p class="module-mini-page__desc">记忆持久化保存在数据库中，AI 聊天时也会自动写入相关条目。</p>' +
       renderBanner() +
       '<div class="form-row"><label class="form-label" for="memoryFormType">类型</label>' +
       '<select id="memoryFormType" class="form-input">' +
@@ -195,10 +330,47 @@
       '<select id="memoryFormImportance" class="form-input">' +
       renderImportanceOptions(importance) +
       "</select></div>" +
+      '<div class="form-row"><span class="form-label">关联技能（可选）</span>' +
+      renderRelationCheckboxes("skill", relatedSkillIds) +
+      "</div>" +
+      '<div class="form-row"><span class="form-label">关联资料（可选）</span>' +
+      renderRelationCheckboxes("material", relatedMaterialIds) +
+      "</div>" +
       '<div class="module-mini-page__actions">' +
       '<button type="button" class="btn btn--ghost" data-action="memory-view-list">取消</button>' +
       '<button type="button" class="btn btn--primary" data-action="memory-submit">保存</button></div></section>'
     );
+  }
+
+  function renderDailySummaryForm() {
+    return (
+      '<section class="module-mini-page">' +
+      '<h2 class="module-mini-page__title">生成每日总结</h2>' +
+      '<p class="module-mini-page__desc">提交后会创建一条 type=daily_summary 的长期记忆，供后续 AI 对话注入使用。</p>' +
+      renderBanner() +
+      '<div class="form-row"><label class="form-label" for="memoryDailySummary">今日学习总结</label>' +
+      '<textarea id="memoryDailySummary" class="form-textarea" rows="6" placeholder="例如：完成了二次函数练习，仍有配方法薄弱点…" required></textarea></div>' +
+      '<div class="form-row"><label class="form-label" for="memoryDailyWeaknesses">薄弱点（可选，逗号分隔）</label>' +
+      '<input id="memoryDailyWeaknesses" class="form-input" type="text" placeholder="配方法, 因式分解" /></div>' +
+      '<div class="form-row"><label class="form-label" for="memoryDailySuggestions">明日建议（可选，逗号分隔）</label>' +
+      '<input id="memoryDailySuggestions" class="form-input" type="text" placeholder="做5道综合题, 复习错题本" /></div>' +
+      '<div class="module-mini-page__actions">' +
+      '<button type="button" class="btn btn--ghost" data-action="memory-view-list">取消</button>' +
+      '<button type="button" class="btn btn--primary" data-action="memory-submit-daily-summary"' +
+      (isBusy ? " disabled" : "") +
+      ">" +
+      (isBusy ? "生成中…" : "保存总结") +
+      "</button></div></section>"
+    );
+  }
+
+  function parseCommaList(value) {
+    return String(value || "")
+      .split(/[,，]/)
+      .map(function (part) {
+        return part.trim();
+      })
+      .filter(Boolean);
   }
 
   function renderList() {
@@ -230,10 +402,11 @@
       return (
         renderSubnav() +
         renderBanner() +
+        renderListToolbar() +
         '<div class="memory-filters">' +
         filterHtml +
         "</div>" +
-        '<p class="module-empty">该分类下暂无记忆条目。</p>'
+        '<p class="module-empty">该分类下暂无记忆条目。可与 AI 聊天自动生成，或手动新建。</p>'
       );
     }
 
@@ -307,6 +480,7 @@
     return (
       renderSubnav() +
       renderBanner() +
+      renderListToolbar() +
       '<div class="memory-filters">' +
       filterHtml +
       "</div>" +
@@ -321,7 +495,75 @@
       rootEl.innerHTML = renderSubnav() + renderForm();
       return;
     }
+    if (viewMode === "daily-summary") {
+      rootEl.innerHTML = renderSubnav() + renderDailySummaryForm();
+      return;
+    }
     rootEl.innerHTML = renderList();
+  }
+
+  async function submitDailySummary() {
+    if (isBusy) return;
+
+    var summaryEl = document.getElementById("memoryDailySummary");
+    var weaknessesEl = document.getElementById("memoryDailyWeaknesses");
+    var suggestionsEl = document.getElementById("memoryDailySuggestions");
+    var summary = summaryEl ? summaryEl.value.trim() : "";
+
+    if (!summary) {
+      setBanner("error", "请填写今日学习总结。");
+      render();
+      return;
+    }
+
+    isBusy = true;
+    clearBanner();
+    render();
+
+    try {
+      await api.post("/api/memory/daily-summary", {
+        summary: summary,
+        weaknesses: parseCommaList(weaknessesEl ? weaknessesEl.value : ""),
+        nextSuggestions: parseCommaList(suggestionsEl ? suggestionsEl.value : ""),
+      });
+      setBanner("success", "每日总结已保存。");
+      setViewMode("list");
+      await refresh();
+    } catch (err) {
+      setBanner("error", "保存失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  async function summarizeMemories(type) {
+    if (isBusy) return;
+
+    isBusy = true;
+    clearBanner();
+    render();
+
+    try {
+      var path =
+        type && type !== "all"
+          ? "/api/memory/summarize?type=" + encodeURIComponent(type) + "&minCount=3"
+          : "/api/memory/summarize?minCount=3";
+      var result = await api.post(path, {});
+      var merged = result && typeof result.merged === "number" ? result.merged : 0;
+
+      if (merged > 0) {
+        setBanner("success", "已合并 " + merged + " 条相似记忆。");
+      } else {
+        setBanner("info", "暂无可合并的相似记忆（需至少 3 条同类型且标题相近）。");
+      }
+      await refresh();
+    } catch (err) {
+      setBanner("error", "整理失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
   }
 
   async function submitMemoryForm() {
@@ -335,6 +577,8 @@
       title: titleEl ? titleEl.value.trim() : "",
       content: contentEl ? contentEl.value.trim() : "",
       importance: importanceEl ? importanceEl.value : "medium",
+      relatedSkillIds: collectCheckedValues("memory-related-skill"),
+      relatedMaterialIds: collectCheckedValues("memory-related-material"),
     };
 
     if (!payload.title || !payload.content) {
