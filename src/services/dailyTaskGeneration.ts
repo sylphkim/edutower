@@ -332,144 +332,12 @@ export function selectByRules(
   return selection;
 }
 
-function extractJsonObject(text: string): unknown {
-  const trimmed = text.trim();
-
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    // The model may wrap JSON in prose or markdown fences; fall through.
-  }
-
-  const match = trimmed.match(/\{[\s\S]*\}/);
-
-  if (!match) {
-    return undefined;
-  }
-
-  try {
-    return JSON.parse(match[0]);
-  } catch {
-    return undefined;
-  }
-}
-
-function buildAiPrompt(params: {
-  project: GenerationProjectInfo;
-  currentPhaseTitle: string | null;
-  availableMinutes: number;
-  candidates: DailyTaskCandidate[];
-}): { systemPrompt: string; userPrompt: string } {
-  const systemPrompt = [
-    "你是一名学习规划助手，负责从候选学习任务中编排学生今天的任务清单。",
-    "硬性规则：",
-    "1. 只能从给出的候选任务中选择，禁止创造候选之外的任务。",
-    `2. 最多选择 ${MAX_DAILY_TASKS} 个任务，至少选择 1 个。`,
-    "3. 预计总时长应接近但尽量不超过可用时间预算。",
-    "4. 未完成的续排任务和薄弱点巩固通常应优先安排。",
-    "5. 为每个选中的任务写一句简短的中文理由。",
-    '只输出一个 JSON 对象，格式：{"tasks":[{"candidateId":"c1","reason":"..."}],"note":"一句话整体说明（可选）"}。',
-    "不要输出任何其他文字。"
-  ].join("\n");
-
-  const candidateLines = params.candidates.map((candidate) =>
-    JSON.stringify({
-      candidateId: candidate.candidateId,
-      title: candidate.title,
-      type: candidate.type,
-      source: candidate.sourceType,
-      estimatedMinutes: candidate.estimatedMinutes,
-      ruleReason: candidate.defaultReason
-    })
-  );
-
-  const userPrompt = [
-    `学习项目：${params.project.title}（学科：${params.project.subject}）`,
-    `学习目标：${params.project.goal || "未填写"}`,
-    params.project.targetScore ? `目标分数：${params.project.targetScore}` : "",
-    params.currentPhaseTitle ? `当前计划阶段：${params.currentPhaseTitle}` : "",
-    `今日可用学习时间：${params.availableMinutes} 分钟`,
-    "候选任务列表（每行一个 JSON）：",
-    ...candidateLines
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  return { systemPrompt, userPrompt };
-}
-
-function validateAiSelection(
-  parsed: unknown,
-  candidates: DailyTaskCandidate[],
-  availableMinutes: number
-): { selection: SelectedDailyTask[]; note?: string } | undefined {
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return undefined;
-  }
-
-  const body = parsed as Record<string, unknown>;
-
-  if (!Array.isArray(body.tasks)) {
-    return undefined;
-  }
-
-  const candidateMap = new Map(
-    candidates.map((candidate) => [candidate.candidateId, candidate])
-  );
-  const usedIds = new Set<string>();
-  const selection: SelectedDailyTask[] = [];
-  let totalMinutes = 0;
-
-  for (const entry of body.tasks) {
-    if (selection.length >= MAX_DAILY_TASKS) {
-      break;
-    }
-
-    if (typeof entry !== "object" || entry === null) {
-      continue;
-    }
-
-    const candidateId = (entry as Record<string, unknown>).candidateId;
-    const reason = (entry as Record<string, unknown>).reason;
-
-    if (typeof candidateId !== "string" || usedIds.has(candidateId)) {
-      continue;
-    }
-
-    const candidate = candidateMap.get(candidateId);
-
-    if (!candidate) {
-      continue;
-    }
-
-    if (selection.length > 0 && totalMinutes >= availableMinutes) {
-      break;
-    }
-
-    usedIds.add(candidateId);
-    selection.push({
-      candidate,
-      reason:
-        typeof reason === "string" && reason.trim()
-          ? reason.trim().slice(0, 200)
-          : candidate.defaultReason
-    });
-    totalMinutes += candidate.estimatedMinutes;
-  }
-
-  if (selection.length === 0) {
-    return undefined;
-  }
-
-  return {
-    selection,
-    note: typeof body.note === "string" ? body.note.trim().slice(0, 300) : undefined
-  };
-}
-
 /**
- * Deterministic rule-based daily task selection.
- * AI ranking stays behind FastAPI only; Express does not call LLM directly.
+ * Picks today's tasks from the rule-built candidate pool.
+ *
+ * AI ranking was removed from Express so the LLM stays strictly behind FastAPI.
+ * The deterministic rule selection is authoritative for now; AI-based ranking
+ * should return later via a FastAPI endpoint (never a direct LLM call here).
  */
 export async function selectDailyTasks(params: {
   project: GenerationProjectInfo;
@@ -477,10 +345,10 @@ export async function selectDailyTasks(params: {
   currentPhaseTitle: string | null;
   availableMinutes: number;
 }): Promise<{ selection: SelectedDailyTask[]; meta: SelectionMeta }> {
-  const ruleSelection = selectByRules(params.candidates, params.availableMinutes);
+  const selection = selectByRules(params.candidates, params.availableMinutes);
 
   return {
-    selection: ruleSelection,
+    selection,
     meta: { mode: "rules" }
   };
 }

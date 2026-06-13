@@ -8,6 +8,7 @@ import type {
   UpdateMemoryInput
 } from "../types/memory";
 import { AppError } from "../utils/errors";
+import { getDemoUserId } from "./demoUser.service";
 
 const VALID_MEMORY_TYPES: MemoryType[] = [
   "weakness",
@@ -172,7 +173,8 @@ function toApiMemory(record: MemoryRecord): MemoryItem {
 
 export const memoryService = {
   async list(): Promise<{ items: MemoryItem[] }> {
-    const records = await memoryRepository.list();
+    const userId = await getDemoUserId();
+    const records = await memoryRepository.list(userId);
 
     return { items: records.map(toApiMemory) };
   },
@@ -184,7 +186,8 @@ export const memoryService = {
   },
 
   async findByTitle(title: string): Promise<MemoryItem | null> {
-    const record = await memoryRepository.findByTitle(title);
+    const userId = await getDemoUserId();
+    const record = await memoryRepository.findByTitle(userId, title);
 
     return record ? toApiMemory(record) : null;
   },
@@ -192,7 +195,9 @@ export const memoryService = {
   async create(input: CreateMemoryInput): Promise<MemoryItem> {
     ensureValidCreateInput(input);
 
+    const userId = await getDemoUserId();
     const record = await memoryRepository.create({
+      userId,
       type: input.type,
       title: input.title.trim(),
       content: input.content.trim(),
@@ -235,7 +240,9 @@ export const memoryService = {
   async createDailySummary(input: DailySummaryInput): Promise<MemoryItem> {
     ensureValidDailySummaryInput(input);
 
+    const userId = await getDemoUserId();
     const record = await memoryRepository.create({
+      userId,
       type: "daily_summary",
       title: "Daily Summary",
       content: buildDailySummaryContent(input),

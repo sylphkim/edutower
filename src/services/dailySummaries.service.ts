@@ -30,6 +30,7 @@ import {
 } from "./dailyTaskMappers";
 import { aiEngineService } from "./aiEngine.service";
 import { getDemoUserId } from "./demoUser.service";
+import { conceptMappingService } from "./conceptMapping.service";
 import { memoryService } from "./memory.service";
 
 type CloseReason = "all_tasks_done" | "user" | "midnight";
@@ -471,6 +472,23 @@ function writeDailySummaryMemory(params: {
     .catch((error) => {
       logger.warn("Failed to write daily summary memory.", error);
     });
+}
+
+/**
+ * 把当天确认「掌握 / 学习中」的知识点写进概念账本（跨项目点亮的数据来源）。
+ * 与记忆写入一样是结束流程的副作用：异步进行、失败只告警，不阻塞主流程。
+ */
+function recordConceptMastery(projectId: string, nodeIds: string[]): void {
+  if (nodeIds.length === 0) {
+    return;
+  }
+
+  void (async () => {
+    const userId = await getDemoUserId();
+    await conceptMappingService.recordNodeMastery(userId, projectId, nodeIds);
+  })().catch((error) => {
+    logger.warn("Failed to record concept mastery.", error);
+  });
 }
 
 async function buildDailyRecord(
@@ -933,21 +951,24 @@ export const dailySummariesService = {
     }
 
     if (result.summaryConfirmed) {
+      const learnedSkillIds = updatedSummary.suggestions
+        .filter(
+          (suggestion) =>
+            suggestion.type === "knowledge_status" &&
+            (suggestion.status === "accepted" || suggestion.status === "modified") &&
+            suggestion.knowledgeNodeId
+        )
+        .map((suggestion) => suggestion.knowledgeNodeId as string);
+
       writeDailySummaryMemory({
         content: updatedSummary.confirmedContent ?? updatedSummary.aiDraft,
         weaknesses: updatedSummary.weaknesses,
         completedTaskIds: updatedSheet.tasks
           .filter((task) => task.status === "done")
           .map((task) => task.id),
-        learnedSkillIds: updatedSummary.suggestions
-          .filter(
-            (suggestion) =>
-              suggestion.type === "knowledge_status" &&
-              (suggestion.status === "accepted" || suggestion.status === "modified") &&
-              suggestion.knowledgeNodeId
-          )
-          .map((suggestion) => suggestion.knowledgeNodeId as string)
+        learnedSkillIds
       });
+      recordConceptMastery(projectId, learnedSkillIds);
     }
 
     return {
@@ -1029,19 +1050,22 @@ export const dailySummariesService = {
       );
 
       if (updatedSummary) {
+        const learnedSkillIds = updatedSummary.suggestions
+          .filter(
+            (suggestion) =>
+              suggestion.type === "knowledge_status" &&
+              suggestion.status === "accepted" &&
+              suggestion.knowledgeNodeId
+          )
+          .map((suggestion) => suggestion.knowledgeNodeId as string);
+
         writeDailySummaryMemory({
           content: updatedSummary.confirmedContent ?? updatedSummary.aiDraft,
           weaknesses: updatedSummary.weaknesses,
           completedTaskIds: [],
-          learnedSkillIds: updatedSummary.suggestions
-            .filter(
-              (suggestion) =>
-                suggestion.type === "knowledge_status" &&
-                suggestion.status === "accepted" &&
-                suggestion.knowledgeNodeId
-            )
-            .map((suggestion) => suggestion.knowledgeNodeId as string)
+          learnedSkillIds
         });
+        recordConceptMastery(projectId, learnedSkillIds);
       }
     }
   },
