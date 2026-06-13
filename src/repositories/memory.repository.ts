@@ -5,6 +5,7 @@ import type { Memory } from "../generated/prisma/client";
 // 仓库层负责序列化/反序列化，对上层只暴露字符串数组。
 export interface MemoryRecord {
   id: string;
+  userId: string;
   type: string;
   title: string;
   content: string;
@@ -18,6 +19,7 @@ export interface MemoryRecord {
 }
 
 export interface CreateMemoryRecordInput {
+  userId: string;
   type: string;
   title: string;
   content: string;
@@ -58,6 +60,7 @@ function serializeIds(value: string[] | undefined): string | undefined {
 function toRecord(memory: Memory): MemoryRecord {
   return {
     id: memory.id,
+    userId: memory.userId,
     type: memory.type,
     title: memory.title,
     content: memory.content,
@@ -72,8 +75,9 @@ function toRecord(memory: Memory): MemoryRecord {
 }
 
 export const memoryRepository = {
-  async list(): Promise<MemoryRecord[]> {
+  async list(userId: string): Promise<MemoryRecord[]> {
     const items = await prisma.memory.findMany({
+      where: { userId },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }]
     });
 
@@ -86,8 +90,10 @@ export const memoryRepository = {
     return item ? toRecord(item) : null;
   },
 
-  async findByTitle(title: string): Promise<MemoryRecord | null> {
-    const item = await prisma.memory.findFirst({ where: { title: title.trim() } });
+  async findByTitle(userId: string, title: string): Promise<MemoryRecord | null> {
+    const item = await prisma.memory.findFirst({
+      where: { userId, title: title.trim() }
+    });
 
     return item ? toRecord(item) : null;
   },
@@ -95,6 +101,7 @@ export const memoryRepository = {
   async create(input: CreateMemoryRecordInput): Promise<MemoryRecord> {
     const item = await prisma.memory.create({
       data: {
+        userId: input.userId,
         type: input.type,
         title: input.title,
         content: input.content,
