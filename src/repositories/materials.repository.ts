@@ -67,6 +67,28 @@ export const materialsRepository = {
     });
   },
 
+  // 某项目关联的资料（经 ProjectMaterial 关联）。
+  listByProjectForUser(projectId: string, userId: string): Promise<Material[]> {
+    return prisma.material.findMany({
+      where: {
+        userId,
+        projectLinks: {
+          some: {
+            projectId
+          }
+        }
+      },
+      orderBy: [
+        {
+          createdAt: "asc"
+        },
+        {
+          id: "asc"
+        }
+      ]
+    });
+  },
+
   create(input: CreateMaterialRecordInput): Promise<Material> {
     return prisma.material.create({
       data: {
