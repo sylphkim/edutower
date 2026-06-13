@@ -423,8 +423,8 @@ async function buildSummaryDraft(
   const template = buildTemplateSummary(project, sheet, evidence);
   const studyData = weakPointDeltaText ? `${template}\n${weakPointDeltaText}` : template;
 
-  // 优先经 FastAPI AI Engine 出总结；FastAPI 不可用时内部回退本地 LLM，
-  // 两条路都拿不到文本（含未配置 key）时返回 null，这里再退回确定性模板。
+  // 经 FastAPI AI Engine 出总结（Express 不直连 LLM）；FastAPI 不可用 / 返回空时
+  // generateSummary 返回 null，这里退回确定性模板（studyData）。
   const aiText = await aiEngineService.generateSummary({
     project: {
       title: project.title,
