@@ -1,17 +1,12 @@
-import { env } from "../config/env";
 import type { StudyTaskSource, StudyTaskType } from "../generated/prisma/client";
 import type {
   GenerationInputs,
   GenerationKnowledgeNode
 } from "../repositories/dailyTaskSheets.repository";
-import { logger } from "../utils/logger";
-import { llmService } from "./llm.service";
 
 /**
- * Daily task generation follows a strict split of responsibilities:
- * deterministic system rules build the candidate pool (which knowledge points
- * are even allowed today), and the AI may only rank, pick and explain within
- * that pool. Any invalid AI output falls back to the rule-based selection.
+ * Daily task generation uses deterministic rules only on Express.
+ * LLM ranking, if added later, must go through FastAPI — never direct LLM here.
  */
 
 export const MAX_DAILY_TASKS = 8;
@@ -473,9 +468,8 @@ function validateAiSelection(
 }
 
 /**
- * Lets the LLM rank and pick within the rule-built candidate pool. Falls back
- * to the deterministic rule selection whenever the model is unavailable or
- * returns anything that fails validation.
+ * Deterministic rule-based daily task selection.
+ * AI ranking stays behind FastAPI only; Express does not call LLM directly.
  */
 export async function selectDailyTasks(params: {
   project: GenerationProjectInfo;
@@ -485,65 +479,10 @@ export async function selectDailyTasks(params: {
 }): Promise<{ selection: SelectedDailyTask[]; meta: SelectionMeta }> {
   const ruleSelection = selectByRules(params.candidates, params.availableMinutes);
 
-  if (params.candidates.length === 0) {
-    return {
-      selection: [],
-      meta: { mode: "rules" }
-    };
-  }
-
-  if (!env.llmApiKey) {
-    return {
-      selection: ruleSelection,
-      meta: { mode: "rules", aiError: "missing_api_key" }
-    };
-  }
-
-  try {
-    const { systemPrompt, userPrompt } = buildAiPrompt(params);
-    const result = await llmService.generateText({
-      systemPrompt,
-      userPrompt,
-      temperature: 0.2,
-      maxOutputTokens: 900
-    });
-    const validated = validateAiSelection(
-      extractJsonObject(result.text),
-      params.candidates,
-      params.availableMinutes
-    );
-
-    if (!validated) {
-      logger.warn("Daily task AI selection was invalid; falling back to rules.");
-      return {
-        selection: ruleSelection,
-        meta: {
-          mode: "rules",
-          provider: result.provider,
-          model: result.model,
-          aiError: "invalid_ai_output"
-        }
-      };
-    }
-
-    return {
-      selection: validated.selection,
-      meta: {
-        mode: "ai",
-        provider: result.provider,
-        model: result.model,
-        aiNote: validated.note
-      }
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.warn(`Daily task AI selection failed (${message}); falling back to rules.`);
-
-    return {
-      selection: ruleSelection,
-      meta: { mode: "rules", aiError: message.slice(0, 200) }
-    };
-  }
+  return {
+    selection: ruleSelection,
+    meta: { mode: "rules" }
+  };
 }
 
 /** Compact, replayable record of one generation round for inputSnapshot. */

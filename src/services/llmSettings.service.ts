@@ -1,13 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import OpenAI from "openai";
+import { env } from "../config/env";
 import {
   getEffectiveLlmConfig,
   getLlmRuntimeOverrides,
   setLlmRuntimeOverrides
 } from "../config/llmRuntime";
-import { env } from "../config/env";
-import { llmService } from "./llm.service";
 import { AppError } from "../utils/errors";
 
 export interface LlmSettingsInput {
@@ -126,6 +124,10 @@ export const llmSettingsService = {
     };
   },
 
+  /**
+   * 保存 LLM 配置到本地 JSON 与根目录 .env，供 FastAPI AI Engine 读取。
+   * Express 不直连 LLM；保存后需重启 FastAPI 才会加载新配置。
+   */
   async save(input: LlmSettingsInput): Promise<LlmSettingsStatus> {
     const normalized = normalizeInput(input);
 
@@ -139,39 +141,68 @@ export const llmSettingsService = {
       model: normalized.model
     });
     await writeStoredSettings(normalized);
-    await upsertEnvLines(normalized).catch(() => {});
-    llmService.resetClient();
+    await upsertEnvLines(normalized);
 
     return this.getStatus();
   },
 
-  async test(input: LlmSettingsInput): Promise<{ ok: boolean; model: string; text: string }> {
-    const normalized = normalizeInput(input);
+  /**
+   * 探测当前运行中的 FastAPI AI Engine 是否可用。
+   * 使用 AI Engine 已加载的配置，不会从 Express 直连 LLM。
+   */
+  async test(_input: LlmSettingsInput): Promise<{ ok: boolean; model: string; text: string }> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), env.aiEngineTimeoutMs);
 
-    if (!normalized.apiKey) {
-      throw new AppError("INVALID_REQUEST", "apiKey is required.", 400);
+    try {
+      const response = await fetch(new URL("/chat", env.aiEngineBaseUrl).toString(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          session_id: "settings_probe",
+          message: "Reply with exactly: OK"
+        }),
+        signal: controller.signal
+      });
+
+      const data = (await response.json().catch(() => undefined)) as
+        | { reply?: string }
+        | undefined;
+      const text =
+        data && typeof data.reply === "string" && data.reply.trim()
+          ? data.reply.trim()
+          : "";
+
+      if (!response.ok || !text) {
+        throw new AppError(
+          "AI_ENGINE_CONNECTION_ERROR",
+          "AI Engine 未返回有效回复。若刚保存配置，请先重启 FastAPI 再测试。",
+          502
+        );
+      }
+
+      const effective = getEffectiveLlmConfig();
+
+      return {
+        ok: true,
+        model: effective.model,
+        text: text.slice(0, 120)
+      };
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      throw new AppError(
+        "AI_ENGINE_CONNECTION_ERROR",
+        "无法连接 AI Engine。请确认 FastAPI 已启动，且已保存配置并重启服务。",
+        502,
+        error
+      );
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const client = new OpenAI({
-      apiKey: normalized.apiKey,
-      baseURL: normalized.baseUrl,
-      timeout: env.llmTimeoutMs,
-      maxRetries: 0
-    });
-
-    const response = await client.chat.completions.create({
-      model: normalized.model || env.llmModel,
-      messages: [{ role: "user", content: "Reply with exactly: OK" }],
-      max_tokens: 16,
-      temperature: 0
-    });
-
-    const text = response.choices[0]?.message?.content?.trim() || "OK";
-
-    return {
-      ok: true,
-      model: response.model || normalized.model || env.llmModel,
-      text
-    };
   }
 };
