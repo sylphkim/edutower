@@ -6,6 +6,7 @@ import { memoryService } from "../services/memory.service";
 import type { CreateMemoryInput } from "../types/memory";
 import { sendSuccess } from "../utils/apiResponse";
 import { AppError } from "../utils/errors";
+import { logger } from "../utils/logger";
 
 const MEMORY_UPDATES_RE = /---memory_updates\n([\s\S]*?)\n---/;
 
@@ -35,7 +36,9 @@ function parseAndSaveMemoryUpdates(reply: string): string {
               importance: item.importance
             });
           })()
-        ).catch(() => {});
+        ).catch((error) => {
+          logger.warn("Failed to persist memory update from chat reply.", error);
+        });
       }
     }
   } catch {
@@ -60,8 +63,11 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
       userMessage: message,
       aiReply: cleanReply,
       engine: "fastapi"
-    }).catch(() => {});    
-    
+    }).catch((error) => {
+      logger.warn("Failed to persist chat exchange.", error);
+    });
+
+
     sendSuccess(res, {
       answer: cleanReply,
       reply: cleanReply,
