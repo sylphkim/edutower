@@ -82,5 +82,57 @@ export const conceptMappingService = {
     }
 
     return { mapped, skipped };
+  },
+
+  /**
+   * 把一批「已确认掌握 / 学习中」的节点写进概念账本（跨项目汇总）。
+   * 掌握度取各项目最大值；状态只要某处达到 mastered 即 mastered；来源累加。
+   * 节点为 not_started 时跳过（账本只记真正学过的）。
+   */
+  async recordNodeMastery(
+    userId: string,
+    projectId: string,
+    nodeIds: string[]
+  ): Promise<{ recorded: number }> {
+    if (nodeIds.length === 0) {
+      return { recorded: 0 };
+    }
+
+    const project = await projectsRepository.findByIdForUser(projectId, userId);
+    const subject = project?.subject ?? null;
+    let recorded = 0;
+
+    for (const nodeId of nodeIds) {
+      const node = await knowledgeNodesRepository.findByIdForProject(nodeId, projectId);
+
+      if (!node || node.learningState === "not_started") {
+        continue;
+      }
+
+      const conceptId = await this.mapNode(userId, { id: node.id, title: node.title }, subject);
+
+      if (!conceptId) {
+        continue;
+      }
+
+      const existing = await conceptsRepository.getMasteryByConcept(conceptId);
+      const source = `project:${projectId}`;
+      const sources = existing ? [...new Set([...existing.sources, source])] : [source];
+      const mastery = Math.max(existing?.mastery ?? 0, node.mastery);
+      const state =
+        existing?.state === "mastered" || node.learningState === "mastered"
+          ? "mastered"
+          : "learning";
+
+      await conceptsRepository.upsertMastery(userId, conceptId, {
+        state,
+        mastery,
+        sources,
+        lastSeenAt: new Date()
+      });
+      recorded += 1;
+    }
+
+    return { recorded };
   }
 };
