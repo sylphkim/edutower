@@ -214,6 +214,19 @@ export class AiEngineService {
     return null;
   }
 
+  /**
+   * 自由答疑小结：复用 FastAPI 的 /generate-summary（套一层「自由答疑」轻量上下文）。
+   * 不可达 / 异常时返回 null，由上层退回确定性模板——同样不直连 LLM。
+   */
+  async summarizeFreeQa(conversationDigest: string): Promise<string | null> {
+    return this.generateSummary({
+      project: { title: "自由答疑", subject: "通用答疑", goal: "" },
+      localDate: new Date().toISOString().slice(0, 10),
+      studyData: "（自由答疑会话，无项目任务数据）",
+      conversationDigest
+    });
+  }
+
   // ── FastAPI 不可用时的降级（不直连 LLM）──────────────────────
 
   private unavailableReply(): string {
