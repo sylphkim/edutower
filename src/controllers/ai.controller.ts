@@ -48,14 +48,15 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
   try {
     const message = readMessage(req.body);
     const sessionId = readSessionId(req.body);
-    const context = await chatContextService.buildContext({ sessionId });
+    const conversationId = readConversationId(req.body);
+    const context = await chatContextService.buildContext({ sessionId, conversationId });
     const result = await aiEngineService.chat({ sessionId, message, context });
 
     const cleanReply = parseAndSaveMemoryUpdates(result.reply);
 
     chatPersistenceService.saveChatExchange({
       sessionId,
-      conversationId: readConversationId(req.body),
+      conversationId,
       userMessage: message,
       aiReply: cleanReply,
       engine: "fastapi"
@@ -84,7 +85,8 @@ export async function legacyChat(req: Request, res: Response, next: NextFunction
   try {
     const message = readMessage(req.body);
     const sessionId = readSessionId(req.body);
-    const context = await chatContextService.buildContext({ sessionId });
+    const conversationId = readConversationId(req.body);
+    const context = await chatContextService.buildContext({ sessionId, conversationId });
     const result = await aiEngineService.chat({ sessionId, message, context });
 
     const cleanReply = parseAndSaveMemoryUpdates(result.reply);
