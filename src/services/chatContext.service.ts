@@ -43,6 +43,8 @@ export interface BuildChatContextParams {
   sessionId: string;
   /** 前端显式子对话时传入；优先用它定位会话，否则按 sessionId(externalSessionId) 查。 */
   conversationId?: string;
+  /** 显式指定项目（如智能体面板）；优先级高于会话所属项目。 */
+  projectId?: string;
 }
 
 interface ProjectContext {
@@ -192,8 +194,9 @@ export const chatContextService = {
     const conversation = await resolveConversation(params, userId);
     const sessionHistory = toSessionHistory(conversation);
 
-    // 项目上下文：会话挂了项目就接真实数据，否则为空（自由答疑无项目）。
-    const projectContext = await buildProjectContext(conversation?.projectId ?? null, userId);
+    // 项目上下文优先级：显式 projectId > 会话所属项目 > 无（自由答疑置空）。
+    const projectId = params.projectId?.trim() || conversation?.projectId || null;
+    const projectContext = await buildProjectContext(projectId, userId);
 
     const memories = await loadTopMemories();
 

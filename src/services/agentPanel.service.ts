@@ -4,6 +4,8 @@ import type { AgentPanelPayload } from "../types/agentPanel";
 
 export interface BuildAgentPanelParams {
   sessionId: string;
+  conversationId?: string;
+  projectId?: string;
 }
 
 function parseSubjectLine(subjectName: string): { subject: string; topic: string } {
@@ -55,8 +57,8 @@ async function countReviewedWrongbookItems(): Promise<number> {
 }
 
 export const agentPanelService = {
-  async buildPanel({ sessionId }: BuildAgentPanelParams): Promise<AgentPanelPayload> {
-    const context = await chatContextService.buildContext({ sessionId });
+  async buildPanel({ sessionId, conversationId, projectId }: BuildAgentPanelParams): Promise<AgentPanelPayload> {
+    const context = await chatContextService.buildContext({ sessionId, conversationId, projectId });
     const { subject, topic } = parseSubjectLine(context.subject.name);
     const primaryWeakPoint = context.weakPoints[0];
     const agent = buildAgentSteps(topic, primaryWeakPoint?.title);
