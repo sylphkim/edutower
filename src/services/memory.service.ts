@@ -180,7 +180,8 @@ export const memoryService = {
   },
 
   async getById(id: string): Promise<MemoryItem> {
-    const record = ensureMemoryExists(await memoryRepository.findById(id));
+    const userId = await getDemoUserId();
+    const record = ensureMemoryExists(await memoryRepository.findById(id, userId));
 
     return toApiMemory(record);
   },
@@ -213,9 +214,11 @@ export const memoryService = {
 
   async update(id: string, input: UpdateMemoryInput): Promise<MemoryItem> {
     ensureValidUpdateInput(input);
-    ensureMemoryExists(await memoryRepository.findById(id));
 
-    const record = await memoryRepository.update(id, {
+    const userId = await getDemoUserId();
+    ensureMemoryExists(await memoryRepository.findById(id, userId));
+
+    const record = await memoryRepository.update(id, userId, {
       type: input.type,
       title: input.title !== undefined ? input.title.trim() : undefined,
       content: input.content !== undefined ? input.content.trim() : undefined,
@@ -230,9 +233,10 @@ export const memoryService = {
   },
 
   async remove(id: string): Promise<MemoryItem> {
-    ensureMemoryExists(await memoryRepository.findById(id));
+    const userId = await getDemoUserId();
+    ensureMemoryExists(await memoryRepository.findById(id, userId));
 
-    const record = await memoryRepository.deleteById(id);
+    const record = await memoryRepository.deleteById(id, userId);
 
     return toApiMemory(record);
   },

@@ -84,8 +84,8 @@ export const memoryRepository = {
     return items.map(toRecord);
   },
 
-  async findById(id: string): Promise<MemoryRecord | null> {
-    const item = await prisma.memory.findUnique({ where: { id } });
+  async findById(id: string, userId: string): Promise<MemoryRecord | null> {
+    const item = await prisma.memory.findFirst({ where: { id, userId } });
 
     return item ? toRecord(item) : null;
   },
@@ -116,9 +116,9 @@ export const memoryRepository = {
     return toRecord(item);
   },
 
-  async update(id: string, data: UpdateMemoryRecordData): Promise<MemoryRecord> {
+  async update(id: string, userId: string, data: UpdateMemoryRecordData): Promise<MemoryRecord> {
     const item = await prisma.memory.update({
-      where: { id },
+      where: { id, userId },
       data: {
         type: data.type,
         title: data.title,
@@ -134,8 +134,8 @@ export const memoryRepository = {
     return toRecord(item);
   },
 
-  async deleteById(id: string): Promise<MemoryRecord> {
-    const item = await prisma.memory.delete({ where: { id } });
+  async deleteById(id: string, userId: string): Promise<MemoryRecord> {
+    const item = await prisma.memory.delete({ where: { id, userId } });
 
     return toRecord(item);
   }
