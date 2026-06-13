@@ -131,6 +131,30 @@ export const conceptsRepository = {
     return concepts.map(toConceptRecord);
   },
 
+  // ── 节点 ↔ 概念 映射 ──────────────────────────────────────
+  /** 幂等地把一个知识点连到一个概念上（多对多）。 */
+  async linkNodeConcept(
+    knowledgeNodeId: string,
+    conceptId: string,
+    source?: string
+  ): Promise<void> {
+    await prisma.knowledgeNodeConcept.upsert({
+      where: { knowledgeNodeId_conceptId: { knowledgeNodeId, conceptId } },
+      update: source !== undefined ? { source } : {},
+      create: { knowledgeNodeId, conceptId, source: source ?? null }
+    });
+  },
+
+  /** 取某概念关联的所有知识点 id（后续预点亮 / 反查用）。 */
+  async listNodeIdsForConcept(conceptId: string): Promise<string[]> {
+    const links = await prisma.knowledgeNodeConcept.findMany({
+      where: { conceptId },
+      select: { knowledgeNodeId: true }
+    });
+
+    return links.map((link) => link.knowledgeNodeId);
+  },
+
   // ── ConceptMastery（掌握账本，跨项目汇总） ─────────────────
   /** 写入/更新某概念的掌握进度（conceptId 唯一 → 与 Concept 一对一）。 */
   async upsertMastery(
