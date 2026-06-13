@@ -87,24 +87,6 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
   }
 }
 
-export async function legacyChat(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const message = readMessage(req.body);
-    const sessionId = readSessionId(req.body);
-    const conversationId = readConversationId(req.body);
-    const context = await chatContextService.buildContext({ sessionId, conversationId });
-    const result = await aiEngineService.chat({ sessionId, message, context });
-
-    const cleanReply = parseAndSaveMemoryUpdates(result.reply);
-
-    res.json({
-      reply: cleanReply
-    });
-  } catch (error) {
-    next(error);
-  }
-}
-
 function readMessage(body: unknown): string {
   const message = isRecordLike(body) && typeof body.message === "string" ? body.message.trim() : "";
 
