@@ -135,7 +135,6 @@ function ensureValidDailySummaryInput(input: DailySummaryInput): void {
   }
 
   ensureOptionalStringArray(input.learnedSkillIds, "learnedSkillIds");
-  ensureOptionalStringArray(input.completedTaskIds, "completedTaskIds");
   ensureOptionalStringArray(input.wrongbookIds, "wrongbookIds");
   ensureOptionalStringArray(input.weaknesses, "weaknesses");
   ensureOptionalStringArray(input.nextSuggestions, "nextSuggestions");

@@ -452,7 +452,6 @@ function confirmationSourceForReason(
 function writeDailySummaryMemory(params: {
   content: string;
   weaknesses?: string | null;
-  completedTaskIds: string[];
   learnedSkillIds: string[];
 }): void {
   // 记忆写入是结束流程的副作用：异步进行、失败只告警，不阻塞 close。
@@ -461,9 +460,6 @@ function writeDailySummaryMemory(params: {
       summary: params.content,
       weaknesses: params.weaknesses
         ? params.weaknesses.split("\n").filter(Boolean)
-        : undefined,
-      completedTaskIds: params.completedTaskIds.length
-        ? params.completedTaskIds
         : undefined,
       learnedSkillIds: params.learnedSkillIds.length
         ? params.learnedSkillIds
@@ -851,9 +847,6 @@ export const dailySummariesService = {
       writeDailySummaryMemory({
         content: aiDraft,
         weaknesses: weaknessLines.join("\n") || null,
-        completedTaskIds: sheet.tasks
-          .filter((task) => task.status === "done")
-          .map((task) => task.id),
         learnedSkillIds: []
       });
     }
@@ -963,9 +956,6 @@ export const dailySummariesService = {
       writeDailySummaryMemory({
         content: updatedSummary.confirmedContent ?? updatedSummary.aiDraft,
         weaknesses: updatedSummary.weaknesses,
-        completedTaskIds: updatedSheet.tasks
-          .filter((task) => task.status === "done")
-          .map((task) => task.id),
         learnedSkillIds
       });
       recordConceptMastery(projectId, learnedSkillIds);
@@ -1062,7 +1052,6 @@ export const dailySummariesService = {
         writeDailySummaryMemory({
           content: updatedSummary.confirmedContent ?? updatedSummary.aiDraft,
           weaknesses: updatedSummary.weaknesses,
-          completedTaskIds: [],
           learnedSkillIds
         });
         recordConceptMastery(projectId, learnedSkillIds);
