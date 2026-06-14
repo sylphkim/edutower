@@ -30,6 +30,7 @@ import {
 } from "./dailyTaskMappers";
 import { aiEngineService } from "./aiEngine.service";
 import { getDemoUserId } from "./demoUser.service";
+import { conceptMappingService } from "./conceptMapping.service";
 import { memoryService } from "./memory.service";
 
 type CloseReason = "all_tasks_done" | "user" | "midnight";
@@ -422,8 +423,8 @@ async function buildSummaryDraft(
   const template = buildTemplateSummary(project, sheet, evidence);
   const studyData = weakPointDeltaText ? `${template}\n${weakPointDeltaText}` : template;
 
-  // 优先经 FastAPI AI Engine 出总结；FastAPI 不可用时内部回退本地 LLM，
-  // 两条路都拿不到文本（含未配置 key）时返回 null，这里再退回确定性模板。
+  // 经 FastAPI AI Engine 出总结（Express 不直连 LLM）；FastAPI 不可用 / 返回空时
+  // generateSummary 返回 null，这里退回确定性模板（studyData）。
   const aiText = await aiEngineService.generateSummary({
     project: {
       title: project.title,
@@ -451,7 +452,6 @@ function confirmationSourceForReason(
 function writeDailySummaryMemory(params: {
   content: string;
   weaknesses?: string | null;
-  completedTaskIds: string[];
   learnedSkillIds: string[];
 }): void {
   // 记忆写入是结束流程的副作用：异步进行、失败只告警，不阻塞 close。
@@ -461,9 +461,6 @@ function writeDailySummaryMemory(params: {
       weaknesses: params.weaknesses
         ? params.weaknesses.split("\n").filter(Boolean)
         : undefined,
-      completedTaskIds: params.completedTaskIds.length
-        ? params.completedTaskIds
-        : undefined,
       learnedSkillIds: params.learnedSkillIds.length
         ? params.learnedSkillIds
         : undefined
@@ -471,6 +468,23 @@ function writeDailySummaryMemory(params: {
     .catch((error) => {
       logger.warn("Failed to write daily summary memory.", error);
     });
+}
+
+/**
+ * 把当天确认「掌握 / 学习中」的知识点写进概念账本（跨项目点亮的数据来源）。
+ * 与记忆写入一样是结束流程的副作用：异步进行、失败只告警，不阻塞主流程。
+ */
+function recordConceptMastery(projectId: string, nodeIds: string[]): void {
+  if (nodeIds.length === 0) {
+    return;
+  }
+
+  void (async () => {
+    const userId = await getDemoUserId();
+    await conceptMappingService.recordNodeMastery(userId, projectId, nodeIds);
+  })().catch((error) => {
+    logger.warn("Failed to record concept mastery.", error);
+  });
 }
 
 async function buildDailyRecord(
@@ -833,9 +847,6 @@ export const dailySummariesService = {
       writeDailySummaryMemory({
         content: aiDraft,
         weaknesses: weaknessLines.join("\n") || null,
-        completedTaskIds: sheet.tasks
-          .filter((task) => task.status === "done")
-          .map((task) => task.id),
         learnedSkillIds: []
       });
     }
@@ -933,21 +944,21 @@ export const dailySummariesService = {
     }
 
     if (result.summaryConfirmed) {
+      const learnedSkillIds = updatedSummary.suggestions
+        .filter(
+          (suggestion) =>
+            suggestion.type === "knowledge_status" &&
+            (suggestion.status === "accepted" || suggestion.status === "modified") &&
+            suggestion.knowledgeNodeId
+        )
+        .map((suggestion) => suggestion.knowledgeNodeId as string);
+
       writeDailySummaryMemory({
         content: updatedSummary.confirmedContent ?? updatedSummary.aiDraft,
         weaknesses: updatedSummary.weaknesses,
-        completedTaskIds: updatedSheet.tasks
-          .filter((task) => task.status === "done")
-          .map((task) => task.id),
-        learnedSkillIds: updatedSummary.suggestions
-          .filter(
-            (suggestion) =>
-              suggestion.type === "knowledge_status" &&
-              (suggestion.status === "accepted" || suggestion.status === "modified") &&
-              suggestion.knowledgeNodeId
-          )
-          .map((suggestion) => suggestion.knowledgeNodeId as string)
+        learnedSkillIds
       });
+      recordConceptMastery(projectId, learnedSkillIds);
     }
 
     return {
@@ -1029,19 +1040,21 @@ export const dailySummariesService = {
       );
 
       if (updatedSummary) {
+        const learnedSkillIds = updatedSummary.suggestions
+          .filter(
+            (suggestion) =>
+              suggestion.type === "knowledge_status" &&
+              suggestion.status === "accepted" &&
+              suggestion.knowledgeNodeId
+          )
+          .map((suggestion) => suggestion.knowledgeNodeId as string);
+
         writeDailySummaryMemory({
           content: updatedSummary.confirmedContent ?? updatedSummary.aiDraft,
           weaknesses: updatedSummary.weaknesses,
-          completedTaskIds: [],
-          learnedSkillIds: updatedSummary.suggestions
-            .filter(
-              (suggestion) =>
-                suggestion.type === "knowledge_status" &&
-                suggestion.status === "accepted" &&
-                suggestion.knowledgeNodeId
-            )
-            .map((suggestion) => suggestion.knowledgeNodeId as string)
+          learnedSkillIds
         });
+        recordConceptMastery(projectId, learnedSkillIds);
       }
     }
   },

@@ -53,6 +53,21 @@ export const conversationsRepository = {
     });
   },
 
+  // 按前端传入的 externalSessionId 定位会话（含消息）。
+  // 与 chatPersistence 懒创建会话时写入的 externalSessionId 对应。
+  findByExternalSessionIdForUser(
+    externalSessionId: string,
+    userId: string
+  ): Promise<ConversationWithMessages | null> {
+    return prisma.conversation.findFirst({
+      where: {
+        externalSessionId,
+        userId
+      },
+      include: messagesInclude
+    });
+  },
+
   async appendExchangeForUser(input: {
     conversationId: string;
     userId: string;

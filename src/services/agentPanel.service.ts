@@ -10,6 +10,8 @@ import type { AgentPanelPayload, AgentStep } from "../types/agentPanel";
 
 export interface BuildAgentPanelParams {
   sessionId: string;
+  conversationId?: string;
+  projectId?: string;
 }
 
 function parseSubjectLine(subjectName: string): { subject: string; topic: string } {
@@ -67,10 +69,9 @@ async function countReviewedWrongbookItems(): Promise<number> {
 }
 
 export const agentPanelService = {
-  async buildPanel({ sessionId }: BuildAgentPanelParams): Promise<AgentPanelPayload> {
+  async buildPanel({ sessionId, projectId: paramProjectId }: BuildAgentPanelParams): Promise<AgentPanelPayload> {
     const safeSessionId = (sessionId || "").trim() || "default";
-
-    const projectId = await getDemoProjectId();
+    const projectId = paramProjectId || await getDemoProjectId();
     const userId = await getDemoUserId();
     const project = await projectsRepository.upsertDemoProject(userId);
     const { subject, topic } = parseSubjectLine(project.subject);

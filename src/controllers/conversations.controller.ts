@@ -30,3 +30,18 @@ export async function getConversation(
     next(error);
   }
 }
+
+export async function summarizeConversation(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await conversationsService.summarizeFreeQa(id);
+
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
+}

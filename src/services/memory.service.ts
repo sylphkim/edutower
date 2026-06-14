@@ -8,6 +8,7 @@ import type {
   UpdateMemoryInput
 } from "../types/memory";
 import { AppError } from "../utils/errors";
+import { getDemoUserId } from "./demoUser.service";
 
 const VALID_MEMORY_TYPES: MemoryType[] = [
   "weakness",
@@ -134,7 +135,6 @@ function ensureValidDailySummaryInput(input: DailySummaryInput): void {
   }
 
   ensureOptionalStringArray(input.learnedSkillIds, "learnedSkillIds");
-  ensureOptionalStringArray(input.completedTaskIds, "completedTaskIds");
   ensureOptionalStringArray(input.wrongbookIds, "wrongbookIds");
   ensureOptionalStringArray(input.weaknesses, "weaknesses");
   ensureOptionalStringArray(input.nextSuggestions, "nextSuggestions");
@@ -172,19 +172,22 @@ function toApiMemory(record: MemoryRecord): MemoryItem {
 
 export const memoryService = {
   async list(): Promise<{ items: MemoryItem[] }> {
-    const records = await memoryRepository.list();
+    const userId = await getDemoUserId();
+    const records = await memoryRepository.list(userId);
 
     return { items: records.map(toApiMemory) };
   },
 
   async getById(id: string): Promise<MemoryItem> {
-    const record = ensureMemoryExists(await memoryRepository.findById(id));
+    const userId = await getDemoUserId();
+    const record = ensureMemoryExists(await memoryRepository.findById(id, userId));
 
     return toApiMemory(record);
   },
 
   async findByTitle(title: string): Promise<MemoryItem | null> {
-    const record = await memoryRepository.findByTitle(title);
+    const userId = await getDemoUserId();
+    const record = await memoryRepository.findByTitle(userId, title);
 
     return record ? toApiMemory(record) : null;
   },
@@ -192,7 +195,9 @@ export const memoryService = {
   async create(input: CreateMemoryInput): Promise<MemoryItem> {
     ensureValidCreateInput(input);
 
+    const userId = await getDemoUserId();
     const record = await memoryRepository.create({
+      userId,
       type: input.type,
       title: input.title.trim(),
       content: input.content.trim(),
@@ -208,9 +213,11 @@ export const memoryService = {
 
   async update(id: string, input: UpdateMemoryInput): Promise<MemoryItem> {
     ensureValidUpdateInput(input);
-    ensureMemoryExists(await memoryRepository.findById(id));
 
-    const record = await memoryRepository.update(id, {
+    const userId = await getDemoUserId();
+    ensureMemoryExists(await memoryRepository.findById(id, userId));
+
+    const record = await memoryRepository.update(id, userId, {
       type: input.type,
       title: input.title !== undefined ? input.title.trim() : undefined,
       content: input.content !== undefined ? input.content.trim() : undefined,
@@ -225,9 +232,10 @@ export const memoryService = {
   },
 
   async remove(id: string): Promise<MemoryItem> {
-    ensureMemoryExists(await memoryRepository.findById(id));
+    const userId = await getDemoUserId();
+    ensureMemoryExists(await memoryRepository.findById(id, userId));
 
-    const record = await memoryRepository.deleteById(id);
+    const record = await memoryRepository.deleteById(id, userId);
 
     return toApiMemory(record);
   },
@@ -235,7 +243,9 @@ export const memoryService = {
   async createDailySummary(input: DailySummaryInput): Promise<MemoryItem> {
     ensureValidDailySummaryInput(input);
 
+    const userId = await getDemoUserId();
     const record = await memoryRepository.create({
+      userId,
       type: "daily_summary",
       title: "Daily Summary",
       content: buildDailySummaryContent(input),

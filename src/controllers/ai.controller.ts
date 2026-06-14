@@ -7,6 +7,7 @@ import { agentStatusService } from "../services/agentStatus.service";
 import type { CreateMemoryInput } from "../types/memory";
 import { sendSuccess } from "../utils/apiResponse";
 import { AppError } from "../utils/errors";
+import { logger } from "../utils/logger";
 
 const MEMORY_UPDATES_RE = /---memory_updates\n([\s\S]*?)\n---/;
 
@@ -36,7 +37,9 @@ function parseAndSaveMemoryUpdates(reply: string): string {
               importance: item.importance
             });
           })()
-        ).catch(() => {});
+        ).catch((error) => {
+          logger.warn("Failed to persist memory update from chat reply.", error);
+        });
       }
     }
   } catch {
@@ -53,7 +56,8 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
     // 报告 Agent 进入推理阶段
     agentStatusService.setPhase(sessionId, "thinking", "推理中 · 正在分析你的问题");
 
-    const context = await chatContextService.buildContext({ sessionId });
+    const conversationId = readConversationId(req.body);
+    const context = await chatContextService.buildContext({ sessionId, conversationId });
 
     agentStatusService.setPhase(sessionId, "generating", "推理中 · 正在生成回答");
     const result = await aiEngineService.chat({ sessionId, message, context });
@@ -62,7 +66,7 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
 
     chatPersistenceService.saveChatExchange({
       sessionId,
-      conversationId: readConversationId(req.body),
+      conversationId,
       userMessage: message,
       aiReply: cleanReply,
       engine: "fastapi"
@@ -70,6 +74,11 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
 
     // 报告 Agent 完成
     agentStatusService.setPhase(sessionId, "idle", "就绪 · 已回复");
+
+    }).catch((error) => {
+      logger.warn("Failed to persist chat exchange.", error);
+    });
+
 
     sendSuccess(res, {
       answer: cleanReply,
@@ -93,23 +102,6 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
     } catch {
       // 如果连 sessionId 都无法读取，则忽略
     }
-    next(error);
-  }
-}
-
-export async function legacyChat(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const message = readMessage(req.body);
-    const sessionId = readSessionId(req.body);
-    const context = await chatContextService.buildContext({ sessionId });
-    const result = await aiEngineService.chat({ sessionId, message, context });
-
-    const cleanReply = parseAndSaveMemoryUpdates(result.reply);
-
-    res.json({
-      reply: cleanReply
-    });
-  } catch (error) {
     next(error);
   }
 }
