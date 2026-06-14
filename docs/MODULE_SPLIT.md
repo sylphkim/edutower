@@ -16,7 +16,7 @@ EduTower 使用 Express 作为面向前端的主后端，使用 FastAPI 作为 A
 | AI Engine bridge | `src/routes/ai.routes.ts`, `src/controllers/ai.controller.ts`, `src/services/aiEngine.service.ts` | 将产品聊天请求转发给 FastAPI，并处理降级 |
 | LLM Debug | `src/routes/llm.routes.ts`, `src/controllers/llm.controller.ts`, `src/services/llm.service.ts`, `src/types/llm.ts` | 提供底层 OpenAI-compatible provider 调试能力 |
 | Chat Context | `src/services/chatContext.service.ts`, `src/types/chatContext.ts`, `src/mock/demo*.ts` | 组装当前 demo 学习上下文 |
-| Agent Panel | `src/routes/agentPanel.routes.ts`, `src/controllers/agentPanel.controller.ts`, `src/services/agentPanel.service.ts`, `src/types/agentPanel.ts` | 基于 demo context 和错题数据输出面板信息 |
+| Agent Panel | `src/routes/agentPanel.routes.ts`, `src/controllers/agentPanel.controller.ts`, `src/services/agentPanel.service.ts`, `src/services/agentStatus.service.ts`, `src/types/agentPanel.ts` | 基于数据库真实数据（KnowledgeNode / Quiz / WeakPoint）输出面板信息，并在 AI 聊天时实时更新 Agent 执行状态 |
 | 文件上传中间件 | `src/middlewares/materialUpload.middleware.ts` | 校验并保存资料上传文件 |
 | 本地日期工具 | `src/utils/localDate.ts` | Asia/Shanghai 本地日期与次日零点计算，供每日学习单使用 |
 | 零点 Sweeper | `src/services/dailySheetSweeper.ts`, `src/server.ts` | 每 60 秒扫描过零点未结束的学习单并强制结算；服务启动时挂载 |
@@ -114,7 +114,7 @@ DailyTasks 分层边界：
 | 产品模块 DTO | `src/types/<module>.ts` |
 | 资料文件夹 DTO | `src/types/materialFolders.ts` |
 | Chat context | `src/types/chatContext.ts` |
-| Agent panel | `src/types/agentPanel.ts` |
+| Agent panel + Agent 状态跟踪 | `src/types/agentPanel.ts` |
 | LLM provider | `src/types/llm.ts` |
 | 旧共享学习类型 | `src/types/edutower.ts` |
 | Prisma generated types | `src/generated/prisma/*` |

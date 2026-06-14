@@ -130,6 +130,22 @@ Frontend
 - Memory 已接 Prisma 持久化，总结确认写入的记忆不会重启即丢。
 - 每日任务尚未关联具体资料（`materialId` 字段已预留）。
 
+### Phase 7: Agent 面板数据化与实时状态
+
+状态：已完成。
+
+- `GET /api/agent/panel` 数据源从 demo mock 切换到数据库真实数据（StudyProject / KnowledgeNode / Quiz / WeakPoint / WrongbookItem）。
+- 新增 `src/services/agentStatus.service.ts`：基于内存的 Agent 实时阶段跟踪，按 sessionId 隔离，2 分钟自动过期。
+- `POST /api/ai/chat` 执行过程中通过 `agentStatusService.setPhase()` 报告 Agent 当前阶段（thinking → generating → idle），`GET /api/agent/panel` 合并返回实时状态。
+- 面板展示内容从固定 4 步骤流水线改为真实统计信息（知识点数、练习题数、错题订正数、当前主题），并保留实时推理状态插入。
+
+当前状态：
+
+- 进度统计（percent / knowledgePoints / practiceQuestions / errorCorrections）走真实数据库 ✅
+- Agent 状态在 AI 聊天时实时更新 ✅
+- WeakPoint 仍需手动录入或由后续自动化管道（Quiz 提交分析）生成 ⚠️
+- 前端 `agent-panel.js` 需适配 `"info"` 类型步骤样式（灰色半透明，无序号）
+
 ## 下一阶段真实能力
 
 推荐按下面顺序接入，不要一次性铺太多面。

@@ -1,4 +1,4 @@
-export type AgentStepStatus = "done" | "current" | "pending";
+export type AgentStepStatus = "done" | "current" | "pending" | "info";
 
 export interface AgentStep {
   label: string;
