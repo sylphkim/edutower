@@ -22,7 +22,7 @@ import type {
 } from "../types/materials";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoUserId } from "./demo.service";
 
 const VALID_TYPES: MaterialType[] = ["slides", "photo", "outline", "note", "other"];
 const VALID_SOURCES: MaterialSource[] = ["uploaded", "manual", "mock"];

@@ -16,8 +16,7 @@ import type {
   UpdatePlanInput
 } from "../types/plan";
 import { AppError } from "../utils/errors";
-import { getDemoProjectId } from "./demoProject.service";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoProjectId, getDemoUserId } from "./demo.service";
 
 const VALID_PLAN_STATUSES: PlanStatus[] = ["draft", "active", "completed"];
 const VALID_TASK_TYPES: PlanTaskType[] = [

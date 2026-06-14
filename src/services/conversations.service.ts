@@ -18,8 +18,7 @@ import type {
 } from "../types/conversation";
 import { AppError } from "../utils/errors";
 import { aiEngineService } from "./aiEngine.service";
-import { getDemoProjectId } from "./demoProject.service";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoProjectId, getDemoUserId } from "./demo.service";
 import { memoryService } from "./memory.service";
 
 const VALID_TYPES: ConversationType[] = ["free_qa", "project_setup", "project_study"];

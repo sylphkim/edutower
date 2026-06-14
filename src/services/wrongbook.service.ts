@@ -20,7 +20,7 @@ import type {
   WrongbookTaxonomyEntry
 } from "../types/wrongbook";
 import { AppError } from "../utils/errors";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoUserId } from "./demo.service";
 import {
   loadWrongbookCustomTaxonomy,
   saveWrongbookCustomTaxonomy

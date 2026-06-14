@@ -1,7 +1,7 @@
 import { conversationsRepository } from "../repositories/conversations.repository";
 import { prisma } from "../lib/prisma";
 import { logger } from "../utils/logger";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoUserId } from "./demo.service";
 
 const DEFAULT_CONVERSATION_TITLE = "AI Chat";
 
