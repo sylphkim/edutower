@@ -27,6 +27,26 @@ export interface AiEngineSummaryParams {
   conversationDigest?: string | null;
 }
 
+export interface AiEnginePlanParams {
+  project: {
+    title: string;
+    subject: string;
+    goal: string;
+    targetScore: string | null;
+    deadline: string | null;
+    dailyMinutes: number | null;
+  };
+  materials: Array<{ title: string; summary: string }>;
+  masteredConcepts: Array<{ name: string; subject: string | null }>;
+}
+
+/** FastAPI 返回的计划草稿（未校验）；交由 normalizePlanProposal 规整。 */
+export interface AiEnginePlanDraft {
+  nodes: unknown;
+  prerequisiteEdges: unknown;
+  phases: unknown;
+}
+
 type RecordLike = Record<string, unknown>;
 
 export class AiEngineService {
@@ -227,6 +247,71 @@ export class AiEngineService {
     });
   }
 
+  /**
+   * 生成计划草稿：转发给 FastAPI AI Engine 的 /generate-plan。
+   * 请求走 snake_case；响应须为 camelCase（直接喂给 normalizePlanProposal 校验）。
+   * 不可达 / 返回异常时抛错——不假造学习计划，也不直连 LLM。
+   */
+  async generatePlan(params: AiEnginePlanParams): Promise<AiEnginePlanDraft> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), env.aiEngineTimeoutMs);
+
+    try {
+      const response = await fetch(this.generatePlanUrl(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          project: {
+            title: params.project.title,
+            subject: params.project.subject,
+            goal: params.project.goal,
+            target_score: params.project.targetScore,
+            deadline: params.project.deadline,
+            daily_minutes: params.project.dailyMinutes
+          },
+          materials: params.materials,
+          mastered_concepts: params.masteredConcepts
+        }),
+        signal: controller.signal
+      });
+
+      const data = await this.readJson(response);
+
+      if (response.ok && isRecordLike(data)) {
+        const record = data as Record<string, unknown>;
+        return {
+          nodes: record.nodes,
+          prerequisiteEdges: record.prerequisiteEdges ?? [],
+          phases: record.phases
+        };
+      }
+
+      throw new AppError("AI_ENGINE_REQUEST_FAILED", "AI engine 生成计划返回异常。", 502);
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      const reason =
+        error instanceof Error && error.name === "AbortError"
+          ? "timeout"
+          : error instanceof Error
+            ? error.message
+            : String(error);
+
+      throw new AppError(
+        "AI_ENGINE_CONNECTION_ERROR",
+        `AI engine 生成计划不可达 (${reason})。`,
+        502,
+        error
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   // ── FastAPI 不可用时的降级（不直连 LLM）──────────────────────
 
   private unavailableChatReply(message: string): string {
@@ -250,6 +335,10 @@ export class AiEngineService {
 
   private generateSummaryUrl(): string {
     return new URL("/generate-summary", env.aiEngineBaseUrl).toString();
+  }
+
+  private generatePlanUrl(): string {
+    return new URL("/generate-plan", env.aiEngineBaseUrl).toString();
   }
 
   private async readJson(response: Response): Promise<unknown> {

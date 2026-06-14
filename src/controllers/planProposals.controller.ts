@@ -14,3 +14,16 @@ export async function applyPlanProposal(
     next(error);
   }
 }
+
+export async function generatePlanProposal(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const proposal = await planProposalsService.generate(req.params.projectId);
+    sendSuccess(res, proposal);
+  } catch (error) {
+    next(error);
+  }
+}
