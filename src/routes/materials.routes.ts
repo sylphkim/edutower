@@ -4,6 +4,7 @@ import {
   deleteMaterial,
   downloadMaterial,
   getMaterial,
+  listMaterialChunks,
   listMaterials,
   uploadMaterial,
   updateMaterial
@@ -13,6 +14,7 @@ import { materialUploadMiddleware } from "../middlewares/materialUpload.middlewa
 const router = Router();
 
 router.get("/", listMaterials);
+router.get("/chunks", listMaterialChunks);
 router.post("/", createMaterial);
 router.post("/upload", materialUploadMiddleware, uploadMaterial);
 router.get("/:id/download", downloadMaterial);

@@ -1491,10 +1491,28 @@
     return iso || "";
   }
 
+  async function loadMaterialChunks(fallbackItems) {
+    try {
+      var data = await api.get("/api/materials/chunks?limit=80");
+      if (data && Array.isArray(data.items) && data.items.length) {
+        return data.items.map(function (chunk) {
+          return {
+            order: chunk.order,
+            text: chunk.text,
+            title: chunk.title,
+          };
+        });
+      }
+    } catch (_err) {
+      /* fallback below */
+    }
+    return buildPreviewChunks(fallbackItems || []);
+  }
+
   async function refreshMaterialsOnly() {
     var items = await fetchMaterials();
     renderMaterialsList(items);
-    renderChunksList(buildPreviewChunks(items));
+    renderChunksList(await loadMaterialChunks(items));
     updateListHint();
   }
 

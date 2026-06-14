@@ -31,6 +31,8 @@ export interface SaveProjectPlanInput {
   status: ProjectStatus;
   materialIds: string[];
   tasks: CreateStudyTaskRecordInput[];
+  deadline?: Date | null;
+  dailyMinutes?: number | null;
 }
 
 export interface UpdateProjectSetupRecord {
@@ -159,6 +161,8 @@ export const projectsRepository = {
           subject: input.title,
           goal: input.goal,
           status: input.status,
+          deadline: input.deadline ?? null,
+          dailyMinutes: input.dailyMinutes ?? null,
           studyTasks: {
             create: input.tasks
           }
@@ -194,7 +198,9 @@ export const projectsRepository = {
           title: input.title,
           subject: input.title,
           goal: input.goal,
-          status: input.status
+          status: input.status,
+          ...(input.deadline !== undefined ? { deadline: input.deadline } : {}),
+          ...(input.dailyMinutes !== undefined ? { dailyMinutes: input.dailyMinutes } : {})
         }
       });
 

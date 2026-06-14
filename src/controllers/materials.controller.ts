@@ -18,6 +18,18 @@ function toProjectStoragePath(filePath: string): string {
   return path.relative(process.cwd(), filePath).split(path.sep).join("/");
 }
 
+export async function listMaterialChunks(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    sendSuccess(res, await materialsService.listChunks(req.query.limit));
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function listMaterials(
   req: Request,
   res: Response,

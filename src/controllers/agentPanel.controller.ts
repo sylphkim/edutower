@@ -16,6 +16,13 @@ function readSessionId(req: Request): string {
   return readParam(req, "session_id", "x-session-id") ?? "default";
 }
 
+function readOptionalQuery(req: Request, key: string): string | undefined {
+  const value = typeof req.query[key] === "string" ? req.query[key] : "";
+  const trimmed = value.trim();
+
+  return trimmed || undefined;
+}
+
 export async function getAgentPanel(
   req: Request,
   res: Response,
@@ -27,7 +34,13 @@ export async function getAgentPanel(
     // 不带则维持按 session 行为（自由答疑→空）。
     const conversationId = readParam(req, "conversation_id", "x-conversation-id");
     const projectId = readParam(req, "project_id", "x-project-id");
-    const result = await agentPanelService.buildPanel({ sessionId, conversationId, projectId });
+    const result = await agentPanelService.buildPanel({
+      sessionId,
+      conversationId,
+      projectId,
+      topicHint: readOptionalQuery(req, "topic"),
+      lastMessageHint: readOptionalQuery(req, "last_message")
+    });
 
     sendSuccess(res, result);
   } catch (error) {

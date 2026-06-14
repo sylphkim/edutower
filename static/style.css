@@ -1774,6 +1774,133 @@ code {
   gap: 20px;
 }
 
+.plan-settings {
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.plan-settings__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plan-settings__title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.plan-settings__meta,
+.plan-settings__summary,
+.plan-settings__hint {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.plan-settings__body {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.plan-settings__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.plan-settings__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.plan-history {
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.plan-history__title {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+
+.plan-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.plan-history-item {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.plan-history-item__date {
+  display: block;
+  font-size: 14px;
+}
+
+.plan-history-item__meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.plan-history-item__summary {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.module-toolbar--split {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wrongbook-create-panel__fields--stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wrongbook-create-panel__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.plan-phase-editor {
+  padding: 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.wrongbook-detail,
+.memory-detail__content {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
 .plan-hub__today {
   padding: 16px;
   border: 1px solid var(--color-border);

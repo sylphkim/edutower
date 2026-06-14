@@ -1,15 +1,13 @@
-import { randomUUID } from "node:crypto";
-import { materialsRepository } from "../repositories/materials.repository";
 import { planProposalsRepository } from "../repositories/planProposals.repository";
 import { planVersionsRepository } from "../repositories/planVersions.repository";
+import { knowledgeNodesRepository } from "../repositories/knowledgeNodes.repository";
 import { projectsRepository } from "../repositories/projects.repository";
 import type { ApplyPlanProposalResult, NormalizedPlanProposal } from "../types/planProposal";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
-import { aiEngineService } from "./aiEngine.service";
-import { conceptsService } from "./concepts.service";
 import { conceptMappingService } from "./conceptMapping.service";
 import { getDemoUserId } from "./demo.service";
+import { aiEngineService } from "./aiEngine.service";
 import { hashPlanProposal, normalizePlanProposal } from "./planProposalValidation";
 import { toPlanVersionItem } from "./planVersions.service";
 
@@ -149,64 +147,116 @@ export const planProposalsService = {
     }
   },
 
-  /**
-   * 让 FastAPI 起草一份计划 proposal（编排：收集项目上下文 → 调 AI → 过同一套校验）。
-   * Express 不直连 LLM；FastAPI 不可达直接抛 502。返回的是【未应用】的草稿，
-   * 供前端预览/微调后再走 apply。AI 输出非法会被 normalizePlanProposal 挡下并转成 502。
-   */
-  async generate(projectId: unknown): Promise<NormalizedPlanProposal> {
+  async generateFromAi(projectId: unknown): Promise<{ proposal: NormalizedPlanProposal; source: "ai" | "heuristic" }> {
     const normalizedProjectId = requiredProjectId(projectId);
     const userId = await getDemoUserId();
+    const project = await projectsRepository.findByIdForUser(normalizedProjectId, userId);
 
-    const project = await projectsRepository.findSetupByIdForUser(normalizedProjectId, userId);
     if (!project) {
       throw new AppError("INVALID_REQUEST", "Study project not found.", 404);
     }
 
-    const [materials, conceptList] = await Promise.all([
-      materialsRepository.listByProjectForUser(normalizedProjectId, userId),
-      conceptsService.listGlobal()
-    ]);
+    const nodes = await knowledgeNodesRepository.listByProject(normalizedProjectId);
+    const unlocked = nodes.filter((node) => node.isUnlocked && !node.archivedAt);
 
-    const draft = await aiEngineService.generatePlan({
-      project: {
-        title: project.title,
-        subject: project.subject,
-        goal: project.goal,
-        targetScore: project.targetScore ?? null,
-        deadline: project.deadline ? project.deadline.toISOString() : null,
-        dailyMinutes: project.dailyMinutes ?? null
-      },
-      materials: materials.map((material) => ({
-        title: material.title,
-        summary: material.summary ?? ""
-      })),
-      masteredConcepts: conceptList.concepts
-        .filter((concept) => concept.state === "mastered")
-        .map((concept) => ({ name: concept.name, subject: concept.subject }))
+    if (!unlocked.length) {
+      throw new AppError(
+        "INVALID_REQUEST",
+        "No unlocked skills available for plan generation.",
+        409
+      );
+    }
+
+    const skills = unlocked.map((node) => ({
+      id: node.id,
+      title: node.title,
+      description: node.description,
+      parentId: node.parentId
+    }));
+
+    const dependencyEdges = unlocked.flatMap((node) =>
+      (node.prerequisiteLinks ?? []).map((link) => ({
+        sourceId: link.prerequisiteId,
+        targetId: node.id
+      }))
+    );
+
+    const aiRaw = await aiEngineService.generatePlanProposal({
+      goal: project.goal,
+      skills,
+      dependencyEdges
     });
 
-    try {
-      return normalizePlanProposal({
-        proposalId: `ai_${randomUUID()}`,
-        metadata: {
-          provider: "fastapi",
-          generatedAt: new Date().toISOString()
-        },
-        nodes: draft.nodes,
-        prerequisiteEdges: draft.prerequisiteEdges,
-        phases: draft.phases
-      });
-    } catch (error) {
-      if (error instanceof AppError && error.code === "INVALID_REQUEST") {
-        throw new AppError(
-          "AI_ENGINE_REQUEST_FAILED",
-          `AI 生成的计划结构不合法：${error.message}`,
-          502,
-          error
-        );
-      }
-      throw error;
+    if (aiRaw) {
+      return {
+        proposal: normalizePlanProposal(aiRaw),
+        source: "ai"
+      };
     }
+
+    const heuristic = buildHeuristicProposal(unlocked, dependencyEdges);
+    return {
+      proposal: normalizePlanProposal(heuristic),
+      source: "heuristic"
+    };
   }
 };
+
+function buildHeuristicProposal(
+  unlocked: Array<{
+    id: string;
+    title: string;
+    description: string | null;
+    parentId: string | null;
+  }>,
+  dependencyEdges: Array<{ sourceId: string; targetId: string }>
+): unknown {
+  const nodes = unlocked.map((skill) => {
+    const node: Record<string, unknown> = {
+      key: `node_${skill.id}`,
+      title: skill.title
+    };
+    if (skill.description) {
+      node.description = skill.description;
+    }
+    if (skill.parentId) {
+      node.parentKey = `node_${skill.parentId}`;
+    }
+    return node;
+  });
+
+  const phaseCount = Math.min(3, Math.max(1, Math.ceil(unlocked.length / 4)));
+  const chunkSize = Math.ceil(unlocked.length / phaseCount);
+  const phases = [];
+
+  for (let index = 0; index < phaseCount; index += 1) {
+    const chunk = unlocked.slice(index * chunkSize, (index + 1) * chunkSize);
+    if (!chunk.length) {
+      continue;
+    }
+
+    phases.push({
+      title: `第 ${index + 1} 阶段`,
+      goal: `掌握 ${chunk
+        .slice(0, 3)
+        .map((skill) => skill.title)
+        .join("、")}${chunk.length > 3 ? " 等技能" : ""}`,
+      nodeKeys: chunk.map((skill) => `node_${skill.id}`)
+    });
+  }
+
+  return {
+    proposalId: `heuristic_${Date.now()}`,
+    metadata: {
+      provider: "express",
+      model: "skills-tree",
+      generatedAt: new Date().toISOString()
+    },
+    nodes,
+    prerequisiteEdges: dependencyEdges.map((edge) => ({
+      prerequisiteKey: `node_${edge.sourceId}`,
+      nodeKey: `node_${edge.targetId}`
+    })),
+    phases
+  };
+}

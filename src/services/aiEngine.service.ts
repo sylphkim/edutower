@@ -27,24 +27,15 @@ export interface AiEngineSummaryParams {
   conversationDigest?: string | null;
 }
 
-export interface AiEnginePlanParams {
-  project: {
+export interface AiEnginePlanProposalParams {
+  goal?: string;
+  skills: Array<{
+    id: string;
     title: string;
-    subject: string;
-    goal: string;
-    targetScore: string | null;
-    deadline: string | null;
-    dailyMinutes: number | null;
-  };
-  materials: Array<{ title: string; summary: string }>;
-  masteredConcepts: Array<{ name: string; subject: string | null }>;
-}
-
-/** FastAPI 返回的计划草稿（未校验）；交由 normalizePlanProposal 规整。 */
-export interface AiEnginePlanDraft {
-  nodes: unknown;
-  prerequisiteEdges: unknown;
-  phases: unknown;
+    description?: string | null;
+    parentId?: string | null;
+  }>;
+  dependencyEdges: Array<{ sourceId: string; targetId: string }>;
 }
 
 type RecordLike = Record<string, unknown>;
@@ -67,7 +58,9 @@ export class AiEngineService {
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), env.aiEngineTimeoutMs);
+    const chatTimeoutMs = Math.max(env.aiEngineTimeoutMs, 120_000);
+    const timeout = setTimeout(() => controller.abort(), chatTimeoutMs);
+    let failureReason: string | undefined;
 
     try {
       const response = await fetch(this.chatUrl(), {
@@ -93,27 +86,27 @@ export class AiEngineService {
         status: response.status,
         baseURL: env.aiEngineBaseUrl
       });
+      failureReason = "bad_response";
     } catch (error) {
       if (error instanceof AppError) {
         throw error;
       }
 
-      const reason =
+      failureReason =
         error instanceof Error && error.name === "AbortError"
           ? "timeout"
           : error instanceof Error
             ? error.message
             : String(error);
 
-      logger.warn(`AI engine unreachable (${reason}).`, {
+      logger.warn(`AI engine unreachable (${failureReason}).`, {
         baseURL: env.aiEngineBaseUrl
       });
     } finally {
       clearTimeout(timeout);
     }
 
-    // FastAPI 不可用：友好降级，不直连 LLM。
-    return { reply: this.unavailableChatReply(message) };
+    return { reply: this.unavailableChatReply(message, failureReason) };
   }
 
   /**
@@ -230,7 +223,6 @@ export class AiEngineService {
       clearTimeout(timeout);
     }
 
-    // 拿不到 AI 文本：交给上层退回确定性模板。
     return null;
   }
 
@@ -248,52 +240,41 @@ export class AiEngineService {
   }
 
   /**
-   * 生成计划草稿：转发给 FastAPI AI Engine 的 /generate-plan。
-   * 请求走 snake_case；响应须为 camelCase（直接喂给 normalizePlanProposal 校验）。
-   * 不可达 / 返回异常时抛错——不假造学习计划，也不直连 LLM。
+   * 生成整体计划提案：转发给 FastAPI /generate-plan-proposal。
    */
-  async generatePlan(params: AiEnginePlanParams): Promise<AiEnginePlanDraft> {
+  async generatePlanProposal(params: AiEnginePlanProposalParams): Promise<unknown | null> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), env.aiEngineTimeoutMs);
 
     try {
-      const response = await fetch(this.generatePlanUrl(), {
+      const response = await fetch(this.generatePlanProposalUrl(), {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          project: {
-            title: params.project.title,
-            subject: params.project.subject,
-            goal: params.project.goal,
-            target_score: params.project.targetScore,
-            deadline: params.project.deadline,
-            daily_minutes: params.project.dailyMinutes
-          },
-          materials: params.materials,
-          mastered_concepts: params.masteredConcepts
+          goal: params.goal ?? "",
+          skills: params.skills,
+          dependency_edges: params.dependencyEdges
         }),
         signal: controller.signal
       });
 
       const data = await this.readJson(response);
 
-      if (response.ok && isRecordLike(data)) {
-        const record = data as Record<string, unknown>;
-        return {
-          nodes: record.nodes,
-          prerequisiteEdges: record.prerequisiteEdges ?? [],
-          phases: record.phases
-        };
+      if (
+        response.ok &&
+        isRecordLike(data) &&
+        isRecordLike((data as { proposal?: unknown }).proposal)
+      ) {
+        return (data as { proposal: unknown }).proposal;
       }
 
-      throw new AppError("AI_ENGINE_REQUEST_FAILED", "AI engine 生成计划返回异常。", 502);
+      logger.warn("AI engine plan proposal returned non-ok response.", {
+        status: response.status,
+        baseURL: env.aiEngineBaseUrl
+      });
     } catch (error) {
-      if (error instanceof AppError) {
-        throw error;
-      }
-
       const reason =
         error instanceof Error && error.name === "AbortError"
           ? "timeout"
@@ -301,20 +282,24 @@ export class AiEngineService {
             ? error.message
             : String(error);
 
-      throw new AppError(
-        "AI_ENGINE_CONNECTION_ERROR",
-        `AI engine 生成计划不可达 (${reason})。`,
-        502,
-        error
-      );
+      logger.warn(`AI engine plan proposal unreachable (${reason}).`, {
+        baseURL: env.aiEngineBaseUrl
+      });
     } finally {
       clearTimeout(timeout);
     }
+
+    return null;
   }
 
-  // ── FastAPI 不可用时的降级（不直连 LLM）──────────────────────
+  private unavailableChatReply(message: string, reason?: string): string {
+    if (reason === "timeout") {
+      return (
+        "AI 回复超时了（模型响应较慢）。请稍后再试，或把问题拆短一些重新发送。\n\n" +
+        `你刚才说：「${message}」`
+      );
+    }
 
-  private unavailableChatReply(message: string): string {
     return (
       "AI 引擎暂时不可用，Express 不会直连大模型。\n\n" +
       "请确认：\n" +
@@ -337,8 +322,8 @@ export class AiEngineService {
     return new URL("/generate-summary", env.aiEngineBaseUrl).toString();
   }
 
-  private generatePlanUrl(): string {
-    return new URL("/generate-plan", env.aiEngineBaseUrl).toString();
+  private generatePlanProposalUrl(): string {
+    return new URL("/generate-plan-proposal", env.aiEngineBaseUrl).toString();
   }
 
   private async readJson(response: Response): Promise<unknown> {

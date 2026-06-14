@@ -20,6 +20,9 @@
   var isBusy = false;
   var pendingDelete = null;
   var statusBanner = { type: "", message: "" };
+  var showCreateItem = false;
+  var viewingItemId = null;
+  var viewingItemDetail = null;
 
   var CATEGORY_FILTER_ALL = "all";
   var CATEGORY_FILTER_ALL_LABEL = "全部错因";
@@ -89,6 +92,17 @@
       return;
     }
 
+    if (target.matches("[data-action='toggle-create-item']")) {
+      showCreateItem = !showCreateItem;
+      render();
+      return;
+    }
+
+    if (target.matches("[data-action='submit-create-item']")) {
+      submitCreateItem();
+      return;
+    }
+
     if (target.matches("[data-action='submit-create-subject']")) {
       submitCreateSubject();
       return;
@@ -147,6 +161,12 @@
 
     if (action === "review") {
       markReviewed(id);
+    } else if (action === "view-item") {
+      openItemDetail(id);
+    } else if (action === "close-item-detail") {
+      viewingItemId = null;
+      viewingItemDetail = null;
+      render();
     } else if (action === "delete") {
       pendingDelete = {
         kind: "item",
@@ -178,6 +198,7 @@
     activeSubject = subjectId;
     filterCategory = CATEGORY_FILTER_ALL;
     showCreateCategory = false;
+    showCreateItem = false;
     render();
   }
 
@@ -185,6 +206,7 @@
     activeSubject = null;
     filterCategory = CATEGORY_FILTER_ALL;
     showCreateCategory = false;
+    showCreateItem = false;
     render();
   }
 
@@ -198,6 +220,53 @@
     return categories.find(function (entry) {
       return entry.id === id;
     });
+  }
+
+  async function openItemDetail(id) {
+    if (!id || isBusy) return;
+    isBusy = true;
+    try {
+      viewingItemDetail = await api.get("/api/wrongbook/" + encodeURIComponent(id));
+      viewingItemId = id;
+      render();
+    } catch (err) {
+      statusBanner = { type: "error", message: "加载详情失败：" + api.networkError(err) };
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  function renderItemDetail() {
+    var item = viewingItemDetail;
+    if (!item) return "";
+
+    var question = item.question || {};
+    var prompt = question.prompt || question.stem || "";
+
+    return (
+      '<section class="module-mini-page wrongbook-detail">' +
+      '<nav class="wrongbook-breadcrumb">' +
+      '<button type="button" class="btn-link" data-action="close-item-detail">← 返回列表</button></nav>' +
+      '<h2 class="module-mini-page__title">错题详情</h2>' +
+      '<p class="wrongbook-card__prompt">' +
+      renderText(prompt) +
+      "</p>" +
+      '<p class="wrongbook-card__answer">你的答案：<strong>' +
+      renderText(item.wrongAnswer || "") +
+      "</strong></p>" +
+      '<p class="wrongbook-card__answer">正确答案：<strong>' +
+      renderText(question.answer || "") +
+      "</strong></p>" +
+      (question.explanation
+        ? '<p class="wrongbook-card__answer">解析：' + renderText(question.explanation) + "</p>"
+        : "") +
+      '<p class="wrongbook-card__meta">学科：' +
+      api.escapeHtml(subjectLabel(item.subject)) +
+      " · 错因：" +
+      api.escapeHtml(categoryLabel(item.category)) +
+      "</p></section>"
+    );
   }
 
   async function refresh() {
@@ -330,6 +399,11 @@
   }
 
   function render() {
+    if (viewingItemId && viewingItemDetail) {
+      rootEl.innerHTML = renderStatusBanner() + renderItemDetail();
+      return;
+    }
+
     if (!subjects.length) {
       rootEl.innerHTML =
         '<p class="module-empty module-empty--error">分类数据加载异常，请刷新重试。</p>';
@@ -427,6 +501,51 @@
       '<button type="button" class="btn btn--primary btn--compact" data-action="submit-create-subject">创建</button>' +
       '<button type="button" class="btn btn--ghost btn--compact" data-action="toggle-create-subject">取消</button>' +
       "</div></section>"
+    );
+  }
+
+  function renderCreateItemPanel(subjectId) {
+    if (!showCreateItem) return "";
+
+    var categoryOptions = categories
+      .map(function (entry) {
+        var selected =
+          filterCategory !== CATEGORY_FILTER_ALL && filterCategory === entry.id
+            ? " selected"
+            : "";
+        return (
+          '<option value="' +
+          api.escapeAttr(entry.id) +
+          '"' +
+          selected +
+          ">" +
+          api.escapeHtml(entry.label) +
+          "</option>"
+        );
+      })
+      .join("");
+
+    return (
+      '<section class="wrongbook-create-panel" aria-labelledby="createItemTitle">' +
+      '<h3 class="wrongbook-create-panel__title" id="createItemTitle">手动添加错题</h3>' +
+      '<p class="wrongbook-create-panel__hint">适用于线下练习或无法自动收录的题目。</p>' +
+      '<div class="wrongbook-create-panel__fields wrongbook-create-panel__fields--stack">' +
+      '<label class="form-label" for="newItemPrompt">题目</label>' +
+      '<textarea id="newItemPrompt" class="form-textarea" rows="3" maxlength="500" placeholder="输入题干…" required></textarea>' +
+      '<label class="form-label" for="newItemAnswer">正确答案</label>' +
+      '<input id="newItemAnswer" class="form-input" type="text" maxlength="200" placeholder="标准答案" required />' +
+      '<label class="form-label" for="newItemWrongAnswer">你的错误答案</label>' +
+      '<input id="newItemWrongAnswer" class="form-input" type="text" maxlength="200" placeholder="你当时写的答案" required />' +
+      '<label class="form-label" for="newItemCategory">错因</label>' +
+      '<select id="newItemCategory" class="form-input">' +
+      categoryOptions +
+      "</select>" +
+      '<label class="form-label" for="newItemExplanation">解析（可选）</label>' +
+      '<input id="newItemExplanation" class="form-input" type="text" maxlength="200" placeholder="一句话解析" />' +
+      '<div class="wrongbook-create-panel__actions">' +
+      '<button type="button" class="btn btn--primary btn--compact" data-action="submit-create-item">保存错题</button>' +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="toggle-create-item">取消</button>' +
+      "</div></div></section>"
     );
   }
 
@@ -594,14 +713,19 @@
         : '<div class="wrongbook-filters-row">' +
           '<button type="button" class="btn btn--ghost btn--compact wrongbook-filters__add" data-action="toggle-create-category">+ 新建错因</button></div>') +
       renderCreateCategoryPanel() +
-      '<div class="module-toolbar"><span class="module-toolbar__meta">' +
+      '<div class="module-toolbar module-toolbar--split">' +
+      '<span class="module-toolbar__meta">' +
       itemsInSubject(subjectId).length +
       " 道错题" +
       (filterCategory !== CATEGORY_FILTER_ALL ? " · 当前错因 " + filtered.length + " 道" : "") +
-      "</span></div>" +
+      "</span>" +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="toggle-create-item">' +
+      (showCreateItem ? "取消添加" : "+ 手动添加") +
+      "</button></div>" +
+      renderCreateItemPanel(subjectId) +
       (filtered.length
         ? '<ul class="wrongbook-list">' + cards + "</ul>"
-        : '<p class="module-empty">该错因下暂无错题，请切换筛选或为题目选择其他错因。</p>');
+        : '<p class="module-empty">该错因下暂无错题，请切换筛选、手动添加，或完成练习后自动收录。</p>');
 
     if (showCreateCategory) {
       var catInput = document.getElementById("newCategoryLabel");
@@ -706,6 +830,9 @@
       "</strong></p>" +
       explanation +
       '<div class="wrongbook-card__actions">' +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="view-item" data-id="' +
+      api.escapeAttr(item.id) +
+      '">详情</button>' +
       '<button type="button" class="btn btn--primary btn--compact" data-action="review" data-id="' +
       api.escapeAttr(item.id) +
       '">标记已复习</button>' +
@@ -773,6 +900,51 @@
       await refresh();
     } catch (err) {
       statusBanner = { type: "error", message: "创建失败：" + api.networkError(err) };
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  async function submitCreateItem() {
+    if (isBusy || !activeSubject) return;
+
+    var promptInput = document.getElementById("newItemPrompt");
+    var answerInput = document.getElementById("newItemAnswer");
+    var wrongInput = document.getElementById("newItemWrongAnswer");
+    var categoryInput = document.getElementById("newItemCategory");
+    var explanationInput = document.getElementById("newItemExplanation");
+
+    var prompt = promptInput ? promptInput.value.trim() : "";
+    var answer = answerInput ? answerInput.value.trim() : "";
+    var wrongAnswer = wrongInput ? wrongInput.value.trim() : "";
+    var category = categoryInput ? categoryInput.value.trim() : "uncategorized";
+    var explanation = explanationInput ? explanationInput.value.trim() : "";
+
+    if (!prompt || !answer || !wrongAnswer) {
+      statusBanner = { type: "error", message: "请填写题目、正确答案和错误答案。" };
+      render();
+      return;
+    }
+
+    isBusy = true;
+    try {
+      await api.post("/api/wrongbook", {
+        subject: activeSubject,
+        category: category || "uncategorized",
+        wrongAnswer: wrongAnswer,
+        question: {
+          type: "short_answer",
+          prompt: prompt,
+          answer: answer,
+          explanation: explanation || undefined,
+        },
+      });
+      showCreateItem = false;
+      statusBanner = { type: "success", message: "错题已添加。" };
+      await refresh();
+    } catch (err) {
+      statusBanner = { type: "error", message: "添加失败：" + api.networkError(err) };
       render();
     } finally {
       isBusy = false;

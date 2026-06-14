@@ -53,6 +53,89 @@ export const conversationsRepository = {
     });
   },
 
+  listByUser(userId: string, limit = 50) {
+    return prisma.conversation.findMany({
+      where: { userId },
+      orderBy: { updatedAt: "desc" },
+      take: limit,
+      include: {
+        messages: {
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: 1
+        },
+        _count: {
+          select: { messages: true }
+        }
+      }
+    });
+  },
+
+  countMessagesForUser(input: {
+    userId: string;
+    sessionId?: string;
+    conversationId?: string;
+  }): Promise<number> {
+    if (input.conversationId) {
+      return prisma.message.count({
+        where: {
+          conversation: {
+            id: input.conversationId,
+            userId: input.userId
+          }
+        }
+      });
+    }
+
+    if (input.sessionId) {
+      return prisma.message.count({
+        where: {
+          conversation: {
+            externalSessionId: input.sessionId,
+            userId: input.userId
+          }
+        }
+      });
+    }
+
+    return Promise.resolve(0);
+  },
+
+  findLatestUserMessageForUser(input: {
+    userId: string;
+    sessionId?: string;
+    conversationId?: string;
+  }): Promise<string | null> {
+    const where =
+      input.conversationId !== undefined
+        ? {
+            role: "user" as const,
+            conversation: {
+              id: input.conversationId,
+              userId: input.userId
+            }
+          }
+        : input.sessionId
+          ? {
+              role: "user" as const,
+              conversation: {
+                externalSessionId: input.sessionId,
+                userId: input.userId
+              }
+            }
+          : null;
+
+    if (!where) {
+      return Promise.resolve(null);
+    }
+
+    return prisma.message
+      .findFirst({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }]
+      })
+      .then((message) => message?.content?.trim() || null);
+  },
+
   // 按前端传入的 externalSessionId 定位会话（含消息）。
   // 与 chatPersistence 懒创建会话时写入的 externalSessionId 对应。
   findByExternalSessionIdForUser(

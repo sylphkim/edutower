@@ -15,10 +15,7 @@ import {
   revisePlanVersion,
   updatePlanVersion
 } from "../controllers/planVersions.controller";
-import {
-  applyPlanProposal,
-  generatePlanProposal
-} from "../controllers/planProposals.controller";
+import { applyPlanProposal, generatePlanProposal } from "../controllers/planProposals.controller";
 
 const router = Router();
 
