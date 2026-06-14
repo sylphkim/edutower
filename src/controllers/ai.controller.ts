@@ -6,6 +6,7 @@ import { memoryService } from "../services/memory.service";
 import type { CreateMemoryInput } from "../types/memory";
 import { sendSuccess } from "../utils/apiResponse";
 import { AppError } from "../utils/errors";
+import { logger } from "../utils/logger";
 
 const MEMORY_UPDATES_RE = /---memory_updates\n([\s\S]*?)\n---/;
 
@@ -35,7 +36,9 @@ function parseAndSaveMemoryUpdates(reply: string): string {
               importance: item.importance
             });
           })()
-        ).catch(() => {});
+        ).catch((error) => {
+          logger.warn("Failed to persist memory update from chat reply.", error);
+        });
       }
     }
   } catch {
@@ -48,19 +51,23 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
   try {
     const message = readMessage(req.body);
     const sessionId = readSessionId(req.body);
-    const context = await chatContextService.buildContext({ sessionId });
+    const conversationId = readConversationId(req.body);
+    const context = await chatContextService.buildContext({ sessionId, conversationId });
     const result = await aiEngineService.chat({ sessionId, message, context });
 
     const cleanReply = parseAndSaveMemoryUpdates(result.reply);
 
     chatPersistenceService.saveChatExchange({
       sessionId,
-      conversationId: readConversationId(req.body),
+      conversationId,
       userMessage: message,
       aiReply: cleanReply,
       engine: "fastapi"
-    }).catch(() => {});    
-    
+    }).catch((error) => {
+      logger.warn("Failed to persist chat exchange.", error);
+    });
+
+
     sendSuccess(res, {
       answer: cleanReply,
       reply: cleanReply,
@@ -74,23 +81,6 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
         sessionHistoryCount: context.sessionHistory.length,
         memoryCount: context.memories.length    
       }
-    });
-  } catch (error) {
-    next(error);
-  }
-}
-
-export async function legacyChat(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const message = readMessage(req.body);
-    const sessionId = readSessionId(req.body);
-    const context = await chatContextService.buildContext({ sessionId });
-    const result = await aiEngineService.chat({ sessionId, message, context });
-
-    const cleanReply = parseAndSaveMemoryUpdates(result.reply);
-
-    res.json({
-      reply: cleanReply
     });
   } catch (error) {
     next(error);

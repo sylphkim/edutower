@@ -14,9 +14,20 @@ export interface SaveChatExchangeParams {
   engine: string;
 }
 
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: unknown }).code === "P2002"
+  );
+}
+
 // 解析这一轮问答要落到哪个会话：
 // - 传了 conversationId → 用前端显式创建的子对话；
-// - 没传 → 按 sessionId 懒创建/复用一个 free_qa 会话，保证聊天也落库。
+// - 没传 → 按 (userId, externalSessionId) 懒创建/复用一个 free_qa 会话，保证聊天也落库。
+// 依赖 @@unique([userId, externalSessionId])：并发首发时两个请求都查不到 → 一个成功创建、
+// 另一个撞唯一约束(P2002)，捕获后回查复用，保证「一个 session 恒一条会话」。
 async function resolveConversationId(
   params: SaveChatExchangeParams,
   userId: string
@@ -25,25 +36,43 @@ async function resolveConversationId(
     return params.conversationId;
   }
 
-  const existing = await prisma.conversation.findFirst({
-    where: { externalSessionId: params.sessionId }
-  });
+  const where = {
+    userId_externalSessionId: {
+      userId,
+      externalSessionId: params.sessionId
+    }
+  };
+
+  const existing = await prisma.conversation.findUnique({ where });
 
   if (existing) {
     return existing.id;
   }
 
-  const created = await prisma.conversation.create({
-    data: {
-      userId,
-      projectId: params.projectId,
-      type: "free_qa",
-      title: DEFAULT_CONVERSATION_TITLE,
-      externalSessionId: params.sessionId
-    }
-  });
+  try {
+    const created = await prisma.conversation.create({
+      data: {
+        userId,
+        projectId: params.projectId,
+        type: "free_qa",
+        title: DEFAULT_CONVERSATION_TITLE,
+        externalSessionId: params.sessionId
+      }
+    });
 
-  return created.id;
+    return created.id;
+  } catch (error) {
+    // 并发下另一个请求已抢先创建 → 回查复用，而不是抛错或落重复。
+    if (isUniqueConstraintError(error)) {
+      const raced = await prisma.conversation.findUnique({ where });
+
+      if (raced) {
+        return raced.id;
+      }
+    }
+
+    throw error;
+  }
 }
 
 export const chatPersistenceService = {
