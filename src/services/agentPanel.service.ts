@@ -71,19 +71,19 @@ async function countReviewedWrongbookItems(): Promise<number> {
 export const agentPanelService = {
   async buildPanel({ sessionId, projectId: paramProjectId }: BuildAgentPanelParams): Promise<AgentPanelPayload> {
     const safeSessionId = (sessionId || "").trim() || "default";
-    const projectId = paramProjectId || await getDemoProjectId();
+    const resolvedProjectId = paramProjectId || await getDemoProjectId();
     const userId = await getDemoUserId();
     const project = await projectsRepository.upsertDemoProject(userId);
     const { subject, topic } = parseSubjectLine(project.subject);
 
-    const knowledgeNodes = await knowledgeNodesRepository.listByProject(projectId);
+    const knowledgeNodes = await knowledgeNodesRepository.listByProject(resolvedProjectId);
     const knowledgePointCount = knowledgeNodes.length;
     const percent = averageMastery(knowledgeNodes.map((item) => item.mastery));
 
-    const practiceQuestions = await quizzesRepository.countByProject(projectId);
+    const practiceQuestions = await quizzesRepository.countByProject(resolvedProjectId);
     const errorCorrections = await countReviewedWrongbookItems();
 
-    const weakPoints = await dailyTaskSheetsRepository.collectActiveWeakPoints(projectId);
+    const weakPoints = await dailyTaskSheetsRepository.collectActiveWeakPoints(resolvedProjectId);
     const severityRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
     const primaryWeakPoint = [...weakPoints].sort(
       (a, b) => (severityRank[b.severity] ?? 0) - (severityRank[a.severity] ?? 0)

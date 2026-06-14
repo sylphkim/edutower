@@ -70,15 +70,12 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
       userMessage: message,
       aiReply: cleanReply,
       engine: "fastapi"
-    }).catch(() => {});
-
-    // 报告 Agent 完成
-    agentStatusService.setPhase(sessionId, "idle", "就绪 · 已回复");
-
     }).catch((error) => {
       logger.warn("Failed to persist chat exchange.", error);
     });
 
+    // 报告 Agent 完成
+    agentStatusService.setPhase(sessionId, "idle", "就绪 · 已回复");
 
     sendSuccess(res, {
       answer: cleanReply,
