@@ -11,6 +11,7 @@ import type {
 import type {
   ConversationDetail,
   ConversationItem,
+  ConversationListItem,
   ConversationType,
   CreateConversationInput,
   MessageItem,
@@ -104,7 +105,39 @@ function toApiConversationDetail(
   };
 }
 
+function buildPreview(content: string | undefined): string | null {
+  if (!content || !content.trim()) {
+    return null;
+  }
+
+  const normalized = content.replace(/\s+/g, " ").trim();
+  return normalized.length > 48 ? `${normalized.slice(0, 48)}…` : normalized;
+}
+
 export const conversationsService = {
+  async list(limitRaw?: unknown): Promise<{ items: ConversationListItem[] }> {
+    const userId = await getDemoUserId();
+    const limit =
+      typeof limitRaw === "string" && /^\d+$/.test(limitRaw)
+        ? Math.min(100, Math.max(1, Number.parseInt(limitRaw, 10)))
+        : 50;
+
+    const items = await conversationsRepository.listByUser(userId, limit);
+
+    return {
+      items: items.map((item) => {
+        const lastMessage = item.messages[0];
+
+        return {
+          ...toApiConversation(item),
+          externalSessionId: item.externalSessionId,
+          messageCount: item._count.messages,
+          preview: buildPreview(lastMessage?.content)
+        };
+      })
+    };
+  },
+
   async create(input: CreateConversationInput): Promise<ConversationItem> {
     ensureValidCreateInput(input);
 
@@ -114,7 +147,8 @@ export const conversationsService = {
       userId,
       projectId,
       type: (input.type ?? "project_study") as PrismaConversationType,
-      title: input.title?.trim() ? input.title.trim() : null
+      title: input.title?.trim() ? input.title.trim() : null,
+      externalSessionId: input.externalSessionId?.trim() ? input.externalSessionId.trim() : null
     });
 
     return toApiConversation(conversation);

@@ -21,6 +21,8 @@ export interface PlanItem {
   id: string;
   title: string;
   goal?: string;
+  deadline?: string | null;
+  dailyMinutes?: number | null;
   materialIds: string[];
   skillIds: string[];
   days: PlanDay[];
@@ -33,6 +35,8 @@ export interface PlanItem {
 export interface CreatePlanInput {
   title: string;
   goal?: string;
+  deadline?: string | null;
+  dailyMinutes?: number | null;
   materialIds?: string[];
   skillIds?: string[];
   days?: PlanDay[];
@@ -42,6 +46,8 @@ export interface CreatePlanInput {
 export interface UpdatePlanInput {
   title?: string;
   goal?: string;
+  deadline?: string | null;
+  dailyMinutes?: number | null;
   materialIds?: string[];
   skillIds?: string[];
   days?: PlanDay[];

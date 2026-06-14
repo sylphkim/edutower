@@ -34,6 +34,10 @@ REACT_PATTERN = re.compile(
     r"Thought:\s*(.*?)\s*\n\s*Action:\s*(\w+)\s*\n\s*Action Input:\s*(.*)",
     re.DOTALL | re.IGNORECASE,
 )
+FINAL_ONLY_PATTERN = re.compile(
+    r"Action:\s*Final(?:\s+Answer)?\s*\n\s*Action Input:\s*(.*)",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
 class ChatAgent:
@@ -117,6 +121,14 @@ class ChatAgent:
                 "thought": match.group(1).strip(),
                 "action": match.group(2).strip(),
                 "action_input": match.group(3).strip(),
+            }
+
+        final_match = FINAL_ONLY_PATTERN.search(text)
+        if final_match:
+            return {
+                "thought": "",
+                "action": "Final",
+                "action_input": final_match.group(1).strip(),
             }
 
         # Fallback: treat entire output as final answer

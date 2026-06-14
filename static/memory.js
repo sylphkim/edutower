@@ -12,6 +12,8 @@
   var filterType = "all";
   var viewMode = "list";
   var editingId = null;
+  var viewingDetailId = null;
+  var viewingDetail = null;
   var pendingDeleteId = null;
   var isBusy = false;
   var banner = { type: "", message: "" };
@@ -59,8 +61,17 @@
       } else if (action === "memory-edit") {
         editingId = target.getAttribute("data-id");
         pendingDeleteId = null;
+        viewingDetailId = null;
+        viewingDetail = null;
         setViewMode("edit");
         ensureRelationOptions().then(render);
+      } else if (action === "memory-view-detail") {
+        openMemoryDetail(target.getAttribute("data-id"));
+      } else if (action === "memory-close-detail") {
+        viewingDetailId = null;
+        viewingDetail = null;
+        setViewMode("list");
+        render();
       } else if (action === "memory-submit") {
         submitMemoryForm();
       } else if (action === "memory-view-daily-summary") {
@@ -467,6 +478,9 @@
             ? '<span class="memory-card__relations">' + api.escapeHtml(relations.join(" · ")) + "</span>"
             : "") +
           '<div class="memory-card__actions">' +
+          '<button type="button" class="btn btn--ghost btn--compact" data-action="memory-view-detail" data-id="' +
+          api.escapeAttr(item.id) +
+          '">详情</button>' +
           '<button type="button" class="btn btn--ghost btn--compact" data-action="memory-edit" data-id="' +
           api.escapeAttr(item.id) +
           '">编辑</button>' +
@@ -490,7 +504,57 @@
     );
   }
 
+  function renderMemoryDetail() {
+    var item = viewingDetail;
+    if (!item) return "";
+
+    return (
+      renderSubnav() +
+      renderBanner() +
+      '<section class="module-mini-page memory-detail">' +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="memory-close-detail">← 返回列表</button>' +
+      '<h2 class="module-mini-page__title">' +
+      api.escapeHtml(item.title) +
+      "</h2>" +
+      '<p class="memory-card__meta">' +
+      api.escapeHtml(TYPE_LABEL[item.type] || item.type) +
+      " · 重要度 " +
+      api.escapeHtml(IMPORTANCE_LABEL[item.importance] || item.importance) +
+      "</p>" +
+      '<div class="memory-detail__content">' +
+      api.escapeHtml(item.content) +
+      "</div>" +
+      '<p class="memory-card__date">更新于 ' +
+      api.escapeHtml(api.formatDate(item.updatedAt || item.createdAt)) +
+      "</p>" +
+      '<div class="module-mini-page__actions">' +
+      '<button type="button" class="btn btn--primary btn--compact" data-action="memory-edit" data-id="' +
+      api.escapeAttr(item.id) +
+      '">编辑</button></div></section>'
+    );
+  }
+
+  async function openMemoryDetail(id) {
+    if (!id || isBusy) return;
+    isBusy = true;
+    try {
+      viewingDetail = await api.get("/api/memory/" + encodeURIComponent(id));
+      viewingDetailId = id;
+      setViewMode("detail");
+      render();
+    } catch (err) {
+      setBanner("error", "加载详情失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
   function render() {
+    if (viewMode === "detail" && viewingDetail) {
+      rootEl.innerHTML = renderMemoryDetail();
+      return;
+    }
     if (viewMode === "create" || viewMode === "edit") {
       rootEl.innerHTML = renderSubnav() + renderForm();
       return;

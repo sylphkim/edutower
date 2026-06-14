@@ -278,6 +278,22 @@ function toApiMaterial(item: Material): MaterialItem {
   };
 }
 
+function splitSummaryToChunks(summary: string): string[] {
+  const parts = summary
+    .split(/\n+|(?<=[。！？.!?])\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return parts.length > 0 ? parts : [summary.trim()];
+}
+
+export interface MaterialChunkItem {
+  order: number;
+  materialId: string;
+  title: string;
+  text: string;
+}
+
 export const materialsService = {
   async list(query: MaterialListQuery = {}): Promise<{ items: MaterialItem[] }> {
     ensureValidFolderId(query.folderId, "folderId");
@@ -408,5 +424,37 @@ export const materialsService = {
       downloadName: item.originalFileName?.trim() || item.title,
       mimeType: item.mimeType?.trim() || "application/octet-stream"
     };
+  },
+
+  async listChunks(limitRaw?: unknown): Promise<{ items: MaterialChunkItem[] }> {
+    const userId = await getDemoUserId();
+    const limit =
+      typeof limitRaw === "string" && /^\d+$/.test(limitRaw)
+        ? Math.min(200, Math.max(1, Number.parseInt(limitRaw, 10)))
+        : 80;
+
+    const materials = await materialsRepository.listByUser(userId);
+    const chunks: MaterialChunkItem[] = [];
+
+    for (const item of materials) {
+      if (!item.summary?.trim()) {
+        continue;
+      }
+
+      for (const text of splitSummaryToChunks(item.summary)) {
+        chunks.push({
+          order: chunks.length + 1,
+          materialId: item.id,
+          title: item.title,
+          text
+        });
+
+        if (chunks.length >= limit) {
+          return { items: chunks };
+        }
+      }
+    }
+
+    return { items: chunks };
   }
 };

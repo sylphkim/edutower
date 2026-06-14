@@ -20,6 +20,8 @@ import { getDemoProjectId } from "./demoProject.service";
 import { getDemoUserId } from "./demoUser.service";
 
 const VALID_PLAN_STATUSES: PlanStatus[] = ["draft", "active", "completed"];
+const MIN_DAILY_MINUTES = 15;
+const MAX_DAILY_MINUTES = 480;
 const VALID_TASK_TYPES: PlanTaskType[] = [
   "read_material",
   "practice_quiz",
@@ -108,6 +110,67 @@ function ensureValidDays(days: PlanDay[]): void {
   }
 }
 
+function parseDeadlineInput(value: unknown, fieldName: string): Date | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null || value === "") {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new AppError("INVALID_REQUEST", `${fieldName} must be a date string or null.`, 400);
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  const parsed = dateOnlyMatch
+    ? new Date(`${trimmed}T00:00:00.000Z`)
+    : new Date(trimmed);
+
+  if (Number.isNaN(parsed.getTime())) {
+    throw new AppError("INVALID_REQUEST", `${fieldName} must be a valid date.`, 400);
+  }
+
+  return parsed;
+}
+
+function parseDailyMinutesInput(value: unknown): number | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null || value === "") {
+    return null;
+  }
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new AppError(
+      "INVALID_REQUEST",
+      "dailyMinutes must be a number between 15 and 480.",
+      400
+    );
+  }
+
+  const rounded = Math.round(value);
+
+  if (rounded < MIN_DAILY_MINUTES || rounded > MAX_DAILY_MINUTES) {
+    throw new AppError(
+      "INVALID_REQUEST",
+      `dailyMinutes must be between ${MIN_DAILY_MINUTES} and ${MAX_DAILY_MINUTES}.`,
+      400
+    );
+  }
+
+  return rounded;
+}
+
 function ensureValidCreateInput(input: CreatePlanInput): void {
   if (!input || typeof input !== "object") {
     throw new AppError("INVALID_REQUEST", "Request body is required.", 400);
@@ -120,6 +183,9 @@ function ensureValidCreateInput(input: CreatePlanInput): void {
   if (input.goal !== undefined && typeof input.goal !== "string") {
     throw new AppError("INVALID_REQUEST", "goal must be a string.", 400);
   }
+
+  parseDeadlineInput(input.deadline, "deadline");
+  parseDailyMinutesInput(input.dailyMinutes);
 
   if (input.materialIds !== undefined) {
     ensureStringArray(input.materialIds, "materialIds");
@@ -146,6 +212,9 @@ function ensureValidUpdateInput(input: UpdatePlanInput): void {
   if (input.goal !== undefined && typeof input.goal !== "string") {
     throw new AppError("INVALID_REQUEST", "goal must be a string.", 400);
   }
+
+  parseDeadlineInput(input.deadline, "deadline");
+  parseDailyMinutesInput(input.dailyMinutes);
 
   if (input.materialIds !== undefined) {
     ensureStringArray(input.materialIds, "materialIds");
@@ -278,6 +347,8 @@ function toApiPlan(project: StudyProjectWithPlan): PlanItem {
     id: project.id,
     title: project.title,
     goal: project.goal || undefined,
+    deadline: project.deadline ? project.deadline.toISOString() : null,
+    dailyMinutes: project.dailyMinutes,
     materialIds: project.materialLinks.map((link) => link.materialId),
     skillIds: project.knowledgeNodes.map((node) => node.id),
     days,
@@ -326,7 +397,9 @@ export const planService = {
       goal: input.goal ?? "",
       status: "planning",
       materialIds,
-      tasks
+      tasks,
+      deadline: parseDeadlineInput(input.deadline, "deadline") ?? null,
+      dailyMinutes: parseDailyMinutesInput(input.dailyMinutes) ?? null
     });
 
     return toApiPlan(item);
@@ -362,7 +435,9 @@ export const planService = {
       goal: input.goal ?? currentItem.goal,
       status: input.status !== undefined ? toProjectStatus(input.status) : currentItem.status,
       materialIds,
-      tasks
+      tasks,
+      deadline: parseDeadlineInput(input.deadline, "deadline"),
+      dailyMinutes: parseDailyMinutesInput(input.dailyMinutes)
     });
 
     return toApiPlan(updatedItem);

@@ -27,6 +27,17 @@ export interface AiEngineSummaryParams {
   conversationDigest?: string | null;
 }
 
+export interface AiEnginePlanProposalParams {
+  goal?: string;
+  skills: Array<{
+    id: string;
+    title: string;
+    description?: string | null;
+    parentId?: string | null;
+  }>;
+  dependencyEdges: Array<{ sourceId: string; targetId: string }>;
+}
+
 type RecordLike = Record<string, unknown>;
 
 export class AiEngineService {
@@ -47,7 +58,9 @@ export class AiEngineService {
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), env.aiEngineTimeoutMs);
+    const chatTimeoutMs = Math.max(env.aiEngineTimeoutMs, 120_000);
+    const timeout = setTimeout(() => controller.abort(), chatTimeoutMs);
+    let failureReason: string | undefined;
 
     try {
       const response = await fetch(this.chatUrl(), {
@@ -73,26 +86,27 @@ export class AiEngineService {
         status: response.status,
         baseURL: env.aiEngineBaseUrl
       });
+      failureReason = "bad_response";
     } catch (error) {
       if (error instanceof AppError) {
         throw error;
       }
 
-      const reason =
+      failureReason =
         error instanceof Error && error.name === "AbortError"
           ? "timeout"
           : error instanceof Error
             ? error.message
             : String(error);
 
-      logger.warn(`AI engine unreachable (${reason}).`, {
+      logger.warn(`AI engine unreachable (${failureReason}).`, {
         baseURL: env.aiEngineBaseUrl
       });
     } finally {
       clearTimeout(timeout);
     }
 
-    return { reply: this.unavailableChatReply(message) };
+    return { reply: this.unavailableChatReply(message, failureReason) };
   }
 
   /**
@@ -212,7 +226,67 @@ export class AiEngineService {
     return null;
   }
 
-  private unavailableChatReply(message: string): string {
+  /**
+   * 生成整体计划提案：转发给 FastAPI /generate-plan-proposal。
+   */
+  async generatePlanProposal(params: AiEnginePlanProposalParams): Promise<unknown | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), env.aiEngineTimeoutMs);
+
+    try {
+      const response = await fetch(this.generatePlanProposalUrl(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          goal: params.goal ?? "",
+          skills: params.skills,
+          dependency_edges: params.dependencyEdges
+        }),
+        signal: controller.signal
+      });
+
+      const data = await this.readJson(response);
+
+      if (
+        response.ok &&
+        isRecordLike(data) &&
+        isRecordLike((data as { proposal?: unknown }).proposal)
+      ) {
+        return (data as { proposal: unknown }).proposal;
+      }
+
+      logger.warn("AI engine plan proposal returned non-ok response.", {
+        status: response.status,
+        baseURL: env.aiEngineBaseUrl
+      });
+    } catch (error) {
+      const reason =
+        error instanceof Error && error.name === "AbortError"
+          ? "timeout"
+          : error instanceof Error
+            ? error.message
+            : String(error);
+
+      logger.warn(`AI engine plan proposal unreachable (${reason}).`, {
+        baseURL: env.aiEngineBaseUrl
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    return null;
+  }
+
+  private unavailableChatReply(message: string, reason?: string): string {
+    if (reason === "timeout") {
+      return (
+        "AI 回复超时了（模型响应较慢）。请稍后再试，或把问题拆短一些重新发送。\n\n" +
+        `你刚才说：「${message}」`
+      );
+    }
+
     return (
       "AI 引擎暂时不可用，Express 不会直连大模型。\n\n" +
       "请确认：\n" +
@@ -233,6 +307,10 @@ export class AiEngineService {
 
   private generateSummaryUrl(): string {
     return new URL("/generate-summary", env.aiEngineBaseUrl).toString();
+  }
+
+  private generatePlanProposalUrl(): string {
+    return new URL("/generate-plan-proposal", env.aiEngineBaseUrl).toString();
   }
 
   private async readJson(response: Response): Promise<unknown> {
