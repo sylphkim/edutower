@@ -85,6 +85,16 @@ export const quizzesRepository = {
     });
   },
 
+  countByProject(projectId: string): Promise<number> {
+    return prisma.quiz.count({
+      where: {
+        knowledgeNode: {
+          projectId
+        }
+      }
+    });
+  },
+
   async create(input: CreateQuizRecordInput): Promise<QuizWithQuestions> {
     const quiz = await prisma.quiz.create({
       data: {

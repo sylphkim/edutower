@@ -1,12 +1,32 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { env } from "../config/env";
-import {
-  getEffectiveLlmConfig,
-  getLlmRuntimeOverrides,
-  setLlmRuntimeOverrides
-} from "../config/llmRuntime";
 import { AppError } from "../utils/errors";
+
+// —— LLM 运行时配置（原 config/llmRuntime，仅本服务使用，合并进来）——
+interface LlmRuntimeConfig {
+  apiKey: string;
+  baseUrl?: string;
+  model: string;
+}
+
+let runtimeOverrides: Partial<LlmRuntimeConfig> = {};
+
+function setLlmRuntimeOverrides(overrides: Partial<LlmRuntimeConfig>): void {
+  runtimeOverrides = { ...overrides };
+}
+
+function getLlmRuntimeOverrides(): Partial<LlmRuntimeConfig> {
+  return { ...runtimeOverrides };
+}
+
+function getEffectiveLlmConfig(): LlmRuntimeConfig {
+  return {
+    apiKey: runtimeOverrides.apiKey || env.llmApiKey,
+    baseUrl: runtimeOverrides.baseUrl || env.llmBaseUrl,
+    model: runtimeOverrides.model || env.llmModel
+  };
+}
 
 export interface LlmSettingsInput {
   apiKey?: string;

@@ -42,7 +42,6 @@ export interface UpdateMemoryInput {
 export interface DailySummaryInput {
   planId?: string;
   learnedSkillIds?: string[];
-  completedTaskIds?: string[];
   wrongbookIds?: string[];
   summary: string;
   weaknesses?: string[];

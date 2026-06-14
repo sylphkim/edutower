@@ -3,9 +3,11 @@ import { aiEngineService } from "../services/aiEngine.service";
 import { chatContextService } from "../services/chatContext.service";
 import { chatPersistenceService } from "../services/chatPersistence.service";
 import { memoryService } from "../services/memory.service";
+import { agentStatusService } from "../services/agentStatus.service";
 import type { CreateMemoryInput } from "../types/memory";
 import { sendSuccess } from "../utils/apiResponse";
 import { AppError } from "../utils/errors";
+import { logger } from "../utils/logger";
 
 const MEMORY_UPDATES_RE = /---memory_updates\n([\s\S]*?)\n---/;
 
@@ -35,7 +37,9 @@ function parseAndSaveMemoryUpdates(reply: string): string {
               importance: item.importance
             });
           })()
-        ).catch(() => {});
+        ).catch((error) => {
+          logger.warn("Failed to persist memory update from chat reply.", error);
+        });
       }
     }
   } catch {
@@ -48,19 +52,31 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
   try {
     const message = readMessage(req.body);
     const sessionId = readSessionId(req.body);
-    const context = await chatContextService.buildContext({ sessionId });
+
+    // 报告 Agent 进入推理阶段
+    agentStatusService.setPhase(sessionId, "thinking", "推理中 · 正在分析你的问题");
+
+    const conversationId = readConversationId(req.body);
+    const context = await chatContextService.buildContext({ sessionId, conversationId });
+
+    agentStatusService.setPhase(sessionId, "generating", "推理中 · 正在生成回答");
     const result = await aiEngineService.chat({ sessionId, message, context });
 
     const cleanReply = parseAndSaveMemoryUpdates(result.reply);
 
     chatPersistenceService.saveChatExchange({
       sessionId,
-      conversationId: readConversationId(req.body),
+      conversationId,
       userMessage: message,
       aiReply: cleanReply,
       engine: "fastapi"
-    }).catch(() => {});    
-    
+    }).catch((error) => {
+      logger.warn("Failed to persist chat exchange.", error);
+    });
+
+    // 报告 Agent 完成
+    agentStatusService.setPhase(sessionId, "idle", "就绪 · 已回复");
+
     sendSuccess(res, {
       answer: cleanReply,
       reply: cleanReply,
@@ -76,23 +92,13 @@ export async function chat(req: Request, res: Response, next: NextFunction): Pro
       }
     });
   } catch (error) {
-    next(error);
-  }
-}
-
-export async function legacyChat(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const message = readMessage(req.body);
-    const sessionId = readSessionId(req.body);
-    const context = await chatContextService.buildContext({ sessionId });
-    const result = await aiEngineService.chat({ sessionId, message, context });
-
-    const cleanReply = parseAndSaveMemoryUpdates(result.reply);
-
-    res.json({
-      reply: cleanReply
-    });
-  } catch (error) {
+    // 出错时恢复空闲状态
+    try {
+      const fallbackSessionId = readSessionId(req.body);
+      agentStatusService.setPhase(fallbackSessionId, "idle", "就绪");
+    } catch {
+      // 如果连 sessionId 都无法读取，则忽略
+    }
     next(error);
   }
 }

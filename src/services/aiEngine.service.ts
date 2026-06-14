@@ -42,8 +42,8 @@ type RecordLike = Record<string, unknown>;
 
 export class AiEngineService {
   /**
-   * 聊天：仅转发给 FastAPI AI Engine 的 /chat。
-   * Express 不直连 LLM；不可达时返回友好提示。
+   * 聊天：统一转发给 FastAPI AI Engine 的 /chat。
+   * FastAPI 不可达 / 返回异常时返回友好降级文案——Express 绝不直连 LLM。
    */
   async chat(params: AiEngineChatParams): Promise<AiEngineChatResult> {
     const sessionId = params.sessionId?.trim();
@@ -110,8 +110,8 @@ export class AiEngineService {
   }
 
   /**
-   * 出题：仅转发给 FastAPI AI Engine 的 /generate-quiz。
-   * 失败由上层 quizGenerator 退回 mock。
+   * 出题：转发给 FastAPI AI Engine 的 /generate-quiz。
+   * 只经 FastAPI；失败直接抛错，由上层 quizGenerator 退回 mock。
    */
   async generateQuiz(params: AiEngineQuizParams): Promise<unknown[]> {
     const controller = new AbortController();
@@ -167,8 +167,8 @@ export class AiEngineService {
   }
 
   /**
-   * 出总结：仅转发给 FastAPI /generate-summary。
-   * 失败返回 null，由上层退回确定性模板。
+   * 出总结：转发给 FastAPI AI Engine 的 /generate-summary。
+   * 不可达 / 返回异常时返回 null，由上层退回确定性模板——不直连 LLM。
    */
   async generateSummary(params: AiEngineSummaryParams): Promise<string | null> {
     const controller = new AbortController();
@@ -204,7 +204,7 @@ export class AiEngineService {
         return data.summary.trim();
       }
 
-      logger.warn("AI engine summary returned non-ok response.", {
+      logger.warn("AI engine summary returned non-ok response, using template.", {
         status: response.status,
         baseURL: env.aiEngineBaseUrl
       });
@@ -216,7 +216,7 @@ export class AiEngineService {
             ? error.message
             : String(error);
 
-      logger.warn(`AI engine summary unreachable (${reason}).`, {
+      logger.warn(`AI engine summary unreachable (${reason}), using template.`, {
         baseURL: env.aiEngineBaseUrl
       });
     } finally {
@@ -224,6 +224,19 @@ export class AiEngineService {
     }
 
     return null;
+  }
+
+  /**
+   * 自由答疑小结：复用 FastAPI 的 /generate-summary（套一层「自由答疑」轻量上下文）。
+   * 不可达 / 异常时返回 null，由上层退回确定性模板——同样不直连 LLM。
+   */
+  async summarizeFreeQa(conversationDigest: string): Promise<string | null> {
+    return this.generateSummary({
+      project: { title: "自由答疑", subject: "通用答疑", goal: "" },
+      localDate: new Date().toISOString().slice(0, 10),
+      studyData: "（自由答疑会话，无项目任务数据）",
+      conversationDigest
+    });
   }
 
   /**

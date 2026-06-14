@@ -35,6 +35,17 @@ export interface SaveProjectPlanInput {
   dailyMinutes?: number | null;
 }
 
+export interface UpdateProjectSetupRecord {
+  title?: string;
+  subject?: string;
+  goal?: string;
+  targetScore?: string | null;
+  deadline?: Date | null;
+  startDate?: Date | null;
+  dailyMinutes?: number | null;
+  goalConfirmedAt?: Date | null;
+}
+
 const planInclude = {
   materialLinks: true,
   knowledgeNodes: true,
@@ -116,6 +127,29 @@ export const projectsRepository = {
         }
       })
       .then((items) => items.map((item) => item.id));
+  },
+
+  findSetupByIdForUser(id: string, userId: string): Promise<StudyProject | null> {
+    return prisma.studyProject.findFirst({
+      where: {
+        id,
+        userId
+      }
+    });
+  },
+
+  updateSetup(
+    id: string,
+    userId: string,
+    data: UpdateProjectSetupRecord
+  ): Promise<StudyProject> {
+    return prisma.studyProject.update({
+      where: {
+        id,
+        userId
+      },
+      data
+    });
   },
 
   async createPlan(input: SaveProjectPlanInput): Promise<StudyProjectWithPlan> {

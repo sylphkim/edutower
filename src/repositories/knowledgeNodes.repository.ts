@@ -30,6 +30,13 @@ export interface UpdateKnowledgeNodeRecordInput {
   prerequisiteIds?: string[];
 }
 
+export interface PrelightNodeUpdate {
+  nodeId: string;
+  learningState: KnowledgeNodeLearningState;
+  mastery: number;
+  isUnlocked: boolean;
+}
+
 const nodeInclude = {
   prerequisiteLinks: true
 } satisfies KnowledgeNodeInclude;
@@ -361,6 +368,78 @@ export const knowledgeNodesRepository = {
       where: {
         id,
         projectId
+      }
+    });
+  },
+
+  /**
+   * 概念账本「预点亮」：把命中账本的节点设为对应状态/掌握度并解锁，
+   * 再把「前置已全部 mastered」的锁定节点一并解锁（解锁不触发掌握，单趟即可）。
+   */
+  async prelightNodes(projectId: string, updates: PrelightNodeUpdate[]): Promise<void> {
+    if (updates.length === 0) {
+      return;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const now = new Date();
+
+      for (const update of updates) {
+        await tx.knowledgeNode.update({
+          where: {
+            id: update.nodeId,
+            projectId
+          },
+          data: {
+            learningState: update.learningState,
+            mastery: update.mastery,
+            isUnlocked: update.isUnlocked,
+            unlockedAt: update.isUnlocked ? now : undefined
+          }
+        });
+      }
+
+      const locked = await tx.knowledgeNode.findMany({
+        where: {
+          projectId,
+          archivedAt: null,
+          isUnlocked: false
+        },
+        include: {
+          prerequisiteLinks: {
+            include: {
+              prerequisite: {
+                select: {
+                  learningState: true
+                }
+              }
+            }
+          }
+        }
+      });
+      const unlockableIds = locked
+        .filter(
+          (node) =>
+            node.prerequisiteLinks.length > 0 &&
+            node.prerequisiteLinks.every(
+              (link) => link.prerequisite.learningState === "mastered"
+            )
+        )
+        .map((node) => node.id);
+
+      if (unlockableIds.length > 0) {
+        await tx.knowledgeNode.updateMany({
+          where: {
+            id: { in: unlockableIds },
+            projectId,
+            archivedAt: null,
+            isUnlocked: false
+          },
+          data: {
+            isUnlocked: true,
+            unlockedAt: now
+          }
+        });
       }
     });
   }

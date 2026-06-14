@@ -23,6 +23,9 @@ model User {
   conversations   Conversation[]
   wrongbookItems  WrongbookItem[]
   dailySummaries  DailySummary[]
+  memories        Memory[]
+  concepts        Concept[]
+  conceptMasteries ConceptMastery[]
 }
 
 model Material {
@@ -141,6 +144,7 @@ model KnowledgeNode {
   phaseLinks         PlanPhaseKnowledgeNode[]
   weakPoints         WeakPoint[]
   stateEvents        KnowledgeStateEvent[]
+  conceptLinks       KnowledgeNodeConcept[]
   archivedAt         DateTime?
   createdAt          DateTime                    @default(now())
   updatedAt          DateTime                    @updatedAt
@@ -297,6 +301,7 @@ model Conversation {
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
+  @@unique([userId, externalSessionId])
   @@index([userId])
   @@index([projectId])
 }
@@ -533,6 +538,8 @@ model KnowledgeStateEvent {
 
 model Memory {
   id                  String   @id @default(cuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   type                String
   title               String
   content             String
@@ -543,6 +550,62 @@ model Memory {
   relatedWrongbookIds String   @default("[]")
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+
+  @@index([userId])
+}
+
+/// 跨项目概念（用户级词表）——稳定身份的落点；节点映射到它、点亮查它。
+model Concept {
+  id        String                 @id @default(cuid())
+  userId    String
+  user      User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key       String
+  name      String
+  subject   String?
+  aliases   String                 @default("[]")
+  mastery   ConceptMastery?
+  nodeLinks KnowledgeNodeConcept[]
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+
+  @@unique([userId, key])
+  @@index([userId])
+  @@index([userId, subject])
+}
+
+/// 概念掌握账本（用户级进度）——跨项目汇总，新项目据此预点亮。
+model ConceptMastery {
+  id         String              @id @default(cuid())
+  userId     String
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conceptId  String              @unique
+  concept    Concept             @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  state      ConceptMasteryState @default(learning)
+  mastery    Int                 @default(0)
+  sources    String              @default("[]")
+  lastSeenAt DateTime?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  @@index([userId, state])
+}
+
+/// 知识点 ↔ 概念 映射（多对多）——一个节点可对多个概念。
+model KnowledgeNodeConcept {
+  knowledgeNodeId String
+  knowledgeNode   KnowledgeNode @relation(fields: [knowledgeNodeId], references: [id], onDelete: Cascade)
+  conceptId       String
+  concept         Concept       @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+  source          String?
+  createdAt       DateTime      @default(now())
+
+  @@id([knowledgeNodeId, conceptId])
+  @@index([conceptId])
+}
+
+enum ConceptMasteryState {
+  learning
+  mastered
 }
 
 enum MaterialSourceType {

@@ -11,7 +11,7 @@ import type {
   UpdatePlanVersionInput
 } from "../types/planVersion";
 import { AppError } from "../utils/errors";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoUserId } from "./demo.service";
 
 const CREATE_KEYS = new Set(["inputSnapshot", "phases"]);
 const UPDATE_KEYS = new Set(["phases"]);

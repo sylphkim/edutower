@@ -1,27 +1,35 @@
+import { wrongbookService } from "./wrongbook.service";
+import { getDemoProjectId, getDemoUserId } from "./demo.service";
 import { projectsRepository } from "../repositories/projects.repository";
 import { conversationsRepository } from "../repositories/conversations.repository";
-import { dailyTasksService } from "./dailyTasks.service";
-import { getDemoProjectId } from "./demoProject.service";
-import { getDemoUserId } from "./demoUser.service";
-import { wrongbookService } from "./wrongbook.service";
+import { knowledgeNodesRepository } from "../repositories/knowledgeNodes.repository";
+import { quizzesRepository } from "../repositories/quizzes.repository";
+import { dailyTaskSheetsRepository } from "../repositories/dailyTaskSheets.repository";
+import { agentStatusService } from "./agentStatus.service";
 import { inferTopicFromMessage, truncateFocusLabel } from "../utils/topicInference";
-import type { AgentPanelPayload, ReviewProgressPayload } from "../types/agentPanel";
-import type { DailyTaskItem } from "../types/dailyTasks";
+import type { AgentPanelPayload, AgentStep } from "../types/agentPanel";
 
 export interface BuildAgentPanelParams {
   sessionId: string;
   conversationId?: string;
+  projectId?: string;
   topicHint?: string;
   lastMessageHint?: string;
 }
-function buildIdleAgentSteps(): AgentPanelPayload["agent"] {
+
+function parseSubjectLine(subjectName: string): { subject: string; topic: string } {
+  const parts = subjectName.split(/[:：]/);
+
+  if (parts.length >= 2) {
+    return {
+      subject: parts[0].trim(),
+      topic: parts.slice(1).join("：").trim()
+    };
+  }
+
   return {
-    activeLabel: "Agent 就绪 · 等待提问",
-    steps: [
-      { label: "读取当前对话上下文", status: "pending" },
-      { label: "结合学习档案分析", status: "pending" },
-      { label: "生成回答与练习建议", status: "pending" }
-    ]
+    subject: subjectName.trim() || "综合",
+    topic: "今日复习"
   };
 }
 
@@ -41,57 +49,14 @@ function buildConversationAgentSteps(
     ]
   };
 }
-function countTasksByType(tasks: DailyTaskItem[], type: DailyTaskItem["type"]): number {
-  return tasks.filter((task) => task.type === type && task.status !== "cancelled").length;
-}
 
-function countDoneTasksByType(tasks: DailyTaskItem[], type: DailyTaskItem["type"]): number {
-  return tasks.filter((task) => task.type === type && task.status === "done").length;
-}
-
-function buildTaskProgressPercent(tasks: DailyTaskItem[]): number {
-  const activeTasks = tasks.filter((task) => task.status !== "cancelled");
-
-  if (!activeTasks.length) {
+function averageMastery(values: number[]): number {
+  if (!values.length) {
     return 0;
   }
 
-  const doneCount = activeTasks.filter((task) => task.status === "done").length;
-  return Math.round((doneCount / activeTasks.length) * 100);
-}
-
-async function buildReviewProgress(): Promise<ReviewProgressPayload> {
-  const userId = await getDemoUserId();
-  const projectId = await getDemoProjectId();
-  const project = await projectsRepository.findByIdForUser(projectId, userId);
-  const record = await dailyTasksService.getToday(projectId);
-  const tasks = record.sheet?.tasks ?? [];
-  const errorCorrections = await countReviewedWrongbookItems();
-  const projectTitle = project?.title?.trim() || "学习计划";
-
-  if (!tasks.length) {
-    return {
-      percent: 0,
-      subject: projectTitle,
-      topic: "今日尚未启用",
-      stats: {
-        knowledgePoints: 0,
-        practiceQuestions: 0,
-        errorCorrections
-      }
-    };
-  }
-
-  return {
-    percent: buildTaskProgressPercent(tasks),
-    subject: projectTitle,
-    topic: "今日学习",
-    stats: {
-      knowledgePoints: countTasksByType(tasks, "master_skill"),
-      practiceQuestions: countTasksByType(tasks, "practice_quiz"),
-      errorCorrections: Math.max(errorCorrections, countDoneTasksByType(tasks, "review_wrongbook"))
-    }
-  };
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return Math.round(total / values.length);
 }
 
 async function countReviewedWrongbookItems(): Promise<number> {
@@ -104,39 +69,95 @@ export const agentPanelService = {
   async buildPanel({
     sessionId,
     conversationId,
+    projectId: paramProjectId,
     topicHint,
     lastMessageHint
   }: BuildAgentPanelParams): Promise<AgentPanelPayload> {
+    const safeSessionId = (sessionId || "").trim() || "default";
+    const resolvedProjectId = paramProjectId || (await getDemoProjectId());
     const userId = await getDemoUserId();
+    const project = await projectsRepository.upsertDemoProject(userId);
+    const { subject, topic } = parseSubjectLine(project.subject);
+
+    const knowledgeNodes = await knowledgeNodesRepository.listByProject(resolvedProjectId);
+    const knowledgePointCount = knowledgeNodes.length;
+    const percent = averageMastery(knowledgeNodes.map((item) => item.mastery));
+
+    const practiceQuestions = await quizzesRepository.countByProject(resolvedProjectId);
+    const errorCorrections = await countReviewedWrongbookItems();
+
     const messageCount = await conversationsRepository.countMessagesForUser({
       userId,
-      sessionId,
+      sessionId: safeSessionId,
       conversationId
     });
 
-    let agent: AgentPanelPayload["agent"] = buildIdleAgentSteps();
+    let agent: AgentPanelPayload["agent"];
 
     if (messageCount > 0) {
       const latestUserMessage =
         lastMessageHint?.trim() ||
         (await conversationsRepository.findLatestUserMessageForUser({
           userId,
-          sessionId,
+          sessionId: safeSessionId,
           conversationId
         })) ||
         "";
 
-      const topic =
+      const inferredTopic =
         topicHint?.trim() ||
         (latestUserMessage ? inferTopicFromMessage(latestUserMessage) : "综合复习");
 
-      agent = buildConversationAgentSteps(topic, latestUserMessage || topic);
+      agent = buildConversationAgentSteps(inferredTopic, latestUserMessage || inferredTopic);
+    } else {
+      const weakPoints = await dailyTaskSheetsRepository.collectActiveWeakPoints(resolvedProjectId);
+      const severityRank: Record<string, number> = { high: 3, medium: 2, low: 1 };
+      const primaryWeakPoint = [...weakPoints].sort(
+        (a, b) => (severityRank[b.severity] ?? 0) - (severityRank[a.severity] ?? 0)
+      )[0];
+
+      const activeStatus = agentStatusService.getPhase(safeSessionId);
+      const isBusy = activeStatus.phase !== "idle";
+
+      const summarySteps: AgentStep[] = [
+        { label: `知识点已加载（${knowledgePointCount} 项）`, status: "done" },
+        { label: `练习题已就绪（${practiceQuestions} 次）`, status: "done" },
+        {
+          label: `错题待订正（${errorCorrections} 项）`,
+          status: errorCorrections > 0 ? "current" : "done"
+        },
+        { label: `当前主题：${topic}`, status: "info" }
+      ];
+
+      if (isBusy) {
+        summarySteps.unshift({
+          label: activeStatus.activeLabel,
+          status: "current"
+        });
+      }
+
+      agent = {
+        activeLabel: isBusy
+          ? activeStatus.activeLabel
+          : primaryWeakPoint
+            ? `就绪 · ${primaryWeakPoint.title}`
+            : "就绪 · 系统已就绪",
+        steps: summarySteps
+      };
     }
 
-    const progress = await buildReviewProgress();
     return {
       agent,
-      progress,
+      progress: {
+        percent,
+        subject,
+        topic,
+        stats: {
+          knowledgePoints: knowledgePointCount,
+          practiceQuestions,
+          errorCorrections
+        }
+      },
       generatedAt: new Date().toISOString()
     };
   }

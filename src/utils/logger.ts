@@ -1,17 +1,9 @@
 type LogMeta = Record<string, unknown> | unknown;
 
 function redactSensitive(value: string): string {
-  let redacted = value.replace(/sk-[A-Za-z0-9_-]{8,}/g, "sk-***REDACTED***");
-
-  const apiKeys = [process.env.LLM_API_KEY, process.env.OPENAI_API_KEY].filter(
-    (key): key is string => Boolean(key)
-  );
-
-  for (const apiKey of apiKeys) {
-    redacted = redacted.split(apiKey).join("***REDACTED_API_KEY***");
-  }
-
-  return redacted;
+  // 通用兜底：脱敏形如 sk-… 的密钥串。Express 不接触 LLM key，
+  // 这里只作为日志的最后防线，与具体 provider 无关。
+  return value.replace(/sk-[A-Za-z0-9_-]{8,}/g, "sk-***REDACTED***");
 }
 
 function sanitize(value: LogMeta): unknown {

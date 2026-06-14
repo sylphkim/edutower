@@ -1,12 +1,12 @@
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
 import path from "node:path";
-import { legacyChat } from "./controllers/ai.controller";
 import { sendError } from "./utils/apiResponse";
 import { isAppError } from "./utils/errors";
 import { logger } from "./utils/logger";
 import aiRoutes from "./routes/ai.routes";
 import agentPanelRoutes from "./routes/agentPanel.routes";
+import conceptsRoutes from "./routes/concepts.routes";
 import conversationsRoutes from "./routes/conversations.routes";
 import dailyTasksRoutes from "./routes/dailyTasks.routes";
 import healthRoutes from "./routes/health.routes";
@@ -14,6 +14,7 @@ import materialFoldersRoutes from "./routes/materialFolders.routes";
 import materialsRoutes from "./routes/materials.routes";
 import memoryRoutes from "./routes/memory.routes";
 import planRoutes from "./routes/plan.routes";
+import projectsRoutes from "./routes/projects.routes";
 import quizRoutes from "./routes/quiz.routes";
 import settingsRoutes from "./routes/settings.routes";
 import skillsRoutes from "./routes/skills.routes";
@@ -29,15 +30,15 @@ app.get("/", (_req, res) => {
   res.sendFile(path.join(process.cwd(), "static", "index.html"));
 });
 
-app.post("/chat", legacyChat);
-
 app.use("/api/health", healthRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/concepts", conceptsRoutes);
 app.use("/api/conversations", conversationsRoutes);
 app.use("/api/agent", agentPanelRoutes);
 app.use("/api/material-folders", materialFoldersRoutes);
 app.use("/api/materials", materialsRoutes);
 app.use("/api/plan", planRoutes);
+app.use("/api/projects", projectsRoutes);
 app.use("/api/daily", dailyTasksRoutes);
 app.use("/api/skills", skillsRoutes);
 app.use("/api/quiz", quizRoutes);

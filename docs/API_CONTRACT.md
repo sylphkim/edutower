@@ -71,7 +71,7 @@ Frontend / static
 | GET | `/api/health` | ready | 健康检查 |
 | POST | `/api/ai/chat` | ready | 产品聊天入口，内部调用 FastAPI AI Engine，失败时降级 |
 | POST | `/chat` | ready | legacy 聊天接口，兼容旧静态前端 |
-| GET | `/api/agent/panel` | mock | 基于 demo chat context 生成 Agent 面板数据 |
+| GET | `/api/agent/panel` | partial | 基于数据库真实数据（KnowledgeNode / Quiz / WeakPoint）生成进度与 Agent 状态面板 |
 | POST | `/api/llm/chat` | debug | 直接调底层 LLM chat |
 | POST | `/api/llm/generate` | debug | 直接调底层 LLM text generation |
 | `/api/materials` | ready | 资料 CRUD、文件夹筛选、单文件上传 |

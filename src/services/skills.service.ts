@@ -11,7 +11,7 @@ import type {
   UpdateSkillLearningStateInput
 } from "../types/skills";
 import { AppError } from "../utils/errors";
-import { getDemoProjectId } from "./demoProject.service";
+import { getDemoProjectId } from "./demo.service";
 
 const VALID_LEARNING_STATES: SkillLearningState[] = ["not_started", "learning", "mastered"];
 
