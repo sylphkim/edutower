@@ -150,10 +150,22 @@
 
     if (projectId) {
       try {
-        var daily = await api.post(
-          "/api/daily/" + encodeURIComponent(projectId) + "/today",
-          {}
-        );
+        var daily =
+          window.EduTowerPlan &&
+          typeof window.EduTowerPlan.fetchDailyTodayRecord === "function"
+            ? await window.EduTowerPlan.fetchDailyTodayRecord(projectId, {})
+            : await (async function () {
+                var record = await api.get(
+                  "/api/daily/" + encodeURIComponent(projectId) + "/today"
+                );
+                if (!record || !record.sheet || !record.sheet.id) {
+                  return api.post(
+                    "/api/daily/" + encodeURIComponent(projectId) + "/today",
+                    {}
+                  );
+                }
+                return record;
+              })();
         var dailyTasks =
           daily && daily.sheet && Array.isArray(daily.sheet.tasks) ? daily.sheet.tasks : [];
         dailyTasks.forEach(function (task) {

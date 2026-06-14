@@ -9,6 +9,7 @@
   var API_BASE = window.EDUTOWER_API || "";
   var PANEL_API = API_BASE + "/api/agent/panel";
   var SESSION_KEY = "edutower_session_id";
+  var CONVERSATION_KEY = "edutower_conversation_id";
 
   var statusEl = document.getElementById("agentStatusDisplay");
   var progressEl = document.getElementById("agentProgressDisplay");
@@ -28,6 +29,10 @@
 
   function getSessionId() {
     return sessionStorage.getItem(SESSION_KEY) || "default";
+  }
+
+  function getConversationId() {
+    return sessionStorage.getItem(CONVERSATION_KEY) || "";
   }
 
   function mapDailyTask(task) {
@@ -129,6 +134,19 @@
 
     try {
       var url = PANEL_API + "?session_id=" + encodeURIComponent(getSessionId());
+      var conversationId = getConversationId();
+      if (conversationId) {
+        url += "&conversation_id=" + encodeURIComponent(conversationId);
+      }
+      if (window.EduTowerChat && typeof window.EduTowerChat.getAgentPanelHints === "function") {
+        var hints = window.EduTowerChat.getAgentPanelHints();
+        if (hints && hints.topic) {
+          url += "&topic=" + encodeURIComponent(hints.topic);
+        }
+        if (hints && hints.lastMessage) {
+          url += "&last_message=" + encodeURIComponent(hints.lastMessage);
+        }
+      }
       var response = await fetch(url);
       var result = await response.json();
 

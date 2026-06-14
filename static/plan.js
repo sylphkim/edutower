@@ -25,6 +25,12 @@
   var dependencyEdges = [];
   var suggestionDecisions = {};
   var DAILY_CONV_STORAGE_KEY = "edutower_daily_conversation_map";
+  var sheetHistory = [];
+  var showProjectSettings = false;
+  var editingDraftVersionId = null;
+  var draftPhaseForms = [];
+  var MIN_DAILY_MINUTES = 15;
+  var MAX_DAILY_MINUTES = 480;
 
   var TASK_STATUS_LABEL = {
     todo: "待开始",
@@ -94,6 +100,17 @@
         render();
       } else if (action === "phase-apply-tree") {
         applyTreeProposal();
+      } else if (action === "phase-ai-generate") {
+        generateAiPlanProposal();
+      } else if (action === "phase-edit-draft") {
+        beginEditDraftVersion(target.getAttribute("data-id"));
+      } else if (action === "phase-save-draft") {
+        saveDraftVersion();
+      } else if (action === "phase-cancel-edit") {
+        editingDraftVersionId = null;
+        draftPhaseForms = [];
+        setViewMode("phases");
+        render();
       } else if (action === "phase-confirm") {
         confirmPlanVersion(target.getAttribute("data-id"));
       } else if (action === "phase-revise") {
@@ -118,6 +135,11 @@
         );
       } else if (action === "daily-submit-decisions") {
         submitSummaryDecisions();
+      } else if (action === "toggle-project-settings") {
+        showProjectSettings = !showProjectSettings;
+        render();
+      } else if (action === "submit-project-settings") {
+        submitProjectSettings();
       } else if (action === "select-plan") {
         selectedId = target.getAttribute("data-id");
         render();
@@ -262,11 +284,37 @@
     );
   }
 
-  function getProjectId() {
-    var active =
+  function getActivePlan() {
+    return (
       plans.find(function (p) {
         return p.status === "active";
-      }) || getSelectedPlan();
+      }) || getSelectedPlan()
+    );
+  }
+
+  function formatDeadlineInputValue(value) {
+    if (!value || typeof value !== "string") return "";
+    var match = /^(\d{4}-\d{2}-\d{2})/.exec(value);
+    return match ? match[1] : "";
+  }
+
+  async function fetchDailyTodayRecord(projectId, options) {
+    var ensure = options && options.ensure;
+
+    if (ensure) {
+      return api.post("/api/daily/" + encodeURIComponent(projectId) + "/today", {});
+    }
+
+    var record = await api.get("/api/daily/" + encodeURIComponent(projectId) + "/today");
+    if (!record || !record.sheet || !record.sheet.id) {
+      return api.post("/api/daily/" + encodeURIComponent(projectId) + "/today", {});
+    }
+
+    return record;
+  }
+
+  function getProjectId() {
+    var active = getActivePlan();
     return active ? active.id : "";
   }
 
@@ -464,12 +512,12 @@
     return conversationId;
   }
 
-  async function syncDailyRecord() {
+  async function syncDailyRecord(options) {
     var projectId = getProjectId();
     if (!projectId) return;
 
     try {
-      dailyRecord = await api.post("/api/daily/" + encodeURIComponent(projectId) + "/today", {});
+      dailyRecord = await fetchDailyTodayRecord(projectId, options);
       try {
         await ensureTodayConversation();
       } catch (_convErr) {
@@ -477,6 +525,23 @@
       }
     } catch (err) {
       setBanner("error", "同步今日任务失败：" + api.networkError(err));
+    }
+  }
+
+  async function loadSheetHistory() {
+    var projectId = getProjectId();
+    if (!projectId) {
+      sheetHistory = [];
+      return;
+    }
+
+    try {
+      var data = await api.get(
+        "/api/daily/" + encodeURIComponent(projectId) + "/sheets?limit=14"
+      );
+      sheetHistory = data && Array.isArray(data.items) ? data.items : [];
+    } catch (_err) {
+      sheetHistory = [];
     }
   }
 
@@ -488,6 +553,7 @@
 
     try {
       await loadPlanPhaseMeta();
+      await loadSheetHistory();
       render();
       await syncDailyRecord();
       render();
@@ -734,6 +800,23 @@
       '<textarea id="planEditGoal" class="form-textarea" rows="4">' +
       api.escapeHtml(plan.goal || "") +
       "</textarea></div>" +
+      '<div class="plan-settings__row">' +
+      '<div class="form-row"><label class="form-label" for="planEditDeadline">目标日期</label>' +
+      '<input id="planEditDeadline" class="form-input" type="date" value="' +
+      api.escapeAttr(formatDeadlineInputValue(plan.deadline)) +
+      '" /></div>' +
+      '<div class="form-row"><label class="form-label" for="planEditDailyMinutes">每日可用时长（分钟）</label>' +
+      '<input id="planEditDailyMinutes" class="form-input" type="number" min="' +
+      MIN_DAILY_MINUTES +
+      '" max="' +
+      MAX_DAILY_MINUTES +
+      '" step="5" value="' +
+      api.escapeAttr(
+        plan.dailyMinutes != null && plan.dailyMinutes !== ""
+          ? String(plan.dailyMinutes)
+          : "60"
+      ) +
+      '" /></div></div>' +
       '<p class="module-mini-page__desc">任务安排请使用「管理任务」视图。</p>' +
       '<div class="module-mini-page__actions">' +
       '<button type="button" class="btn btn--ghost" data-action="plan-view-advanced">返回手动课表</button>' +
@@ -898,6 +981,117 @@
     );
   }
 
+  function renderProjectSettings(plan) {
+    if (!plan) return "";
+
+    var settingsBody = showProjectSettings
+      ? '<div class="plan-settings__body">' +
+        '<div class="form-row"><label class="form-label" for="projectSettingsGoal">学习目标</label>' +
+        '<textarea id="projectSettingsGoal" class="form-textarea" rows="3" placeholder="例如：期末数学达到 90 分">' +
+        api.escapeHtml(plan.goal || "") +
+        "</textarea></div>" +
+        '<div class="plan-settings__row">' +
+        '<div class="form-row"><label class="form-label" for="projectSettingsDeadline">目标日期</label>' +
+        '<input id="projectSettingsDeadline" class="form-input" type="date" value="' +
+        api.escapeAttr(formatDeadlineInputValue(plan.deadline)) +
+        '" /></div>' +
+        '<div class="form-row"><label class="form-label" for="projectSettingsDailyMinutes">每日可用时长（分钟）</label>' +
+        '<input id="projectSettingsDailyMinutes" class="form-input" type="number" min="' +
+        MIN_DAILY_MINUTES +
+        '" max="' +
+        MAX_DAILY_MINUTES +
+        '" step="5" value="' +
+        api.escapeAttr(
+          plan.dailyMinutes != null && plan.dailyMinutes !== ""
+            ? String(plan.dailyMinutes)
+            : "60"
+        ) +
+        '" /></div></div>' +
+        '<p class="plan-settings__hint">每日时长会影响「今天要学什么」的任务编排上限（' +
+        MIN_DAILY_MINUTES +
+        "–" +
+        MAX_DAILY_MINUTES +
+        " 分钟）。修改后对新创建的学习单生效。</p>" +
+        '<div class="plan-settings__actions">' +
+        '<button type="button" class="btn btn--primary btn--compact" data-action="submit-project-settings"' +
+        (isBusy ? " disabled" : "") +
+        ">保存设置</button></div></div>"
+      : '<p class="plan-settings__summary">' +
+        (plan.goal ? api.escapeHtml(plan.goal) : "尚未填写学习目标") +
+        " · 每日 " +
+        (plan.dailyMinutes != null ? plan.dailyMinutes : 60) +
+        " 分钟" +
+        (plan.deadline
+          ? " · 目标 " + api.escapeHtml(formatDeadlineInputValue(plan.deadline))
+          : "") +
+        "</p>";
+
+    return (
+      '<section class="plan-settings">' +
+      '<header class="plan-settings__header">' +
+      "<div><h3 class=\"plan-settings__title\">项目设置</h3>" +
+      '<p class="plan-settings__meta">目标、截止日期与每日学习时长</p></div>' +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="toggle-project-settings">' +
+      (showProjectSettings ? "收起" : "编辑") +
+      "</button></header>" +
+      settingsBody +
+      "</section>"
+    );
+  }
+
+  function renderSheetHistory() {
+    if (!sheetHistory.length) return "";
+
+    var items = sheetHistory
+      .map(function (entry) {
+        var sheet = entry && entry.sheet ? entry.sheet : null;
+        var summary = entry && entry.summary ? entry.summary : null;
+        if (!sheet) return "";
+
+        var statusLabel =
+          sheet.status === "closed"
+            ? "已结束"
+            : sheet.status === "forced_closed"
+              ? "系统结束"
+              : sheet.status === "active"
+                ? "进行中"
+                : sheet.status || "未知";
+        var summaryText =
+          summary && (summary.confirmedContent || summary.aiDraft)
+            ? summary.confirmedContent || summary.aiDraft
+            : "";
+
+        return (
+          '<li class="plan-history-item">' +
+          '<div class="plan-history-item__body">' +
+          '<strong class="plan-history-item__date">' +
+          api.escapeHtml(sheet.localDate || "未知日期") +
+          "</strong>" +
+          '<span class="plan-history-item__meta">' +
+          api.escapeHtml(statusLabel) +
+          " · " +
+          (Array.isArray(sheet.tasks) ? sheet.tasks.length : 0) +
+          " 项任务</span>" +
+          (summaryText
+            ? '<p class="plan-history-item__summary">' + api.escapeHtml(summaryText) + "</p>"
+            : "") +
+          "</div></li>"
+        );
+      })
+      .filter(Boolean)
+      .join("");
+
+    if (!items) return "";
+
+    return (
+      '<section class="plan-history">' +
+      '<h3 class="plan-history__title">最近学习记录</h3>' +
+      '<ul class="plan-history-list">' +
+      items +
+      "</ul></section>"
+    );
+  }
+
   function renderHub() {
     var projectId = getProjectId();
     if (!projectId) {
@@ -910,6 +1104,7 @@
 
     var sheet = dailyRecord && dailyRecord.sheet ? dailyRecord.sheet : null;
     var summary = dailyRecord && dailyRecord.summary ? dailyRecord.summary : null;
+    var activePlan = getActivePlan();
     var tasksHtml = renderDailyTasksHtml();
     var sheetMeta = sheet
       ? "今天 · " +
@@ -927,6 +1122,7 @@
       renderSubnav() +
       renderBanner() +
       '<section class="plan-hub">' +
+      renderProjectSettings(activePlan) +
       (!currentPlanVersion ? renderOnboardingCard() : renderPhaseStrip()) +
       '<section class="plan-hub__today">' +
       '<header class="plan-detail__header">' +
@@ -957,8 +1153,59 @@
           "</p></section>"
         : "") +
       renderSummaryDecisions(summary) +
+      renderSheetHistory() +
       "</section></section>"
     );
+  }
+
+  async function submitProjectSettings() {
+    if (isBusy) return;
+
+    var plan = getActivePlan();
+    if (!plan) return;
+
+    var goalInput = document.getElementById("projectSettingsGoal");
+    var deadlineInput = document.getElementById("projectSettingsDeadline");
+    var minutesInput = document.getElementById("projectSettingsDailyMinutes");
+    var goal = goalInput ? goalInput.value.trim() : "";
+    var deadline = deadlineInput ? deadlineInput.value.trim() : "";
+    var dailyMinutesRaw = minutesInput ? minutesInput.value.trim() : "";
+    var dailyMinutes = dailyMinutesRaw ? parseInt(dailyMinutesRaw, 10) : null;
+
+    if (
+      dailyMinutes !== null &&
+      (!Number.isFinite(dailyMinutes) ||
+        dailyMinutes < MIN_DAILY_MINUTES ||
+        dailyMinutes > MAX_DAILY_MINUTES)
+    ) {
+      setBanner(
+        "error",
+        "每日时长需在 " + MIN_DAILY_MINUTES + "–" + MAX_DAILY_MINUTES + " 分钟之间。"
+      );
+      render();
+      return;
+    }
+
+    isBusy = true;
+    clearBanner();
+
+    try {
+      await api.patch("/api/plan/" + encodeURIComponent(plan.id), {
+        goal: goal,
+        deadline: deadline || null,
+        dailyMinutes: dailyMinutes,
+      });
+      var data = await api.get("/api/plan");
+      plans = data && Array.isArray(data.items) ? data.items : [];
+      showProjectSettings = false;
+      setBanner("success", "项目设置已保存。");
+      render();
+    } catch (err) {
+      setBanner("error", "保存失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
   }
 
   async function loadDailyToday() {
@@ -1318,6 +1565,11 @@
     if (selected) {
       if (selected.status === "draft") {
         actionHtml +=
+          '<button type="button" class="btn btn--ghost btn--compact" data-action="phase-edit-draft" data-id="' +
+          api.escapeAttr(selected.id) +
+          '"' +
+          (isBusy ? " disabled" : "") +
+          ">编辑草案</button>" +
           '<button type="button" class="btn btn--primary btn--compact" data-action="phase-confirm" data-id="' +
           api.escapeAttr(selected.id) +
           '"' +
@@ -1352,7 +1604,10 @@
         : '<p class="plan-today__meta">尚未确认阶段计划</p>') +
       "</div>" +
       '<div class="plan-detail__actions">' +
-      '<button type="button" class="btn btn--primary btn--compact" data-action="phase-apply-tree"' +
+      '<button type="button" class="btn btn--primary btn--compact" data-action="phase-ai-generate"' +
+      (isBusy ? " disabled" : "") +
+      ">AI 生成计划</button>" +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="phase-apply-tree"' +
       (isBusy ? " disabled" : "") +
       ">从技能树生成草案</button>" +
       actionHtml +
@@ -1473,6 +1728,209 @@
       render();
     } catch (err) {
       setBanner("error", "启用失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  async function generateAiPlanProposal() {
+    var projectId = getProjectId();
+    if (!projectId || isBusy) return;
+
+    isBusy = true;
+    clearBanner();
+    rootEl.innerHTML =
+      renderSubnav() +
+      '<p class="module-empty module-empty--loading">AI 正在生成整体学习计划…</p>';
+
+    try {
+      await loadMaterials();
+      var generated = await api.post(
+        "/api/plan/" + encodeURIComponent(projectId) + "/proposals/generate",
+        {}
+      );
+      var proposal = generated && generated.proposal ? generated.proposal : null;
+      if (!proposal) {
+        throw new Error("AI 未返回可用计划");
+      }
+
+      var result = await api.post(
+        "/api/plan/" + encodeURIComponent(projectId) + "/proposals/apply",
+        proposal
+      );
+
+      if (result && result.planVersion && result.planVersion.status === "draft") {
+        selectedVersionId = result.planVersion.id;
+      }
+
+      await loadPlanPhaseMeta();
+      setViewMode("phases");
+      setBanner(
+        "success",
+        generated.source === "ai" ? "AI 计划已生成并保存为草案。" : "AI 不可用，已使用规则草案。"
+      );
+      render();
+    } catch (err) {
+      setViewMode("phases");
+      setBanner("error", "AI 生成失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
+  function beginEditDraftVersion(versionId) {
+    var version = planVersions.find(function (entry) {
+      return entry.id === versionId;
+    });
+    if (!version || version.status !== "draft") {
+      setBanner("error", "只能编辑草案版本。");
+      render();
+      return;
+    }
+
+    editingDraftVersionId = version.id;
+    draftPhaseForms = (version.phases || []).map(function (phase) {
+      return {
+        title: phase.title || "",
+        goal: phase.goal || "",
+        description: phase.description || "",
+        completionCriteria: phase.completionCriteria || "",
+        knowledgeNodeIds: Array.isArray(phase.knowledgeNodeIds)
+          ? phase.knowledgeNodeIds.slice()
+          : [],
+      };
+    });
+    setViewMode("phase-edit");
+    render();
+  }
+
+  function renderPhaseEdit() {
+    var version = planVersions.find(function (entry) {
+      return entry.id === editingDraftVersionId;
+    });
+    if (!version) {
+      return (
+        renderSubnav() +
+        renderBanner() +
+        '<p class="module-empty">草案不存在或已失效。</p>'
+      );
+    }
+
+    var phasesHtml = draftPhaseForms
+      .map(function (phase, index) {
+        var skillLabels = (phase.knowledgeNodeIds || [])
+          .map(function (id) {
+            return skillTitleById(id);
+          })
+          .join("、");
+
+        return (
+          '<article class="plan-phase-editor" data-phase-index="' +
+          index +
+          '">' +
+          '<h3 class="plan-phase-card__title">阶段 ' +
+          (index + 1) +
+          "</h3>" +
+          '<div class="form-row"><label class="form-label">标题</label>' +
+          '<input class="form-input phase-field-title" type="text" maxlength="120" value="' +
+          api.escapeAttr(phase.title) +
+          '" /></div>' +
+          '<div class="form-row"><label class="form-label">目标</label>' +
+          '<textarea class="form-textarea phase-field-goal" rows="2">' +
+          api.escapeHtml(phase.goal) +
+          "</textarea></div>" +
+          '<div class="form-row"><label class="form-label">说明</label>' +
+          '<textarea class="form-textarea phase-field-description" rows="2">' +
+          api.escapeHtml(phase.description || "") +
+          "</textarea></div>" +
+          '<div class="form-row"><label class="form-label">完成标准</label>' +
+          '<input class="form-input phase-field-criteria" type="text" maxlength="200" value="' +
+          api.escapeAttr(phase.completionCriteria || "") +
+          '" /></div>' +
+          (skillLabels
+            ? '<p class="plan-phase-card__nodes">关联技能：' + api.escapeHtml(skillLabels) + "</p>"
+            : "") +
+          "</article>"
+        );
+      })
+      .join("");
+
+    return (
+      renderSubnav() +
+      renderBanner() +
+      '<section class="module-mini-page">' +
+      '<h2 class="module-mini-page__title">编辑阶段草案 · v' +
+      version.version +
+      "</h2>" +
+      '<p class="module-mini-page__desc">可修改阶段标题、目标与说明；关联技能需通过「从技能树生成」或 AI 生成调整。</p>' +
+      phasesHtml +
+      '<div class="module-mini-page__actions">' +
+      '<button type="button" class="btn btn--ghost" data-action="phase-cancel-edit">取消</button>' +
+      '<button type="button" class="btn btn--primary" data-action="phase-save-draft"' +
+      (isBusy ? " disabled" : "") +
+      ">保存草案</button></div></section>"
+    );
+  }
+
+  function collectDraftPhasesFromDom() {
+    return Array.from(rootEl.querySelectorAll(".plan-phase-editor")).map(function (article, index) {
+      var base = draftPhaseForms[index] || { knowledgeNodeIds: [] };
+      return {
+        title: (article.querySelector(".phase-field-title") || {}).value || "",
+        goal: (article.querySelector(".phase-field-goal") || {}).value || "",
+        description: (article.querySelector(".phase-field-description") || {}).value || "",
+        completionCriteria: (article.querySelector(".phase-field-criteria") || {}).value || "",
+        knowledgeNodeIds: base.knowledgeNodeIds || [],
+      };
+    });
+  }
+
+  async function saveDraftVersion() {
+    if (!editingDraftVersionId || isBusy) return;
+
+    var phases = collectDraftPhasesFromDom()
+      .map(function (phase) {
+        return {
+          title: phase.title.trim(),
+          goal: phase.goal.trim(),
+          description: phase.description.trim() || undefined,
+          completionCriteria: phase.completionCriteria.trim() || undefined,
+          knowledgeNodeIds: phase.knowledgeNodeIds,
+        };
+      })
+      .filter(function (phase) {
+        return phase.title && phase.goal;
+      });
+
+    if (!phases.length) {
+      setBanner("error", "至少保留一个有效阶段。");
+      render();
+      return;
+    }
+
+    var projectId = getProjectId();
+    if (!projectId) return;
+
+    isBusy = true;
+    clearBanner();
+    try {
+      await api.patch(
+        "/api/plan/" +
+          encodeURIComponent(projectId) +
+          "/versions/" +
+          encodeURIComponent(editingDraftVersionId),
+        { phases: phases }
+      );
+      editingDraftVersionId = null;
+      draftPhaseForms = [];
+      await loadPlanPhaseMeta();
+      setViewMode("phases");
+      setBanner("success", "阶段草案已保存。");
+      render();
+    } catch (err) {
+      setBanner("error", "保存失败：" + api.networkError(err));
       render();
     } finally {
       isBusy = false;
@@ -1740,6 +2198,11 @@
   }
 
   function render() {
+    if (viewMode === "phase-edit") {
+      rootEl.innerHTML = renderPhaseEdit();
+      return;
+    }
+
     if (viewMode === "create") {
       rootEl.innerHTML = renderSubnav() + renderCreateForm();
       return;
@@ -1893,11 +2356,30 @@
 
     var titleInput = document.getElementById("planEditTitle");
     var goalInput = document.getElementById("planEditGoal");
+    var deadlineInput = document.getElementById("planEditDeadline");
+    var minutesInput = document.getElementById("planEditDailyMinutes");
     var title = titleInput ? titleInput.value.trim() : "";
     var goal = goalInput ? goalInput.value.trim() : "";
+    var deadline = deadlineInput ? deadlineInput.value.trim() : "";
+    var dailyMinutesRaw = minutesInput ? minutesInput.value.trim() : "";
+    var dailyMinutes = dailyMinutesRaw ? parseInt(dailyMinutesRaw, 10) : null;
 
     if (!title) {
       setBanner("error", "计划标题不能为空。");
+      render();
+      return;
+    }
+
+    if (
+      dailyMinutes !== null &&
+      (!Number.isFinite(dailyMinutes) ||
+        dailyMinutes < MIN_DAILY_MINUTES ||
+        dailyMinutes > MAX_DAILY_MINUTES)
+    ) {
+      setBanner(
+        "error",
+        "每日时长需在 " + MIN_DAILY_MINUTES + "–" + MAX_DAILY_MINUTES + " 分钟之间。"
+      );
       render();
       return;
     }
@@ -1909,6 +2391,8 @@
       await api.patch("/api/plan/" + encodeURIComponent(plan.id), {
         title: title,
         goal: goal,
+        deadline: deadline || null,
+        dailyMinutes: dailyMinutes,
       });
       await refresh();
       setViewMode("advanced");
@@ -2033,6 +2517,7 @@
   window.EduTowerPlan = {
     refresh: refresh,
     getProjectId: getProjectId,
+    fetchDailyTodayRecord: fetchDailyTodayRecord,
     getDailyRecord: function () {
       return dailyRecord;
     },

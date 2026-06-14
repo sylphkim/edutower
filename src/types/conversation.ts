@@ -21,8 +21,15 @@ export interface ConversationDetail extends ConversationItem {
   messages: MessageItem[];
 }
 
+export interface ConversationListItem extends ConversationItem {
+  externalSessionId: string | null;
+  messageCount: number;
+  preview: string | null;
+}
+
 export interface CreateConversationInput {
   projectId?: string;
   type?: ConversationType;
   title?: string;
+  externalSessionId?: string;
 }

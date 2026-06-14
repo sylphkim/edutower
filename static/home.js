@@ -561,37 +561,41 @@
       var daily;
 
       try {
-
-        daily = api
-
-          ? await api.post("/api/daily/" + encodeURIComponent(active.id) + "/today", {})
-
-          : await fetch(API_BASE + "/api/daily/" + encodeURIComponent(active.id) + "/today", {
-
-              method: "POST",
-
-              headers: { "Content-Type": "application/json" },
-
-              body: "{}",
-
+        if (
+          window.EduTowerPlan &&
+          typeof window.EduTowerPlan.fetchDailyTodayRecord === "function"
+        ) {
+          daily = await window.EduTowerPlan.fetchDailyTodayRecord(active.id, {});
+        } else if (api) {
+          daily = await api.get("/api/daily/" + encodeURIComponent(active.id) + "/today");
+          if (!daily || !daily.sheet || !daily.sheet.id) {
+            daily = await api.post("/api/daily/" + encodeURIComponent(active.id) + "/today", {});
+          }
+        } else {
+          daily = await fetch(API_BASE + "/api/daily/" + encodeURIComponent(active.id) + "/today")
+            .then(function (r) {
+              return r.json();
             })
+            .then(function (r) {
+              return r.data;
+            });
 
+          if (!daily || !daily.sheet || !daily.sheet.id) {
+            daily = await fetch(API_BASE + "/api/daily/" + encodeURIComponent(active.id) + "/today", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: "{}",
+            })
               .then(function (r) {
-
                 return r.json();
-
               })
-
               .then(function (r) {
-
                 return r.data;
-
               });
-
+          }
+        }
       } catch (_dailyErr) {
-
         daily = null;
-
       }
 
 

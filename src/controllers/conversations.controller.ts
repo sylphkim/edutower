@@ -2,6 +2,18 @@ import { NextFunction, Request, Response } from "express";
 import { conversationsService } from "../services/conversations.service";
 import { sendSuccess } from "../utils/apiResponse";
 
+export async function listConversations(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    sendSuccess(res, await conversationsService.list(req.query.limit));
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function createConversation(
   req: Request,
   res: Response,

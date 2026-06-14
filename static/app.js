@@ -29,7 +29,7 @@
   const TOPIC_RULES = [
     { label: "二次函数", keywords: ["二次函数", "抛物线", "顶点式", "对称轴", "开口方向"] },
     { label: "导数与积分", keywords: ["导数", "积分", "微分", "定积分", "不定积分", "切线斜率"] },
-    { label: "线性代数", keywords: ["行列式", "矩阵", "向量", "特征值", "线性方程", "秩"] },
+    { label: "线性代数", keywords: ["行列式", "矩阵", "向量", "特征值", "特征向量", "线性方程", "秩", "艾米特", "厄米", "埃尔米特", "hermitian", "对角化", "正交", "内积"] },
     { label: "三角函数", keywords: ["三角函数", "正弦", "余弦", "正切", "弧度", "诱导公式"] },
     { label: "概率统计", keywords: ["概率", "统计", "期望", "方差", "分布", "抽样"] },
     { label: "立体几何", keywords: ["立体几何", "空间向量", "三视图", "体积", "表面积"] },
@@ -59,6 +59,7 @@
   let sessionId = sessionStorage.getItem(SESSION_KEY) || "";
   let conversationId = sessionStorage.getItem(CONVERSATION_KEY) || "";
   let isSending = false;
+  let serverSessionsCache = [];
 
   function createId(prefix) {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -167,6 +168,96 @@
     return store.sessions.find(function (session) {
       return session.conversationId === convId;
     });
+  }
+
+  async function fetchServerSessions() {
+    const api = window.EduTowerApi;
+    if (!api || typeof api.get !== "function") {
+      return [];
+    }
+
+    try {
+      const data = await api.get("/api/conversations?limit=50");
+      return data && Array.isArray(data.items) ? data.items : [];
+    } catch (_err) {
+      return [];
+    }
+  }
+
+  function serverItemToSession(item) {
+    const sessionKey = item.externalSessionId || item.id;
+    const typeLabel =
+      item.type === "project_study"
+        ? "今日学习"
+        : item.type === "project_setup"
+          ? "项目设置"
+          : "自由问答";
+
+    return {
+      id: sessionKey,
+      conversationId: item.id,
+      conversationType: item.type,
+      topicLabel: typeLabel,
+      title: item.title || typeLabel || "对话",
+      preview: item.preview || "暂无消息",
+      messages: [],
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      fromServer: true,
+    };
+  }
+
+  async function refreshSessionListFromServer() {
+    serverSessionsCache = await fetchServerSessions();
+    const store = loadStore();
+    let changed = false;
+
+    serverSessionsCache.forEach(function (item) {
+      let session = findSessionByConversationId(store, item.id);
+      if (!session) {
+        store.sessions.push(serverItemToSession(item));
+        changed = true;
+        return;
+      }
+
+      session.conversationId = item.id;
+      session.updatedAt = item.updatedAt || session.updatedAt;
+      if (item.preview) {
+        session.preview = item.preview;
+      }
+      if (item.title) {
+        session.title = item.title;
+      }
+      changed = true;
+    });
+
+    if (changed) {
+      saveStore(store);
+    }
+
+    notifyHistoryChanged();
+    return store.sessions;
+  }
+
+  async function createServerConversation(title) {
+    const api = window.EduTowerApi;
+    if (!api || typeof api.post !== "function") {
+      return null;
+    }
+
+    try {
+      const payload = {
+        type: "free_qa",
+        title: title || "新对话",
+      };
+      if (sessionId) {
+        payload.externalSessionId = sessionId;
+      }
+      const created = await api.post("/api/conversations", payload);
+      return created && created.id ? created.id : null;
+    } catch (_err) {
+      return null;
+    }
   }
 
   function setActiveConversationId(id) {
@@ -529,6 +620,38 @@
     if (window.EduTowerChatHistory && typeof window.EduTowerChatHistory.close === "function") {
       window.EduTowerChatHistory.close();
     }
+
+    refreshAgentPanel();
+  }
+
+  function getAgentPanelHints() {
+    const store = loadStore();
+    const session = sessionId ? findSession(store, sessionId) : null;
+    if (!session) {
+      return { topic: "", lastMessage: "" };
+    }
+
+    const userMessages = (session.messages || []).filter(function (entry) {
+      return entry.role === "user";
+    });
+    const latestUser = userMessages[userMessages.length - 1];
+    const topic =
+      session.topicLabel && session.topicLabel !== PENDING_TOPIC_LABEL
+        ? session.topicLabel
+        : latestUser
+          ? inferTopicFromMessage(latestUser.content)
+          : "";
+
+    return {
+      topic: topic || "",
+      lastMessage: latestUser ? String(latestUser.content || "").trim() : "",
+    };
+  }
+
+  function refreshAgentPanel() {
+    if (window.EduTowerAgentPanel && typeof window.EduTowerAgentPanel.refreshFromBackend === "function") {
+      window.EduTowerAgentPanel.refreshFromBackend();
+    }
   }
 
   function deleteSession(targetSessionId) {
@@ -558,7 +681,7 @@
 
     const store = loadStore();
     const now = new Date().toISOString();
-    store.sessions.unshift({
+    const session = {
       id: sessionId,
       topicLabel: PENDING_TOPIC_LABEL,
       title: "新对话",
@@ -566,8 +689,25 @@
       messages: [],
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    store.sessions.unshift(session);
     saveStore(store);
+
+    createServerConversation("新对话").then(function (convId) {
+      if (!convId) {
+        return;
+      }
+      const latestStore = loadStore();
+      const active = findSession(latestStore, sessionId);
+      if (!active) {
+        return;
+      }
+      active.conversationId = convId;
+      setActiveConversationId(convId);
+      saveStore(latestStore);
+      notifyHistoryChanged();
+      refreshAgentPanel();
+    });
 
     updateTopicLabelFromSession();
     showWelcomeMessage();
@@ -576,33 +716,49 @@
     if (window.EduTowerChatHistory && typeof window.EduTowerChatHistory.close === "function") {
       window.EduTowerChatHistory.close();
     }
+
+    refreshAgentPanel();
   }
 
   function bootstrapSession() {
-    if (!sessionId) {
-      updateTopicLabelFromSession();
-      return;
-    }
+    refreshSessionListFromServer().finally(function () {
+      if (!sessionId) {
+        updateTopicLabelFromSession();
+        return;
+      }
 
-    const store = loadStore();
-    const session = findSession(store, sessionId);
+      const store = loadStore();
+      const session = findSession(store, sessionId);
 
-    if (!session) {
-      sessionId = "";
-      sessionStorage.removeItem(SESSION_KEY);
-      updateTopicLabelFromSession();
-      showWelcomeMessage();
-      return;
-    }
+      if (!session) {
+        sessionId = "";
+        sessionStorage.removeItem(SESSION_KEY);
+        updateTopicLabelFromSession();
+        showWelcomeMessage();
+        return;
+      }
 
-    if (session.conversationId) {
-      setActiveConversationId(session.conversationId);
-    } else {
-      setActiveConversationId("");
-    }
-
-    updateTopicLabelFromSession();
-    renderSessionMessages(session.messages || []);
+      if (session.conversationId) {
+        setActiveConversationId(session.conversationId);
+        syncSessionFromServer(session).then(function (updated) {
+          const latestStore = loadStore();
+          const active = findSession(latestStore, sessionId);
+          if (active) {
+            active.messages = updated.messages || active.messages;
+            active.preview = updated.preview || active.preview;
+            active.title = updated.title || active.title;
+            active.updatedAt = updated.updatedAt || active.updatedAt;
+          }
+          saveStore(latestStore);
+          updateTopicLabelFromSession();
+          renderSessionMessages((active && active.messages) || []);
+        });
+      } else {
+        setActiveConversationId("");
+        updateTopicLabelFromSession();
+        renderSessionMessages(session.messages || []);
+      }
+    });
   }
 
   function notifyHistoryChanged() {
@@ -710,6 +866,20 @@
       removeThinkingIndicator();
       addMessage("ai", reply);
       persistMessage("assistant", reply);
+      refreshSessionListFromServer().then(function () {
+        const store = loadStore();
+        const active = findSession(store, sessionId);
+        if (active && !active.conversationId) {
+          const matched = serverSessionsCache.find(function (item) {
+            return item.externalSessionId === sessionId;
+          });
+          if (matched) {
+            active.conversationId = matched.id;
+            setActiveConversationId(matched.id);
+            saveStore(store);
+          }
+        }
+      });
 
       if (window.EduTowerAgentPanel && typeof window.EduTowerAgentPanel.refreshFromBackend === "function") {
         window.EduTowerAgentPanel.refreshFromBackend();
@@ -816,10 +986,12 @@
       return sessionId;
     },
     getConversationId: getActiveConversationId,
+    getAgentPanelHints: getAgentPanelHints,
     loadSession: loadSession,
     startNewSession: startNewSession,
     deleteSession: deleteSession,
     listSessionsGrouped: listSessionsGrouped,
+    refreshSessionListFromServer: refreshSessionListFromServer,
     showWelcomeMessage: showWelcomeMessage,
     activateStudyConversation: activateStudyConversation,
     clearStudyConversation: clearStudyConversation,

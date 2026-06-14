@@ -1,6 +1,5 @@
 /**
- * EduTower — AI 复习历史对话（浏览器本地存储，按时间分组展示）
- * 今日学习对话会同步服务端子对话；自由问答仍保存在本机 localStorage。
+ * EduTower — AI 复习历史对话（服务端会话 + 本机缓存合并展示）
  */
 (function () {
   "use strict";
@@ -34,7 +33,7 @@
     drawerEl.innerHTML =
       '<header class="chat-history-drawer__header">' +
       '<div><h2 class="chat-history-drawer__title">历史对话</h2>' +
-      '<p class="chat-history-drawer__subtitle">按时间查看过往会话；今日学习对话与服务端同步，其余保存在本机浏览器</p></div>' +
+      '<p class="chat-history-drawer__subtitle">按时间查看过往会话；列表来自服务端，消息在打开时同步</p></div>' +
       '<button type="button" class="icon-btn chat-history-drawer__close" data-action="close-history" aria-label="关闭">' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 6L6 18M6 6l12 12"/></svg></button></header>' +
       '<div class="chat-history-drawer__toolbar">' +
@@ -106,7 +105,19 @@
     drawerEl.classList.remove("is-hidden");
     overlayEl.setAttribute("aria-hidden", "false");
     drawerEl.setAttribute("aria-hidden", "false");
-    renderDrawer();
+    bodyLoading();
+    var refresh =
+      window.EduTowerChat && typeof window.EduTowerChat.refreshSessionListFromServer === "function"
+        ? window.EduTowerChat.refreshSessionListFromServer()
+        : Promise.resolve();
+    refresh.finally(renderDrawer);
+  }
+
+  function bodyLoading() {
+    var body = document.getElementById("chatHistoryBody");
+    if (body) {
+      body.innerHTML = '<p class="chat-history-empty">正在加载历史对话…</p>';
+    }
   }
 
   function closeDrawer() {
