@@ -1,8 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
 import { Router } from "express";
 import { env } from "../config/env";
-import type { DatabaseStatus } from "../types/edutower";
 import { sendSuccess } from "../utils/apiResponse";
+
+type DatabaseStatus = "ok" | "not_configured" | "error";
 
 const router = Router();
 

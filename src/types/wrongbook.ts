@@ -1,4 +1,22 @@
-import type { QuizQuestion } from "./edutower";
+export type Difficulty = "easy" | "medium" | "hard";
+export type QuizQuestionType = "single_choice" | "short_answer";
+
+export interface QuizOption {
+  id: string;
+  text: string;
+}
+
+// 错题里嵌的题目快照（早期 mock 结构，错题本沿用至今）。
+export interface QuizQuestion {
+  id: string;
+  type: QuizQuestionType;
+  stem: string;
+  options?: QuizOption[];
+  answer: string;
+  explanation: string;
+  difficulty: Difficulty;
+  knowledgePointId: string;
+}
 
 export type WrongbookStatus = "uncorrected" | "corrected";
 

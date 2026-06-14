@@ -11,7 +11,9 @@ import type {
   UpdateSkillLearningStateInput
 } from "../types/skills";
 import { AppError } from "../utils/errors";
-import { getDemoProjectId } from "./demo.service";
+import { logger } from "../utils/logger";
+import { conceptMappingService } from "./conceptMapping.service";
+import { getDemoProjectId, getDemoUserId } from "./demo.service";
 
 const VALID_LEARNING_STATES: SkillLearningState[] = ["not_started", "learning", "mastered"];
 
@@ -462,8 +464,18 @@ export const skillsService = {
       );
 
     switch (result.status) {
-      case "success":
+      case "success": {
+        // 手动标「掌握」也要同步跨项目概念账本（best-effort，失败不影响本次更新）。
+        if (updateInput.learningState === "mastered") {
+          const userId = await getDemoUserId();
+          await conceptMappingService
+            .recordNodeMastery(userId, projectId, [id])
+            .catch((error) => {
+              logger.warn("Failed to sync skill mastery to concept ledger.", error);
+            });
+        }
         return toApiSkill(result.item);
+      }
       case "not_found":
         throw new AppError("INVALID_REQUEST", "Skill item not found.", 404);
       case "archived":
