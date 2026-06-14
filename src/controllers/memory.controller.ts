@@ -1,6 +1,5 @@
 import { NextFunction, Request, Response } from "express";
-import { memoryService } from "../services/memory.service";
-import { memorySummarizerService } from "../services/memorySummarizer.service";
+import { memoryService, memorySummarizerService } from "../services/memory.service";
 import type { MemoryType } from "../types/memory";
 import { sendSuccess } from "../utils/apiResponse";
 

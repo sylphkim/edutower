@@ -4,7 +4,7 @@ import type { ApplyPlanProposalResult } from "../types/planProposal";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
 import { conceptMappingService } from "./conceptMapping.service";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoUserId } from "./demo.service";
 import { hashPlanProposal, normalizePlanProposal } from "./planProposalValidation";
 import { toPlanVersionItem } from "./planVersions.service";
 

@@ -1,5 +1,5 @@
 import { conceptsRepository } from "../repositories/concepts.repository";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoUserId } from "./demo.service";
 
 /** 全局技能图谱的一项：概念 + 掌握度（无掌握记录时 state/mastery 为 null = 未点亮）。 */
 export interface ConceptListItem {

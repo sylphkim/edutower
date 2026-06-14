@@ -1,6 +1,5 @@
 import { wrongbookService } from "./wrongbook.service";
-import { getDemoProjectId } from "./demoProject.service";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoProjectId, getDemoUserId } from "./demo.service";
 import { projectsRepository } from "../repositories/projects.repository";
 import { knowledgeNodesRepository } from "../repositories/knowledgeNodes.repository";
 import { quizzesRepository } from "../repositories/quizzes.repository";

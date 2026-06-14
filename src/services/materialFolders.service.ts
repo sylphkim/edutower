@@ -6,7 +6,7 @@ import type {
   UpdateMaterialFolderInput
 } from "../types/materialFolders";
 import { AppError } from "../utils/errors";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoUserId } from "./demo.service";
 
 function ensureMaterialFolderExists(item: MaterialFolder | null): MaterialFolder {
   if (!item) {

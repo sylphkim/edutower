@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { getDemoProjectId } from "../services/demoProject.service";
+import { getDemoProjectId } from "../services/demo.service";
 import type { KnowledgeNodeLearningState } from "../generated/prisma/client";
 
 interface SeedSkillNode {

@@ -1,6 +1,6 @@
 import { conceptsRepository } from "../repositories/concepts.repository";
 import { conceptMappingService } from "../services/conceptMapping.service";
-import { getDemoUserId } from "../services/demoUser.service";
+import { getDemoUserId } from "../services/demo.service";
 import { projectsRepository } from "../repositories/projects.repository";
 
 /**

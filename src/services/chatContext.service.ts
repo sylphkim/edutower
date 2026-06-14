@@ -5,7 +5,7 @@ import type { KnowledgeNodeWithPrerequisites } from "../repositories/knowledgeNo
 import { materialsRepository } from "../repositories/materials.repository";
 import { projectsRepository } from "../repositories/projects.repository";
 import { weakPointsRepository } from "../repositories/weakPoints.repository";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoUserId } from "./demo.service";
 import { memoryService } from "./memory.service";
 import type { Material, MaterialSourceType, WeakPoint } from "../generated/prisma/client";
 import type {

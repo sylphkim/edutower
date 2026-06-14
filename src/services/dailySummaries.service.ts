@@ -29,7 +29,7 @@ import {
   toDailySummaryItem
 } from "./dailyTaskMappers";
 import { aiEngineService } from "./aiEngine.service";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoUserId } from "./demo.service";
 import { conceptMappingService } from "./conceptMapping.service";
 import { memoryService } from "./memory.service";
 

@@ -31,7 +31,7 @@ import {
   toDailySummaryItem,
   toDailyTaskItem
 } from "./dailyTaskMappers";
-import { getDemoUserId } from "./demoUser.service";
+import { getDemoUserId } from "./demo.service";
 
 const DEFAULT_AVAILABLE_MINUTES = 60;
 const MIN_AVAILABLE_MINUTES = 15;
