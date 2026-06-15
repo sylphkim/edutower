@@ -8,11 +8,11 @@ import {
   BUILTIN_WRONGBOOK_CATEGORIES,
   BUILTIN_WRONGBOOK_SUBJECTS
 } from "../mock/wrongbookTaxonomy";
-import type { QuizQuestion } from "../types/edutower";
 import type {
   CreateWrongbookInput,
   CreateWrongbookTaxonomyInput,
   DeleteWrongbookTaxonomyResult,
+  QuizQuestion,
   UpdateWrongbookInput,
   WrongbookItem,
   WrongbookListPayload,
