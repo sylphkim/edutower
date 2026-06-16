@@ -11,14 +11,12 @@ import type {
 
 export const MAX_DAILY_TASKS = 8;
 const MAX_CANDIDATES = 30;
-const CATEGORY_CAPS: Record<StudyTaskSource, number> = {
+const CATEGORY_CAPS: Partial<Record<StudyTaskSource, number>> = {
   carry_over: 10,
   weak_point: 8,
   wrongbook: 5,
-  plan: 16,
-  daily_summary: 0,
-  quiz: 0,
-  user_requested: 0
+  plan: 16
+  // daily_summary, quiz, user_requested: not yet implemented — missing caps default to 0
 };
 
 const DEFAULT_MINUTES_BY_TYPE: Record<StudyTaskType, number> = {
@@ -145,7 +143,7 @@ export function buildCandidates(
     const key = candidateDedupeKey(candidate.type, candidate.knowledgeNodeId);
     const used = categoryCounts.get(candidate.sourceType) ?? 0;
 
-    if (seenKeys.has(key) || used >= CATEGORY_CAPS[candidate.sourceType]) {
+    if (seenKeys.has(key) || used >= (CATEGORY_CAPS[candidate.sourceType] ?? 0)) {
       return;
     }
 

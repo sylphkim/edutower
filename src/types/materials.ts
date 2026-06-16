@@ -1,4 +1,4 @@
-export type MaterialType = "slides" | "photo" | "outline" | "note" | "other";
+export type MaterialType = "slides" | "photo" | "board" | "outline" | "note" | "exam" | "other";
 export type MaterialOrigin = "uploaded" | "manual" | "mock";
 export type MaterialSource = MaterialOrigin;
 export type MaterialSourceType = "pdf" | "doc" | "image" | "text" | "link";
@@ -18,6 +18,7 @@ export interface MaterialItem {
   fileSize: number | null;
   storagePath: string | null;
   summary?: string;
+  extractedText?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -49,4 +50,5 @@ export interface UpdateMaterialInput {
   status?: MaterialStatus;
   folderId?: string | null;
   summary?: string;
+  extractedText?: string | null;
 }

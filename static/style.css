@@ -3643,7 +3643,9 @@ body:has(.local-file-warning:not([hidden])) .app {
 }
 
 .materials-list__move,
-.materials-list__download {
+.materials-list__move,
+.materials-list__download,
+.materials-list__reparse {
   padding: 4px 10px;
   font-size: 12px;
   color: var(--color-text-secondary);
@@ -3653,10 +3655,12 @@ body:has(.local-file-warning:not([hidden])) .app {
   text-decoration: none;
   display: inline-flex;
   align-items: center;
+  cursor: pointer;
 }
 
 .materials-list__move:hover,
-.materials-list__download:hover {
+.materials-list__download:hover,
+.materials-list__reparse:hover {
   border-color: var(--color-accent-muted);
   color: var(--color-text);
 }

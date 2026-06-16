@@ -181,7 +181,11 @@ export const projectsRepository = {
       return createdProject;
     });
 
-    return this.findByIdForUser(project.id, input.userId) as Promise<StudyProjectWithPlan>;
+    const result = await this.findByIdForUser(project.id, input.userId);
+    if (!result) {
+      throw new Error("Failed to load project plan after creation.");
+    }
+    return result;
   },
 
   async updatePlan(
@@ -195,8 +199,7 @@ export const projectsRepository = {
           userId: input.userId
         },
         data: {
-          title: input.title,
-          subject: input.title,
+          ...(input.title !== undefined ? { title: input.title } : {}),
           goal: input.goal,
           status: input.status,
           ...(input.deadline !== undefined ? { deadline: input.deadline } : {}),
@@ -242,7 +245,11 @@ export const projectsRepository = {
       }
     });
 
-    return this.findByIdForUser(id, input.userId!) as Promise<StudyProjectWithPlan>;
+    const result = await this.findByIdForUser(id, input.userId!);
+    if (!result) {
+      throw new Error("Failed to load project plan after update.");
+    }
+    return result;
   },
 
   deleteByIdForUser(id: string, userId: string): Promise<StudyProject> {

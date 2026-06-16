@@ -210,6 +210,17 @@
         return;
       }
 
+      if (target.matches("[data-action='reparse-material']")) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        var reparseId = target.getAttribute("data-material-id");
+        if (reparseId) {
+          reparseMaterial(reparseId);
+        }
+        return;
+      }
+
       if (target.matches("[data-action='move-material']")) {
         event.preventDefault();
         event.stopPropagation();
@@ -1268,6 +1279,42 @@
     }
   }
 
+  async function reparseMaterial(id) {
+    if (isDeleting) return;
+    hideStatus();
+    showStatus("正在重新提取文本...", "info");
+
+    try {
+      var response = await fetch(
+        MATERIALS_API + "/" + encodeURIComponent(id) + "/reparse",
+        { method: "POST" }
+      );
+      var result = await response.json();
+
+      if (result && result.ok === true) {
+        var item = result.data;
+        var charCount = (item && item.extractedText && item.extractedText.length) || 0;
+        showStatus(
+          charCount > 0
+            ? "文本重新提取完成 (" + charCount + " 字符)"
+            : "重新提取完成，未提取到文本内容。",
+          charCount > 0 ? "success" : "info"
+        );
+        refreshMaterialsOnly();
+        loadMaterialChunks(items);
+        return;
+      }
+
+      showStatus(extractErrorMessage(result, response), "error");
+    } catch (err) {
+      var friendly =
+        err instanceof TypeError && /fetch|network/i.test(String(err.message))
+          ? "网络连接失败，请确认 Express 后端已启动。"
+          : err.message || "未知错误";
+      showStatus("重新提取失败：" + friendly, "error");
+    }
+  }
+
   function renderMaterialsList(items) {
     listEl.innerHTML = "";
     var hasItems = items.length > 0;
@@ -1352,6 +1399,21 @@
         downloadLink.textContent = "下载";
         downloadLink.setAttribute("aria-label", "下载资料：" + item.title);
         actions.appendChild(downloadLink);
+      }
+
+      // Reparse button for uploaded PDF/DOCX files
+      if (
+        item.storagePath &&
+        (item.sourceType === "pdf" || item.sourceType === "doc")
+      ) {
+        var reparseBtn = document.createElement("button");
+        reparseBtn.type = "button";
+        reparseBtn.className = "materials-list__reparse";
+        reparseBtn.setAttribute("data-action", "reparse-material");
+        reparseBtn.setAttribute("data-material-id", item.id);
+        reparseBtn.setAttribute("aria-label", "重新提取文本：" + item.title);
+        reparseBtn.textContent = "提取文本";
+        actions.appendChild(reparseBtn);
       }
 
       actions.appendChild(moveBtn);
@@ -1453,8 +1515,21 @@
       return "";
     }
 
+    var parts = [];
+    parts.push(item.originalFileName);
     var sizeLabel = formatFileSize(item.fileSize);
-    return " · " + item.originalFileName + (sizeLabel ? " · " + sizeLabel : "");
+    if (sizeLabel) parts.push(sizeLabel);
+
+    // Show extraction status for parseable file types
+    if (item.sourceType === "pdf" || item.sourceType === "doc") {
+      if (item.extractedText && item.extractedText.length > 0) {
+        parts.push("文本已提取(" + item.extractedText.length + "字)");
+      } else {
+        parts.push("文本未提取");
+      }
+    }
+
+    return " · " + parts.join(" · ");
   }
 
   function formatUploadedFilePreview(item) {

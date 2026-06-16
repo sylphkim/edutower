@@ -12,7 +12,7 @@ _MIN_OPTIONS = 2
 
 _DIFFICULTY_HINT = {
     "pass": "难度：基础巩固，侧重概念理解与常见考点，题目应清晰直接。",
-    "high_score": "难度：高分强化，可包含综合应用、易错辨析与多步推理，但仍为单选题。",
+    "high_score": "难度：高分强化，可包含综合应用、易错辨析与多步推理。",
 }
 
 
@@ -57,12 +57,14 @@ def _call_llm_json(
 ) -> str:
     system_prompt = (
         "你是 EduTower 学习平台的出题助手。"
-        "只生成单项选择题，必须输出合法 JSON，不要输出 Markdown 代码块或任何额外说明。"
-        "JSON 顶层只有一个字段 questions，值为数组；数组长度必须等于要求的题数。"
-        "每道题字段：prompt（题干）、options（3-4 个互斥选项的字符串数组）、"
-        "answer（必须与 options 中某一项文字完全一致）、"
-        "explanation（一句话解析）。"
-        "题干与选项使用简体中文。"
+        "请生成以下类型的题目，输出合法 JSON，不要输出 Markdown 代码块或任何额外说明。"
+        "JSON 顶层只有一个字段 questions，值为数组；数组长度必须等于要求的题数。\n"
+        "题目类型包括：\n"
+        "1. 单选题（type: single_choice）：prompt（题干）、options（3-4 个互斥选项的字符串数组）、"
+        "answer（必须与 options 中某一项文字完全一致）、explanation（一句话解析）。\n"
+        "2. 简答题（type: short_answer）：prompt（题干）、answer（参考答案）、"
+        "explanation（解析），不需要 options 字段。\n"
+        "请混搭两种题型。题干与选项使用简体中文。"
     )
 
     user_prompt = (
@@ -128,10 +130,23 @@ def _normalize_question(item: Any) -> dict[str, Any] | None:
         return None
 
     prompt = str(item.get("prompt", "")).strip()
-    options_raw = item.get("options")
     answer_raw = str(item.get("answer", "")).strip()
-    explanation = str(item.get("explanation", "")).strip()
+    explanation_raw = str(item.get("explanation", "")).strip()
+    raw_type = str(item.get("type", "single_choice")).strip().lower()
 
+    # ── short_answer: no options needed ──
+    if raw_type == "short_answer":
+        if not prompt or not answer_raw:
+            return None
+        return {
+            "type": "short_answer",
+            "prompt": prompt,
+            "answer": answer_raw,
+            "explanation": explanation_raw or "请结合知识点理解参考答案。",
+        }
+
+    # ── single_choice (default) ──
+    options_raw = item.get("options")
     if not isinstance(options_raw, list):
         return None
 
@@ -150,10 +165,11 @@ def _normalize_question(item: Any) -> dict[str, Any] | None:
         return None
 
     return {
+        "type": "single_choice",
         "prompt": prompt,
         "options": options,
         "answer": answer,
-        "explanation": explanation or "请参考正确选项理解本题要点。",
+        "explanation": explanation_raw or "请参考正确选项理解本题要点。",
     }
 
 

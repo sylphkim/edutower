@@ -11,6 +11,8 @@ export interface DemoMaterial {
   title: string;
   type: "pdf" | "doc" | "text" | "link";
   summary: string;
+  /** First ~1500 characters of extracted document text, for RAG context injection. */
+  contentSnippet?: string;
   knowledgePointIds: string[];
 }
 

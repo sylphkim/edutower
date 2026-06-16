@@ -35,6 +35,13 @@ export interface UpdateSkillLearningStateInput {
   learningState: SkillLearningState;
 }
 
+export interface UpdateSkillInput {
+  learningState?: SkillLearningState;
+  mastery?: number;
+  title?: string;
+  description?: string;
+}
+
 export interface SkillTreeItem extends SkillItem {
   prerequisiteRisk: boolean;
   riskPrerequisiteIds: string[];

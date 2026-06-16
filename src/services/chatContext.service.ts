@@ -123,6 +123,7 @@ function toContextMaterials(projectId: string, materials: Material[]): DemoMater
     title: material.title,
     type: material.sourceType ? SOURCE_TYPE_TO_MATERIAL_TYPE[material.sourceType] : "text",
     summary: material.summary ?? "",
+    contentSnippet: material.extractedText?.slice(0, 800) || undefined,
     knowledgePointIds: [] // 库里无 材料↔知识点 直接关联
   }));
 }

@@ -8,6 +8,7 @@ import type {
   SkillLearningState,
   SkillTreeResponse,
   SkillTreeItem,
+  UpdateSkillInput,
   UpdateSkillLearningStateInput
 } from "../types/skills";
 import { AppError } from "../utils/errors";
@@ -93,40 +94,58 @@ function ensureValidCreateInput(input: CreateSkillInput): void {
   }
 }
 
-function ensureValidLearningStateUpdateInput(
+function ensureValidSkillUpdateInput(
   input: unknown
-): UpdateSkillLearningStateInput {
+): UpdateSkillInput {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new AppError("INVALID_REQUEST", "Request body is required.", 400);
   }
 
   const body = input as Record<string, unknown>;
-  const keys = Object.keys(body);
+  const result: UpdateSkillInput = {};
 
-  if (keys.length !== 1 || keys[0] !== "learningState") {
+  if (body.learningState !== undefined) {
+    if (
+      typeof body.learningState !== "string" ||
+      !VALID_LEARNING_STATES.includes(body.learningState as SkillLearningState)
+    ) {
+      throw new AppError(
+        "INVALID_REQUEST",
+        `learningState must be one of: ${VALID_LEARNING_STATES.join(", ")}.`,
+        400
+      );
+    }
+    result.learningState = body.learningState as SkillLearningState;
+  }
+
+  if (body.mastery !== undefined) {
+    ensureValidMastery(body.mastery as number);
+    result.mastery = body.mastery as number;
+  }
+
+  if (body.title !== undefined) {
+    if (typeof body.title !== "string" || !body.title.trim()) {
+      throw new AppError("INVALID_REQUEST", "title must be a non-empty string.", 400);
+    }
+    result.title = body.title.trim();
+  }
+
+  if (body.description !== undefined) {
+    if (typeof body.description !== "string") {
+      throw new AppError("INVALID_REQUEST", "description must be a string.", 400);
+    }
+    result.description = body.description;
+  }
+
+  if (Object.keys(result).length === 0) {
     throw new AppError(
       "INVALID_REQUEST",
-      "PATCH /api/skills/:id only accepts learningState.",
+      "PATCH body must contain at least one updatable field: learningState, mastery, title, description.",
       400
     );
   }
 
-  const learningState = body.learningState;
-
-  if (
-    typeof learningState !== "string" ||
-    !VALID_LEARNING_STATES.includes(learningState as SkillLearningState)
-  ) {
-    throw new AppError(
-      "INVALID_REQUEST",
-      `learningState must be one of: ${VALID_LEARNING_STATES.join(", ")}.`,
-      400
-    );
-  }
-
-  return {
-    learningState: learningState as SkillLearningState
-  };
+  return result;
 }
 
 async function ensureParentBelongsToProject(
@@ -454,35 +473,69 @@ export const skillsService = {
     input: unknown,
     options: UpdateSkillOptions = {}
   ): Promise<SkillItem> {
-    const updateInput = ensureValidLearningStateUpdateInput(input);
+    const updateInput = ensureValidSkillUpdateInput(input);
     const projectId = await resolveProjectId(options.projectId);
-    const result =
-      await knowledgeNodesRepository.updateLearningStateAndUnlockDirectDependentsByIdForProject(
-        id,
-        projectId,
-        toKnowledgeNodeLearningState(updateInput.learningState)
-      );
 
-    switch (result.status) {
-      case "success": {
-        // 手动标「掌握」也要同步跨项目概念账本（best-effort，失败不影响本次更新）。
-        if (updateInput.learningState === "mastered") {
-          const userId = await getDemoUserId();
-          await conceptMappingService
-            .recordNodeMastery(userId, projectId, [id])
-            .catch((error) => {
-              logger.warn("Failed to sync skill mastery to concept ledger.", error);
-            });
-        }
-        return toApiSkill(result.item);
+    // If learningState is provided, always go through the unlock-aware path first
+    if (updateInput.learningState !== undefined) {
+      const result =
+        await knowledgeNodesRepository.updateLearningStateAndUnlockDirectDependentsByIdForProject(
+          id,
+          projectId,
+          toKnowledgeNodeLearningState(updateInput.learningState)
+        );
+
+      switch (result.status) {
+        case "not_found":
+          throw new AppError("INVALID_REQUEST", "Skill item not found.", 404);
+        case "archived":
+          throw new AppError("INVALID_REQUEST", "Archived skill cannot be updated.", 409);
+        case "locked":
+          throw new AppError("INVALID_REQUEST", "Locked skill cannot change learningState.", 409);
+        case "success":
+          break; // proceed to apply additional fields below
       }
-      case "not_found":
-        throw new AppError("INVALID_REQUEST", "Skill item not found.", 404);
-      case "archived":
-        throw new AppError("INVALID_REQUEST", "Archived skill cannot be updated.", 409);
-      case "locked":
-        throw new AppError("INVALID_REQUEST", "Locked skill cannot change learningState.", 409);
+
+      // Apply any additional fields (mastery, title, description) on top
+      const hasExtraFields =
+        updateInput.mastery !== undefined ||
+        updateInput.title !== undefined ||
+        updateInput.description !== undefined;
+
+      if (hasExtraFields) {
+        await knowledgeNodesRepository.updateByIdForProject(id, projectId, {
+          ...(updateInput.mastery !== undefined ? { mastery: updateInput.mastery } : {}),
+          ...(updateInput.title !== undefined ? { title: updateInput.title } : {}),
+          ...(updateInput.description !== undefined
+            ? { description: updateInput.description }
+            : {})
+        });
+      }
+
+      // Sync mastery to concept ledger if learningState is "mastered"
+      if (updateInput.learningState === "mastered") {
+        const userId = await getDemoUserId();
+        await conceptMappingService
+          .recordNodeMastery(userId, projectId, [id])
+          .catch((error) => {
+            logger.warn("Failed to sync skill mastery to concept ledger.", error);
+          });
+      }
+
+      const item = await knowledgeNodesRepository.findByIdForProject(id, projectId);
+      return toApiSkill(ensureSkillExists(item));
     }
+
+    // No learningState: general update only (mastery, title, description)
+    const item = await knowledgeNodesRepository.updateByIdForProject(id, projectId, {
+      ...(updateInput.mastery !== undefined ? { mastery: updateInput.mastery } : {}),
+      ...(updateInput.title !== undefined ? { title: updateInput.title } : {}),
+      ...(updateInput.description !== undefined
+        ? { description: updateInput.description }
+        : {})
+    });
+
+    return toApiSkill(item);
   },
 
   async remove(id: string): Promise<SkillItem> {

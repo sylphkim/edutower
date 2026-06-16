@@ -8,6 +8,7 @@ import type {
   UpdateMemoryInput
 } from "../types/memory";
 import { AppError } from "../utils/errors";
+import { logger } from "../utils/logger";
 import { getDemoUserId } from "./demo.service";
 
 const VALID_MEMORY_TYPES: MemoryType[] = [
@@ -207,6 +208,19 @@ export const memoryService = {
       relatedQuizIds: input.relatedQuizIds ?? [],
       relatedWrongbookIds: input.relatedWrongbookIds ?? []
     });
+
+    // Auto-trigger summarization when a type accumulates 10+ entries (best-effort, fire-and-forget)
+    const { items: allMemories } = await this.list();
+    const sameTypeCount = allMemories.filter(
+      (m) => m.type === input.type
+    ).length;
+    if (sameTypeCount >= 10) {
+      memorySummarizerService
+        .summarizeByType(input.type as MemoryType, 5)
+        .catch((err) => {
+          logger.warn("Auto-summarization failed.", err);
+        });
+    }
 
     return toApiMemory(record);
   },

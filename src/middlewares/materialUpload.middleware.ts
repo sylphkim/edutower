@@ -3,11 +3,12 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
+import { PROJECT_ROOT } from "../config/projectRoot";
 import { AppError } from "../utils/errors";
 
 export const MATERIAL_UPLOAD_FIELD_NAME = "file";
 export const MATERIAL_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
-export const MATERIAL_UPLOAD_DIR = path.join(process.cwd(), "uploads", "materials");
+export const MATERIAL_UPLOAD_DIR = path.join(PROJECT_ROOT, "uploads", "materials");
 
 const ALLOWED_MIME_TYPES_BY_EXTENSION: Record<string, ReadonlySet<string>> = {
   ".pdf": new Set(["application/pdf"]),

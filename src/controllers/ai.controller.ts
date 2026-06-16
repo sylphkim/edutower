@@ -22,25 +22,36 @@ function parseAndSaveMemoryUpdates(reply: string): string {
     const updates: CreateMemoryInput[] = JSON.parse(match[1]);
 
     if (Array.isArray(updates)) {
-      for (const item of updates) {
-        Promise.resolve(
-          (async () => {
-            // 按 title 查重：已存在的跳过
-            const existing = await memoryService.findByTitle(item.title);
-            if (existing) {
-              return;
+      // Fire-and-forget but serialized within the batch to prevent TOCTOU duplicates
+      const seenTitles = new Set<string>();
+      const deduped = updates.filter((item) => {
+        if (!item.title?.trim() || seenTitles.has(item.title)) {
+          return false;
+        }
+        seenTitles.add(item.title);
+        return true;
+      });
+
+      Promise.resolve(
+        (async () => {
+          for (const item of deduped) {
+            try {
+              const existing = await memoryService.findByTitle(item.title);
+              if (existing) continue;
+              await memoryService.create({
+                type: item.type,
+                title: item.title,
+                content: item.content,
+                importance: item.importance
+              });
+            } catch (error) {
+              logger.warn("Failed to persist memory update from chat reply.", error);
             }
-            await memoryService.create({
-              type: item.type,
-              title: item.title,
-              content: item.content,
-              importance: item.importance
-            });
-          })()
-        ).catch((error) => {
-          logger.warn("Failed to persist memory update from chat reply.", error);
-        });
-      }
+          }
+        })()
+      ).catch((error) => {
+        logger.warn("Failed to process memory updates batch.", error);
+      });
     }
   } catch {
     // 解析失败时静默忽略

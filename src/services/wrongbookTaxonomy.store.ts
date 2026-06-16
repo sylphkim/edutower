@@ -1,9 +1,10 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { PROJECT_ROOT } from "../config/projectRoot";
 import type { WrongbookTaxonomyEntry } from "../types/wrongbook";
 import { logger } from "../utils/logger";
 
-const TAXONOMY_FILE = path.resolve(process.cwd(), "data", "wrongbook-taxonomy.json");
+const TAXONOMY_FILE = path.join(PROJECT_ROOT, "data", "wrongbook-taxonomy.json");
 
 interface StoredTaxonomy {
   subjects: WrongbookTaxonomyEntry[];

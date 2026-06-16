@@ -1,6 +1,8 @@
 import { createReadStream, type ReadStream } from "node:fs";
 import { access, unlink } from "node:fs/promises";
 import path from "node:path";
+import { PROJECT_ROOT } from "../config/projectRoot";
+import { prisma } from "../lib/prisma";
 import { materialsRepository } from "../repositories/materials.repository";
 import { materialFoldersRepository } from "../repositories/materialFolders.repository";
 import type {
@@ -22,12 +24,13 @@ import type {
 } from "../types/materials";
 import { AppError } from "../utils/errors";
 import { logger } from "../utils/logger";
-import { getDemoUserId } from "./demo.service";
+import { getDemoProjectId, getDemoUserId } from "./demo.service";
+import { materialTextExtractionService } from "./materialTextExtraction.service";
 
-const VALID_TYPES: MaterialType[] = ["slides", "photo", "outline", "note", "other"];
+const VALID_TYPES: MaterialType[] = ["slides", "photo", "board", "outline", "note", "exam", "other"];
 const VALID_SOURCES: MaterialSource[] = ["uploaded", "manual", "mock"];
 const VALID_STATUSES: MaterialStatus[] = ["pending", "processing", "ready", "failed"];
-const MATERIAL_UPLOAD_ROOT = path.resolve(process.cwd(), "uploads", "materials");
+const MATERIAL_UPLOAD_ROOT = path.join(PROJECT_ROOT, "uploads", "materials");
 
 function ensureMaterialExists(item: Material | null): Material {
   if (!item) {
@@ -273,18 +276,63 @@ function toApiMaterial(item: Material): MaterialItem {
     fileSize: item.fileSize,
     storagePath: item.storagePath,
     summary: item.summary ?? undefined,
+    extractedText: item.extractedText,
     createdAt: item.createdAt.toISOString(),
     updatedAt: item.updatedAt.toISOString()
   };
 }
 
-function splitSummaryToChunks(summary: string): string[] {
-  const parts = summary
-    .split(/\n+|(?<=[。！？.!?])\s*/)
-    .map((part) => part.trim())
+function splitTextToChunks(text: string, chunkSize: number): string[] {
+  // Split by paragraphs first
+  const paragraphs = text
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
     .filter(Boolean);
 
-  return parts.length > 0 ? parts : [summary.trim()];
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const para of paragraphs) {
+    if (current && current.length + para.length > chunkSize) {
+      chunks.push(current.trim());
+      current = para;
+    } else {
+      current = current ? `${current}\n\n${para}` : para;
+    }
+  }
+
+  if (current.trim()) {
+    chunks.push(current.trim());
+  }
+
+  // If no paragraph breaks produced chunks, fall back to raw text
+  if (chunks.length === 0 && text.trim()) {
+    return [text.trim()];
+  }
+
+  // Split any oversized single chunk by sentence boundaries
+  const result: string[] = [];
+  for (const chunk of chunks) {
+    if (chunk.length <= chunkSize * 1.5) {
+      result.push(chunk);
+    } else {
+      const sentences = chunk.split(/(?<=[。！？.!?])\s*/);
+      let sentenceChunk = "";
+      for (const s of sentences) {
+        if (sentenceChunk && sentenceChunk.length + s.length > chunkSize) {
+          result.push(sentenceChunk.trim());
+          sentenceChunk = s;
+        } else {
+          sentenceChunk += s;
+        }
+      }
+      if (sentenceChunk.trim()) {
+        result.push(sentenceChunk.trim());
+      }
+    }
+  }
+
+  return result;
 }
 
 export interface MaterialChunkItem {
@@ -332,6 +380,20 @@ export const materialsService = {
       summary: input.summary
     });
 
+    // Auto-link to demo project so material appears in AI chat context
+    try {
+      const projectId = await getDemoProjectId();
+      await prisma.projectMaterial.create({
+        data: { projectId, materialId: item.id }
+      });
+    } catch (linkError) {
+      // Link may already exist; log and continue
+      logger.warn("Failed to auto-link manual material to demo project.", {
+        materialId: item.id,
+        error: linkError
+      });
+    }
+
     return toApiMaterial(item);
   },
 
@@ -356,7 +418,47 @@ export const materialsService = {
         summary: undefined
       });
 
-      return toApiMaterial(item);
+      // ── 自动提取文档文本 ──
+      const filePath = path.resolve(process.cwd(), input.storagePath);
+      let updatedItem = item;
+      try {
+        const extraction = await materialTextExtractionService.extractFromFile(
+          filePath,
+          input.mimeType
+        );
+        if (extraction.text) {
+          updatedItem = await materialsRepository.updateByIdForUser(item.id, userId, {
+            extractedText: extraction.text
+          });
+          logger.info("Text extracted from uploaded material.", {
+            materialId: item.id,
+            originalFileName: input.originalFileName,
+            charCount: extraction.charCount,
+            truncated: extraction.truncated
+          });
+        }
+      } catch (extractionError) {
+        logger.warn("Text extraction failed for uploaded material.", {
+          materialId: item.id,
+          originalFileName: input.originalFileName,
+          error: extractionError
+        });
+      }
+
+      // ── 自动关联到 demo project ──
+      try {
+        const projectId = await getDemoProjectId();
+        await prisma.projectMaterial.create({
+          data: { projectId, materialId: item.id }
+        });
+      } catch (linkError) {
+        logger.error("Failed to auto-link material to demo project — material will be invisible to AI.", {
+          materialId: item.id,
+          error: linkError
+        });
+      }
+
+      return toApiMaterial(updatedItem);
     } catch (error) {
       await cleanupUploadedFile(input.storagePath, error);
       throw error;
@@ -381,7 +483,11 @@ export const materialsService = {
           ? toMaterialStatus(input.status)
           : currentItem.status,
       ...(folderId !== undefined ? { folderId } : {}),
-      summary: input.summary ?? currentItem.summary ?? undefined
+      summary: input.summary ?? currentItem.summary ?? undefined,
+      extractedText:
+        input.extractedText !== undefined
+          ? input.extractedText
+          : currentItem.extractedText
     });
 
     return toApiMaterial(updatedItem);
@@ -435,13 +541,16 @@ export const materialsService = {
 
     const materials = await materialsRepository.listByUser(userId);
     const chunks: MaterialChunkItem[] = [];
+    const CHUNK_TARGET_BYTES = 1500;
 
     for (const item of materials) {
-      if (!item.summary?.trim()) {
+      // Priority: extractedText (parsed from PDF/DOCX) > summary (user-written)
+      const sourceText = item.extractedText?.trim() || item.summary?.trim();
+      if (!sourceText) {
         continue;
       }
 
-      for (const text of splitSummaryToChunks(item.summary)) {
+      for (const text of splitTextToChunks(sourceText, CHUNK_TARGET_BYTES)) {
         chunks.push({
           order: chunks.length + 1,
           materialId: item.id,
@@ -456,5 +565,34 @@ export const materialsService = {
     }
 
     return { items: chunks };
+  },
+
+  /** Re-extract text from the original uploaded file. Useful when a previous
+   *  extraction failed or the file was replaced. */
+  async reparseExtractedText(id: string): Promise<MaterialItem> {
+    const userId = await getDemoUserId();
+    const item = ensureMaterialExists(
+      await materialsRepository.findByIdForUser(id, userId)
+    );
+
+    if (!item.storagePath?.trim() || !item.mimeType?.trim()) {
+      throw new AppError(
+        "INVALID_REQUEST",
+        "Material has no uploaded file to re-parse.",
+        400
+      );
+    }
+
+    const filePath = path.resolve(process.cwd(), item.storagePath);
+    const extraction = await materialTextExtractionService.extractFromFile(
+      filePath,
+      item.mimeType
+    );
+
+    const updated = await materialsRepository.updateByIdForUser(id, userId, {
+      extractedText: extraction.text || null
+    });
+
+    return toApiMaterial(updated);
   }
 };

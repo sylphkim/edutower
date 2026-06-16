@@ -25,6 +25,7 @@ export interface CreateMaterialRecordInput {
   fileSize?: number | null;
   storagePath?: string | null;
   summary?: string;
+  extractedText?: string | null;
 }
 
 export interface UpdateMaterialRecordInput {
@@ -33,6 +34,7 @@ export interface UpdateMaterialRecordInput {
   status?: MaterialStatus;
   folderId?: string | null;
   summary?: string;
+  extractedText?: string | null;
 }
 
 export const materialsRepository = {
@@ -104,7 +106,8 @@ export const materialsRepository = {
         mimeType: input.mimeType,
         fileSize: input.fileSize,
         storagePath: input.storagePath,
-        summary: input.summary
+        summary: input.summary,
+        extractedText: input.extractedText ?? null
       }
     });
   },

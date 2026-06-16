@@ -162,3 +162,18 @@ export async function downloadMaterial(
     next(error);
   }
 }
+
+export async function reparseMaterial(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await materialsService.reparseExtractedText(id);
+
+    sendSuccess(res, result);
+  } catch (error) {
+    next(error);
+  }
+}

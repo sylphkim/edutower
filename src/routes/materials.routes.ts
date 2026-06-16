@@ -6,6 +6,7 @@ import {
   getMaterial,
   listMaterialChunks,
   listMaterials,
+  reparseMaterial,
   uploadMaterial,
   updateMaterial
 } from "../controllers/materials.controller";
@@ -21,5 +22,6 @@ router.get("/:id/download", downloadMaterial);
 router.get("/:id", getMaterial);
 router.patch("/:id", updateMaterial);
 router.delete("/:id", deleteMaterial);
+router.post("/:id/reparse", reparseMaterial);
 
 export default router;

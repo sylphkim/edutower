@@ -123,10 +123,11 @@ export const quizzesRepository = {
       }
     });
 
-    return this.findByIdForProject(
-      quiz.id,
-      input.projectId
-    ) as unknown as Promise<QuizWithQuestions>;
+    const created = await this.findByIdForProject(quiz.id, input.projectId);
+    if (!created) {
+      throw new Error("Failed to load quiz after creation.");
+    }
+    return created;
   },
 
   deleteById(id: string): Promise<Quiz> {

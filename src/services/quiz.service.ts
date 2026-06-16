@@ -236,6 +236,38 @@ export const quizService = {
     const answerMap = new Map(
       input.answers.map((answer) => [answer.questionId, normalizeAnswer(answer.answer)])
     );
+
+    // Validate submitted answers match available options for single_choice questions
+    for (const question of quiz.questions) {
+      const submittedRaw = input.answers.find(
+        (a) => a.questionId === question.id
+      )?.answer;
+      if (submittedRaw === undefined) continue;
+
+      if (question.type === "single_choice" && question.options.length > 0) {
+        const optionTexts = question.options.map((o) => normalizeAnswer(o.text));
+        const normalizedSubmitted = normalizeAnswer(submittedRaw);
+
+        // Check if answer matches an option text (full-text match)
+        const matchesOptionText = optionTexts.includes(normalizedSubmitted);
+
+        // Check if answer is a letter (A/B/C/...) pointing to a valid option index
+        const upperAnswer = submittedRaw.trim().toUpperCase();
+        const isLetter = /^[A-Z]$/.test(upperAnswer);
+        const letterIndex = isLetter ? upperAnswer.charCodeAt(0) - 65 : -1;
+        const isLetterInRange =
+          isLetter && letterIndex >= 0 && letterIndex < question.options.length;
+
+        if (!matchesOptionText && !isLetterInRange) {
+          throw new AppError(
+            "INVALID_REQUEST",
+            `Answer for question "${question.id}" does not match any available option.`,
+            400
+          );
+        }
+      }
+    }
+
     const wrongQuestions = quiz.questions.filter((question) => {
       const submittedAnswer = answerMap.get(question.id) ?? "";
 
@@ -312,9 +344,9 @@ export interface GenerateQuestionsInput {
 
 // 结构与 types/quiz.ts 的 QuizQuestion（去掉 id）兼容，方便上层直接落库。
 export interface GeneratedQuestion {
-  type: "single_choice";
+  type: "single_choice" | "short_answer";
   prompt: string;
-  options: string[];
+  options?: string[];
   answer: string;
   explanation?: string;
 }
@@ -380,6 +412,18 @@ function toGeneratedQuestion(raw: unknown): GeneratedQuestion | null {
   }
 
   const record = raw as Record<string, unknown>;
+  const rawType = typeof record.type === "string" ? record.type.trim().toLowerCase() : "single_choice";
+
+  // ── short_answer: no options needed, just prompt + answer ──
+  if (rawType === "short_answer") {
+    const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
+    const answer = typeof record.answer === "string" ? record.answer.trim() : "";
+    const explanation = normalizeExplanation(record.explanation);
+    if (!prompt || !answer) return null;
+    return { type: "short_answer", prompt, answer, explanation };
+  }
+
+  // ── single_choice (default) ──
   const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
   const options = Array.isArray(record.options)
     ? record.options
@@ -461,7 +505,7 @@ function resolveAnswer(answer: string, options: string[]): string | null {
 function buildMockQuestions(input: GenerateQuestionsInput, count: number): GeneratedQuestion[] {
   const title = input.knowledgeTitle.trim() || "该知识点";
 
-  const templates: Array<Omit<GeneratedQuestion, "type">> = [
+  const singleChoiceTemplates: Array<Omit<GeneratedQuestion, "type">> = [
     {
       prompt: `关于"${title}"，下列说法正确的是？`,
       options: [
@@ -486,13 +530,39 @@ function buildMockQuestions(input: GenerateQuestionsInput, count: number): Gener
     }
   ];
 
+  const shortAnswerTemplates: Array<Omit<GeneratedQuestion, "type">> = [
+    {
+      prompt: `请用自己的话简要解释"${title}"的核心概念。`,
+      answer: `${title} 的核心概念涉及基本定义、关键特征和典型应用场景。`,
+      explanation: "兜底题（AI 暂不可用）：用自己的话复述有助于加深记忆和理解。"
+    },
+    {
+      prompt: `请简述"${title}"在实际应用中的一个例子。`,
+      answer: `结合实际场景，${title} 可用于解决相关问题，体现其理论价值。`,
+      explanation: "兜底题（AI 暂不可用）：举例是检验理解的有效方式。"
+    }
+  ];
+
+  const allTemplates = [...singleChoiceTemplates, ...shortAnswerTemplates];
+
   return Array.from({ length: count }, (_, index) => {
-    const template = templates[index % templates.length];
+    const template = allTemplates[index % allTemplates.length];
+
+    if (template.options) {
+      return {
+        type: "single_choice" as const,
+        prompt: template.prompt,
+        options: [...template.options],
+        answer: template.answer,
+        explanation: template.explanation
+      };
+    }
 
     return {
-      type: "single_choice",
-      ...template,
-      options: [...template.options]
+      type: "short_answer" as const,
+      prompt: template.prompt,
+      answer: template.answer,
+      explanation: template.explanation
     };
   });
 }

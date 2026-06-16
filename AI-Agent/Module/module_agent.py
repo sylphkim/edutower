@@ -56,6 +56,18 @@ class ChatAgent:
     def run(self, session_id: str, message: str, context: dict | None = None) -> str:
         """Run the ReAct loop and return the final answer."""
         hist = self._get_history(session_id)
+
+        # Seed history from context on cold start (e.g. after process restart)
+        if not hist and context:
+            session_history = context.get("sessionHistory")
+            if isinstance(session_history, list):
+                for msg in session_history[-40:]:  # max 40 to match Express
+                    if isinstance(msg, dict):
+                        role = msg.get("role", "")
+                        content = msg.get("content", "")
+                        if role in ("user", "assistant") and content:
+                            hist.append({"role": role, "content": content})
+
         hist.append({"role": "user", "content": message})
 
         system_content = SYSTEM_PROMPT
@@ -161,6 +173,10 @@ class ChatAgent:
             for m in materials[:5]:
                 if isinstance(m, dict):
                     parts.append(f"  * {m.get('title', '?')}: {m.get('summary', '')}")
+                    snippet = (m.get("contentSnippet") or "").strip()
+                    if snippet:
+                        preview = snippet[:800]
+                        parts.append(f"    (content excerpt) {preview}")
 
         knowledge_points = context.get("knowledgePoints") or []
         if knowledge_points:
@@ -179,6 +195,27 @@ class ChatAgent:
                     parts.append(
                         f"  * {wp.get('title', '?')} — {wp.get('reason', '')} "
                         f"(suggested: {wp.get('suggestedAction', '')})"
+                    )
+
+        wrongbook_items = context.get("wrongbookItems") or []
+        if wrongbook_items:
+            parts.append("- Recent wrong answers:")
+            for wb in wrongbook_items[:5]:
+                if isinstance(wb, dict):
+                    parts.append(
+                        f"  * Q: {wb.get('question', '')} | "
+                        f"Wrong: {wb.get('wrongAnswer', '')} | "
+                        f"Correct: {wb.get('correctAnswer', '')}"
+                    )
+
+        memories = context.get("memories") or []
+        if memories:
+            parts.append("- Long-term memories:")
+            for mem in memories[:8]:
+                if isinstance(mem, dict):
+                    parts.append(
+                        f"  * [{mem.get('type', '?')}] {mem.get('title', '?')}: "
+                        f"{mem.get('content', '')}"
                     )
 
         return "\n".join(parts)
