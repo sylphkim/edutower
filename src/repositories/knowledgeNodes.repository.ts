@@ -300,6 +300,27 @@ export const knowledgeNodesRepository = {
             prerequisiteId
           }))
         });
+
+        // 有前置依赖：检查是否全部已 mastered，是则自动解锁
+        const masteredCount = await tx.knowledgeNode.count({
+          where: {
+            id: { in: input.prerequisiteIds },
+            projectId: input.projectId,
+            learningState: "mastered"
+          }
+        });
+        if (masteredCount === input.prerequisiteIds.length) {
+          await tx.knowledgeNode.update({
+            where: { id: createdItem.id },
+            data: { isUnlocked: true, unlockedAt: new Date() }
+          });
+        }
+      } else {
+        // 无前置依赖 → 自动解锁
+        await tx.knowledgeNode.update({
+          where: { id: createdItem.id },
+          data: { isUnlocked: true, unlockedAt: new Date() }
+        });
       }
 
       return createdItem;

@@ -32,6 +32,16 @@ export interface DemoWeakPoint {
   suggestedAction: string;
 }
 
+export interface DemoWrongbookItem {
+  id: string;
+  question: string;
+  wrongAnswer: string;
+  correctAnswer: string;
+  explanation?: string;
+  subject?: string;
+  category?: string;
+}
+
 export interface DemoSessionMessage {
   id: string;
   role: "user" | "assistant";
@@ -50,6 +60,7 @@ export interface ChatContext {
   materials: DemoMaterial[];
   knowledgePoints: DemoKnowledgePoint[];
   weakPoints: DemoWeakPoint[];
+  wrongbookItems: DemoWrongbookItem[];
   sessionHistory: DemoSessionMessage[];
   generatedAt: string;
   memories: ChatMemory[];

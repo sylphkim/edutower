@@ -1234,6 +1234,44 @@ export const dailyTaskSheetsRepository = {
     });
 
     return result.count === 1;
+  },
+
+  /**
+   * 重置已终结的今日学习单为 active，清空旧任务和总结，
+   * 允许用户「重新开始今日学习」。
+   */
+  async resetSheet(
+    sheetId: string,
+    projectId: string
+  ): Promise<DailyTaskSheetWithRelations> {
+    return prisma.$transaction(async (tx) => {
+      await tx.studyTask.deleteMany({
+        where: { dailyTaskSheetId: sheetId, projectId }
+      });
+
+      await tx.summarySuggestion.deleteMany({
+        where: { summary: { dailyTaskSheetId: sheetId } }
+      });
+      await tx.dailySummary.deleteMany({
+        where: { dailyTaskSheetId: sheetId }
+      });
+
+      await tx.dailyTaskSheet.update({
+        where: { id: sheetId, projectId },
+        data: {
+          status: "active",
+          endedAt: null,
+          closeReason: null,
+          generationCount: 0,
+          inputSnapshot: "{}"
+        }
+      });
+
+      return tx.dailyTaskSheet.findUnique({
+        where: { id: sheetId },
+        include: sheetInclude
+      }) as Promise<DailyTaskSheetWithRelations>;
+    });
   }
 };
 

@@ -306,6 +306,13 @@
     }
 
     var record = await api.get("/api/daily/" + encodeURIComponent(projectId) + "/today");
+    // 学习单已关闭/终结 → 重新开启（POST 触发后端 resetSheet）
+    if (record && record.sheet && record.sheet.id) {
+      var closedStatuses = ["completed", "forced_closed", "awaiting_confirmation"];
+      if (closedStatuses.indexOf(record.sheet.status) !== -1) {
+        return api.post("/api/daily/" + encodeURIComponent(projectId) + "/today", {});
+      }
+    }
     if (!record || !record.sheet || !record.sheet.id) {
       return api.post("/api/daily/" + encodeURIComponent(projectId) + "/today", {});
     }
@@ -1627,6 +1634,9 @@
       return null;
     }
 
+    var unlockedIds = {};
+    unlocked.forEach(function (s) { unlockedIds[s.id] = true; });
+
     var nodes = unlocked.map(function (skill) {
       var node = {
         key: "node_" + skill.id,
@@ -1637,9 +1647,11 @@
       return node;
     });
 
+    // 只保留两端都已解锁的依赖边
     var edges = (dependencyEdges || [])
       .filter(function (edge) {
-        return edge && edge.sourceId && edge.targetId;
+        return edge && edge.sourceId && edge.targetId
+          && unlockedIds[edge.sourceId] && unlockedIds[edge.targetId];
       })
       .map(function (edge) {
         return {
@@ -1687,8 +1699,10 @@
     var projectId = getProjectId();
     if (!projectId || isBusy) return;
 
-    var proposal = buildProposalFromSkills();
-    if (!proposal) {
+    var unlockedSkills = skills.filter(function (s) {
+      return s.isUnlocked !== false && !s.archivedAt;
+    });
+    if (!unlockedSkills.length) {
       setBanner("error", "技能树为空或全部未解锁。请先在「技能图谱」中解锁一些技能。");
       render();
       return;
@@ -1701,18 +1715,49 @@
       '<p class="module-empty module-empty--loading">正在启用学习计划…</p>';
 
     try {
-      await loadMaterials();
-      var result = await api.post(
-        "/api/plan/" + encodeURIComponent(projectId) + "/proposals/apply",
-        proposal
-      );
+      // 先尝试 proposals/apply（仅空项目可用）
+      var proposal = buildProposalFromSkills();
+      var result;
+      if (proposal) {
+        result = await api.post(
+          "/api/plan/" + encodeURIComponent(projectId) + "/proposals/apply",
+          proposal
+        );
+      }
 
       var versionId =
         result && result.planVersion && result.planVersion.id
           ? result.planVersion.id
-          : selectedVersionId;
+          : null;
 
-      if (result && result.planVersion && result.planVersion.status === "draft" && versionId) {
+      if (!versionId) {
+        // proposals/apply 不可用（项目已有技能），用已有技能创建计划版本
+        await loadMaterials();
+        var total = unlockedSkills.length;
+        var phaseCount = Math.min(3, Math.max(1, Math.ceil(total / 4)));
+        var chunkSize = Math.ceil(total / phaseCount);
+        var phases = [];
+
+        for (var i = 0; i < phaseCount; i++) {
+          var chunk = unlockedSkills.slice(i * chunkSize, (i + 1) * chunkSize);
+          if (!chunk.length) continue;
+          phases.push({
+            title: "第 " + (i + 1) + " 阶段",
+            goal: "掌握 " + chunk.map(function (s) { return s.title; }).slice(0, 3).join("、") +
+              (chunk.length > 3 ? " 等技能" : ""),
+            knowledgeNodeIds: chunk.map(function (s) { return s.id; })
+          });
+        }
+
+        var versionResult = await api.post(
+          "/api/plan/" + encodeURIComponent(projectId) + "/versions",
+          { inputSnapshot: {}, phases: phases }
+        );
+        versionId = versionResult && versionResult.id ? versionResult.id : null;
+      }
+
+      // 确认并启用
+      if (versionId) {
         await api.post(
           "/api/plan/" +
             encodeURIComponent(projectId) +
@@ -1722,6 +1767,10 @@
           {}
         );
       }
+
+      // 重新加载 plans（确认后项目状态变成 active，plans 需要同步）
+      var planData = await api.get("/api/plan");
+      plans = planData && Array.isArray(planData.items) ? planData.items : [];
 
       await loadHubData(false);
       setBanner("success", "学习计划已启用，今日任务已更新。");
@@ -1951,6 +2000,7 @@
     isBusy = true;
     clearBanner();
     try {
+      // 先尝试 proposals/apply（仅空项目可用）
       var result = await api.post(
         "/api/plan/" + encodeURIComponent(projectId) + "/proposals/apply",
         proposal
@@ -1968,8 +2018,46 @@
       );
       render();
     } catch (err) {
-      setBanner("error", "生成失败：" + api.networkError(err));
-      render();
+      // 项目已有知识节点时 proposals/apply 不可用，改用已有技能创建计划版本
+      var treeSkills = skills.filter(function (s) { return s.id; });
+      if (!treeSkills.length) {
+        setBanner("error", "技能树中没有可用技能。");
+        render();
+        return;
+      }
+
+      var total = treeSkills.length;
+      var phaseCount = Math.min(3, Math.max(1, Math.ceil(total / 4)));
+      var chunkSize = Math.ceil(total / phaseCount);
+      var phases = [];
+
+      for (var i = 0; i < phaseCount; i++) {
+        var chunk = treeSkills.slice(i * chunkSize, (i + 1) * chunkSize);
+        if (!chunk.length) continue;
+        phases.push({
+          title: "第 " + (i + 1) + " 阶段",
+          goal: "掌握 " + chunk.map(function (s) { return s.title; }).slice(0, 3).join("、") +
+            (chunk.length > 3 ? " 等技能" : ""),
+          knowledgeNodeIds: chunk.map(function (s) { return s.id; })
+        });
+      }
+
+      try {
+        var versionResult = await api.post(
+          "/api/plan/" + encodeURIComponent(projectId) + "/versions",
+          { inputSnapshot: {}, phases: phases }
+        );
+        if (versionResult && versionResult.id) {
+          selectedVersionId = versionResult.id;
+        }
+        viewMode = "hub";
+        await loadHubData(false);
+        setBanner("success", "草案已生成，请点击「确认并启用」。");
+        render();
+      } catch (versionErr) {
+        setBanner("error", "生成失败：" + api.networkError(versionErr));
+        render();
+      }
     } finally {
       isBusy = false;
     }
@@ -1990,6 +2078,9 @@
           "/confirm",
         {}
       );
+      // 重新加载 plans（确认后项目状态变成 active）
+      var planData = await api.get("/api/plan");
+      plans = planData && Array.isArray(planData.items) ? planData.items : [];
       viewMode = "hub";
       await loadHubData(false);
       setBanner("success", "学习计划已启用，今日任务将据此编排。");

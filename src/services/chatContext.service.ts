@@ -5,6 +5,7 @@ import type { KnowledgeNodeWithPrerequisites } from "../repositories/knowledgeNo
 import { materialsRepository } from "../repositories/materials.repository";
 import { projectsRepository } from "../repositories/projects.repository";
 import { weakPointsRepository } from "../repositories/weakPoints.repository";
+import { wrongbookRepository } from "../repositories/wrongbook.repository";
 import { getDemoUserId } from "./demo.service";
 import { memoryService } from "./memory.service";
 import type { Material, MaterialSourceType, WeakPoint } from "../generated/prisma/client";
@@ -15,7 +16,8 @@ import type {
   DemoMaterial,
   DemoSessionMessage,
   DemoSubject,
-  DemoWeakPoint
+  DemoWeakPoint,
+  DemoWrongbookItem
 } from "../types/chatContext";
 
 // 单轮聊天最多带入的历史消息条数（取最近的），避免长对话把上下文撑爆。
@@ -200,11 +202,23 @@ export const chatContextService = {
 
     const memories = await loadTopMemories();
 
+    // 加载错题
+    const rawWrongbookItems = await wrongbookRepository.listActiveByUser(userId);
+
     return {
       subject: projectContext.subject,
       materials: projectContext.materials,
       knowledgePoints: projectContext.knowledgePoints,
       weakPoints: projectContext.weakPoints,
+      wrongbookItems: rawWrongbookItems.map((item) => ({
+        id: item.id,
+        question: item.questionPrompt ?? "",
+        wrongAnswer: item.wrongAnswer ?? "",
+        correctAnswer: item.correctAnswer ?? "",
+        explanation: item.explanation ?? undefined,
+        subject: item.subject ?? undefined,
+        category: item.category ?? undefined
+      })),
       sessionHistory,
       generatedAt: new Date().toISOString(),
       memories

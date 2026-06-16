@@ -1,0 +1,10 @@
+{
+  "subjects": [
+    {
+      "id": "subject-custom-001",
+      "label": "错题测试1",
+      "builtIn": false
+    }
+  ],
+  "categories": []
+}

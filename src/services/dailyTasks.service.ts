@@ -84,6 +84,11 @@ function ensureProjectAcceptsDailyStudy(project: OwnedProjectSummary): void {
   }
 }
 
+/** 判断学习单是否处于可重置的终结状态。 */
+function isTerminalSheetStatus(status: string): boolean {
+  return status === "completed" || status === "forced_closed" || status === "awaiting_confirmation";
+}
+
 async function buildRecord(
   projectId: string,
   localDate: string,
@@ -239,6 +244,12 @@ export const dailyTasksService = {
     let sheet = await dailyTaskSheetsRepository.findSheetByDate(project.id, localDate);
     let created = false;
     let ownsGeneration = false;
+
+    // 今日学习单已处于终结状态 → 重置为 active，允许重新生成
+    if (sheet && isTerminalSheetStatus(sheet.status)) {
+      sheet = await dailyTaskSheetsRepository.resetSheet(sheet.id, project.id);
+      ownsGeneration = true;
+    }
 
     if (!sheet) {
       try {
