@@ -34,6 +34,7 @@ export interface PlanItem {
 // 创建时不传 id、状态和时间，由 service 统一补齐。
 export interface CreatePlanInput {
   title: string;
+  subject?: string;
   goal?: string;
   deadline?: string | null;
   dailyMinutes?: number | null;

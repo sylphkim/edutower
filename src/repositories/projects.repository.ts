@@ -27,6 +27,7 @@ export interface CreateStudyTaskRecordInput {
 export interface SaveProjectPlanInput {
   userId: string;
   title: string;
+  subject?: string;
   goal: string;
   status: ProjectStatus;
   materialIds: string[];
@@ -158,7 +159,7 @@ export const projectsRepository = {
         data: {
           userId: input.userId,
           title: input.title,
-          subject: input.title,
+          subject: input.subject?.trim() || input.title,
           goal: input.goal,
           status: input.status,
           deadline: input.deadline ?? null,

@@ -13,5 +13,6 @@ uploads/materials/*
 !uploads/materials/.gitkeep
 *.memory-card.json
 data/local-llm-config.json
+data/tessdata/
 /src/generated/prisma
 .claude

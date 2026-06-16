@@ -21,6 +21,12 @@ export interface SkillDependencyEdge {
   targetId: string;
 }
 
+/** 同主题弱关联边（图谱布局用，不表示先修约束） */
+export interface SkillThemeEdge {
+  sourceId: string;
+  targetId: string;
+}
+
 export interface CreateSkillInput {
   title: string;
   description?: string;
@@ -51,4 +57,5 @@ export interface SkillTreeItem extends SkillItem {
 export interface SkillTreeResponse {
   items: SkillTreeItem[];
   dependencyEdges: SkillDependencyEdge[];
+  themeEdges: SkillThemeEdge[];
 }

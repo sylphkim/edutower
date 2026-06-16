@@ -167,8 +167,12 @@
           .id(function (d) {
             return d.id;
           })
-          .distance(linkDistance)
-          .strength(0.72)
+          .distance(function (d) {
+            return d.type === "theme" ? 76 : linkDistance;
+          })
+          .strength(function (d) {
+            return d.type === "theme" ? 0.38 : 0.72;
+          })
       )
       .force("charge", d3.forceManyBody().strength(chargeStrength).distanceMax(300))
       .force("center", d3.forceCenter(width / 2, height / 2))
@@ -271,7 +275,9 @@
       '<span><i class="knowledge-graph__dot knowledge-graph__dot--mid"></i>需要巩固</span>' +
       '<span><i class="knowledge-graph__dot knowledge-graph__dot--weak"></i>薄弱重点</span>' +
       '<span><i class="knowledge-graph__dot knowledge-graph__dot--locked"></i>未解锁</span>' +
-      '<span><i class="knowledge-graph__dot knowledge-graph__dot--risk"></i>前置风险</span>';
+      '<span><i class="knowledge-graph__dot knowledge-graph__dot--risk"></i>前置风险</span>' +
+      '<span><i class="knowledge-graph__legend-line knowledge-graph__legend-line--theme"></i>主题关联</span>' +
+      '<span><i class="knowledge-graph__legend-line knowledge-graph__legend-line--prereq"></i>先修关系</span>';
 
     container.appendChild(canvasWrap);
     container.appendChild(detailAside);
@@ -335,7 +341,9 @@
       .selectAll("path")
       .data(data.links)
       .join("path")
-      .attr("class", "kg-link");
+      .attr("class", function (d) {
+        return d.type === "theme" ? "kg-link kg-link--theme" : "kg-link";
+      });
 
     var nodeGroups = root
       .append("g")

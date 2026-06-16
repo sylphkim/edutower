@@ -52,6 +52,31 @@
 
 
 
+  async function goStartToday() {
+    if (window.EduTowerShell && typeof window.EduTowerShell.switchView === "function") {
+      window.EduTowerShell.switchView("plan");
+    }
+    if (window.EduTowerPlan && typeof window.EduTowerPlan.refresh === "function") {
+      await window.EduTowerPlan.refresh();
+    }
+    var projectId =
+      window.EduTowerPlan && typeof window.EduTowerPlan.getProjectId === "function"
+        ? window.EduTowerPlan.getProjectId()
+        : "";
+    if (
+      projectId &&
+      window.EduTowerPlan &&
+      typeof window.EduTowerPlan.openDirection === "function"
+    ) {
+      await window.EduTowerPlan.openDirection(projectId);
+    }
+    if (window.EduTowerPlan && typeof window.EduTowerPlan.startToday === "function") {
+      await window.EduTowerPlan.startToday();
+    }
+  }
+
+
+
   function bindEvents() {
 
     document.querySelectorAll("[data-go-view]").forEach(function (el) {
@@ -68,6 +93,14 @@
 
           event.preventDefault();
 
+        }
+
+
+
+        if (el.getAttribute("data-plan-start-today") === "true") {
+          event.preventDefault();
+          goStartToday();
+          return;
         }
 
 
@@ -252,13 +285,18 @@
 
       try {
 
-        var query =
-
-          window.EduTowerSkillsModel && window.EduTowerSkillsModel.buildTreeQuery
-
-            ? window.EduTowerSkillsModel.buildTreeQuery()
-
+        var projectId =
+          window.EduTowerPlan && typeof window.EduTowerPlan.getProjectId === "function"
+            ? window.EduTowerPlan.getProjectId()
             : "";
+        var query =
+          window.EduTowerSkillsModel && window.EduTowerSkillsModel.buildTreeQuery
+            ? window.EduTowerSkillsModel.buildTreeQuery({
+                projectId: projectId || undefined,
+              })
+            : projectId
+              ? "?projectId=" + encodeURIComponent(projectId)
+              : "";
 
         var data = await window.EduTowerApi.get("/api/skills/tree" + query);
 
@@ -268,15 +306,21 @@
 
           data && Array.isArray(data.dependencyEdges) ? data.dependencyEdges : [];
 
+        var themeEdges =
+
+          data && Array.isArray(data.themeEdges) ? data.themeEdges : [];
+
         if (items.length) {
 
           graph = window.EduTowerGraphData.buildGraphFromSkillTree(items, {
 
             title: "我的技能图谱",
 
-            subtitle: "来自技能树的先修关系与掌握度",
+            subtitle: "实线=先修，虚线=同主题关联",
 
             dependencyEdges: edges,
+
+            themeEdges: themeEdges,
 
           });
 
@@ -414,13 +458,17 @@
 
       primaryCtaEl.setAttribute("data-go-view", "plan");
 
+      primaryCtaEl.removeAttribute("data-plan-start-today");
+
       return;
 
     }
 
-    primaryCtaEl.textContent = "开始 AI 复习";
+    primaryCtaEl.textContent = "开始今日学习";
 
-    primaryCtaEl.setAttribute("data-go-view", "chat");
+    primaryCtaEl.setAttribute("data-go-view", "plan");
+
+    primaryCtaEl.setAttribute("data-plan-start-today", "true");
 
   }
 
@@ -548,7 +596,7 @@
 
           '<p class="home-card__empty">今日还没有学习任务。</p>' +
 
-          '<button type="button" class="btn btn--primary btn--compact" data-go-view="plan">一键启用学习计划</button>';
+          '<button type="button" class="btn btn--primary btn--compact" data-go-view="plan" data-plan-start-today="true">开始今日学习</button>';
 
         bindChecklistGoView();
 
@@ -634,7 +682,7 @@
 
         '<p class="home-card__empty">今日任务尚未生成。打开「学习计划」点击「一键启用」即可。</p>' +
 
-        '<button type="button" class="btn btn--primary btn--compact" data-go-view="plan">去启用今日学习</button>';
+        '<button type="button" class="btn btn--primary btn--compact" data-go-view="plan" data-plan-start-today="true">开始今日学习</button>';
 
       bindChecklistGoView();
 
@@ -662,7 +710,7 @@
 
         '<p class="home-card__empty">今日还没有学习任务。</p>' +
 
-        '<button type="button" class="btn btn--primary btn--compact" data-go-view="plan">去启用今日学习</button>';
+        '<button type="button" class="btn btn--primary btn--compact" data-go-view="plan" data-plan-start-today="true">开始今日学习</button>';
 
       bindChecklistGoView();
 
@@ -802,9 +850,14 @@
 
     if (!checklistEl) return;
 
-    checklistEl.querySelectorAll("[data-go-view]").forEach(function (el) {
+    checklistEl.querySelectorAll("[data-go-view], [data-plan-start-today]").forEach(function (el) {
 
       el.addEventListener("click", function () {
+
+        if (el.getAttribute("data-plan-start-today") === "true") {
+          goStartToday();
+          return;
+        }
 
         if (window.EduTowerShell) {
 

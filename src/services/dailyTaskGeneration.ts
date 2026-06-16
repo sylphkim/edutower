@@ -96,6 +96,10 @@ function severityRank(severity: string): number {
  * 4. knowledge points currently being learned (unlocked + learning);
  * 5. new knowledge points (unlocked + not started) restricted to the current
  *    phase of the confirmed plan version when one exists.
+ *
+ * When a confirmed plan exists, candidates are limited to the **current
+ * incomplete phase** so unrelated skill-tree nodes (e.g. leftover demo skills)
+ * do not appear alongside the active learning path.
  */
 export function buildCandidates(
   inputs: GenerationInputs,
@@ -128,6 +132,35 @@ export function buildCandidates(
     }
   }
 
+  const planNodeIds = plan
+    ? new Set(
+        plan.phases.flatMap((phase) =>
+          phase.knowledgeNodeLinks.map((link) => link.knowledgeNodeId)
+        )
+      )
+    : null;
+
+  /** Whether a knowledge node should be scheduled today. */
+  const nodeEligibleForToday = (nodeId: string | null | undefined): boolean => {
+    if (nodeId === null || nodeId === undefined) {
+      return true;
+    }
+
+    if (!activeNodes.has(nodeId)) {
+      return false;
+    }
+
+    if (planNodeIds && !planNodeIds.has(nodeId)) {
+      return false;
+    }
+
+    if (currentPhaseNodeIds) {
+      return currentPhaseNodeIds.has(nodeId);
+    }
+
+    return true;
+  };
+
   const phaseIdForNode = (nodeId: string | undefined): string | undefined =>
     nodeId && currentPhaseId && currentPhaseNodeIds?.has(nodeId)
       ? currentPhaseId
@@ -157,7 +190,7 @@ export function buildCandidates(
 
   // 1. Carry over unfinished tasks from the most recent closed sheet.
   inputs.previousUnfinishedTasks.forEach((task, index) => {
-    if (task.knowledgeNodeId && !activeNodes.has(task.knowledgeNodeId)) {
+    if (!nodeEligibleForToday(task.knowledgeNodeId)) {
       return;
     }
 
@@ -190,7 +223,7 @@ export function buildCandidates(
     .forEach((weakPoint, index) => {
       const node = activeNodes.get(weakPoint.knowledgeNodeId);
 
-      if (!node) {
+      if (!node || !nodeEligibleForToday(node.id)) {
         return;
       }
 
@@ -226,6 +259,10 @@ export function buildCandidates(
   [...wrongbookGroups.entries()]
     .sort((left, right) => right[1] - left[1] || String(left[0]).localeCompare(String(right[0])))
     .forEach(([nodeId, count], index) => {
+      if (nodeId && !nodeEligibleForToday(nodeId)) {
+        return;
+      }
+
       const node = nodeId ? activeNodes.get(nodeId) : undefined;
 
       tryAdd({
@@ -248,7 +285,12 @@ export function buildCandidates(
 
   // 4. Keep making progress on knowledge points already being learned.
   inputs.nodes
-    .filter((node) => node.isUnlocked && node.learningState === "learning")
+    .filter(
+      (node) =>
+        node.isUnlocked &&
+        node.learningState === "learning" &&
+        nodeEligibleForToday(node.id)
+    )
     .forEach((node, index) => {
       tryAdd({
         title: `继续学习：${node.title}`,
@@ -271,7 +313,7 @@ export function buildCandidates(
     (node) =>
       node.isUnlocked &&
       node.learningState === "not_started" &&
-      (currentPhaseNodeIds ? currentPhaseNodeIds.has(node.id) : true)
+      nodeEligibleForToday(node.id)
   );
 
   newNodePool.forEach((node, index) => {

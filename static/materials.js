@@ -1296,8 +1296,14 @@
         var charCount = (item && item.extractedText && item.extractedText.length) || 0;
         showStatus(
           charCount > 0
-            ? "文本重新提取完成 (" + charCount + " 字符)"
-            : "重新提取完成，未提取到文本内容。",
+            ? "文本重新提取完成 (" +
+                charCount +
+                " 字符" +
+                (item.extractionMethod === "pdf-ocr" || item.extractionMethod === "image-ocr"
+                  ? " · OCR"
+                  : "") +
+                ")"
+            : "重新提取完成，未提取到文本内容。扫描版 PDF 需先运行 npm run tessdata:fetch 下载离线语言包。",
           charCount > 0 ? "success" : "info"
         );
         refreshMaterialsOnly();

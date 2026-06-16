@@ -183,6 +183,10 @@ function ensureValidCreateInput(input: CreatePlanInput): void {
     throw new AppError("INVALID_REQUEST", "goal must be a string.", 400);
   }
 
+  if (input.subject !== undefined && typeof input.subject !== "string") {
+    throw new AppError("INVALID_REQUEST", "subject must be a string.", 400);
+  }
+
   parseDeadlineInput(input.deadline, "deadline");
   parseDailyMinutesInput(input.dailyMinutes);
 
@@ -393,6 +397,7 @@ export const planService = {
     const item = await projectsRepository.createPlan({
       userId,
       title: input.title.trim(),
+      subject: input.subject?.trim() || input.title.trim(),
       goal: input.goal ?? "",
       status: "planning",
       materialIds,

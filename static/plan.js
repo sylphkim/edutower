@@ -13,9 +13,10 @@
   var skills = [];
   var selectedId = null;
   var isBusy = false;
-  var viewMode = "hub";
+  var viewMode = "directions";
   var banner = { type: "", message: "" };
   var pendingDeletePlanId = null;
+  var ACTIVE_DIRECTION_KEY = "edutower_active_direction_id";
   var draftDays = [];
   var editingDays = [];
   var dailyRecord = null;
@@ -27,6 +28,7 @@
   var DAILY_CONV_STORAGE_KEY = "edutower_daily_conversation_map";
   var sheetHistory = [];
   var showProjectSettings = false;
+  var projectSetup = null;
   var editingDraftVersionId = null;
   var draftPhaseForms = [];
   var MIN_DAILY_MINUTES = 15;
@@ -62,7 +64,18 @@
       var action = target.getAttribute("data-action");
       if (!action) return;
 
-      if (action === "plan-view-hub") {
+      if (action === "plan-view-directions") {
+        leaveTimetableView();
+        setViewMode("directions");
+        render();
+      } else if (action === "plan-open-direction") {
+        openDirection(target.getAttribute("data-id"));
+      } else if (action === "plan-create-direction") {
+        setViewMode("create-direction");
+        render();
+      } else if (action === "submit-create-direction") {
+        submitCreateDirection();
+      } else if (action === "plan-view-hub") {
         leaveTimetableView();
         setViewMode("hub");
         loadHubData();
@@ -254,7 +267,175 @@
     }
   }
 
+  function readStoredDirectionId() {
+    try {
+      return localStorage.getItem(ACTIVE_DIRECTION_KEY) || "";
+    } catch (_err) {
+      return "";
+    }
+  }
+
+  function writeStoredDirectionId(projectId) {
+    try {
+      if (projectId) {
+        localStorage.setItem(ACTIVE_DIRECTION_KEY, projectId);
+      } else {
+        localStorage.removeItem(ACTIVE_DIRECTION_KEY);
+      }
+    } catch (_err) {
+      /* ignore */
+    }
+  }
+
+  function restoreSelectedDirection() {
+    var stored = readStoredDirectionId();
+    if (stored && plans.some(function (p) { return p.id === stored; })) {
+      selectedId = stored;
+      return;
+    }
+    if (!selectedId && plans.length) {
+      selectedId = plans[0].id;
+    }
+  }
+
+  async function openDirection(projectId) {
+    if (!projectId || isBusy) return;
+    selectedId = projectId;
+    writeStoredDirectionId(projectId);
+    leaveTimetableView();
+    setViewMode("hub");
+    clearBanner();
+    await loadHubData();
+  }
+
+  function renderDirectionsSubnav() {
+    return (
+      '<nav class="module-subnav module-subnav--compact" aria-label="学习方向">' +
+      '<span class="module-subnav__hint module-subnav__hint--current">全部学习方向</span>' +
+      "</nav>"
+    );
+  }
+
+  function renderDirectionCard(plan) {
+    var statusLabel = PLAN_STATUS_LABEL[plan.status] || plan.status;
+    var goalText = plan.goal && plan.goal.trim() ? plan.goal.trim() : "尚未填写学习目标";
+    var meta =
+      statusLabel +
+      (plan.dailyMinutes ? " · 每日 " + plan.dailyMinutes + " 分钟" : "") +
+      (plan.deadline ? " · 截止 " + formatDeadlineInputValue(plan.deadline) : "");
+
+    return (
+      '<article class="plan-direction-card">' +
+      '<button type="button" class="plan-direction-card__body" data-action="plan-open-direction" data-id="' +
+      api.escapeAttr(plan.id) +
+      '"' +
+      (isBusy ? " disabled" : "") +
+      ">" +
+      '<h3 class="plan-direction-card__title">' +
+      api.escapeHtml(plan.title) +
+      "</h3>" +
+      '<p class="plan-direction-card__goal">' +
+      api.escapeHtml(goalText) +
+      "</p>" +
+      '<p class="plan-direction-card__meta">' +
+      api.escapeHtml(meta) +
+      "</p>" +
+      '<span class="plan-direction-card__cta">进入学习计划 →</span>' +
+      "</button></article>"
+    );
+  }
+
+  function renderDirectionsHub() {
+    var cards = plans.map(renderDirectionCard).join("");
+
+    return (
+      renderDirectionsSubnav() +
+      renderBanner() +
+      '<section class="plan-directions">' +
+      '<header class="plan-directions__header">' +
+      "<div>" +
+      '<h2 class="plan-directions__title">我的学习方向</h2>' +
+      '<p class="plan-directions__desc">每个方向有独立的目标、技能树与今日任务。点进卡片开始今日学习。</p>' +
+      "</div>" +
+      '<button type="button" class="btn btn--primary btn--compact" data-action="plan-create-direction"' +
+      (isBusy ? " disabled" : "") +
+      ">新建学习方向</button></header>" +
+      (cards
+        ? '<div class="plan-directions__grid">' + cards + "</div>"
+        : '<p class="module-empty">还没有学习方向。点击「新建学习方向」开始，例如：考研数学 · 高数、英语六级。</p>') +
+      "</section>"
+    );
+  }
+
+  function renderCreateDirectionForm() {
+    return (
+      renderDirectionsSubnav() +
+      renderBanner() +
+      '<section class="plan-direction-create">' +
+      '<h2 class="plan-direction-create__title">新建学习方向</h2>' +
+      '<p class="plan-direction-create__desc">创建后可单独设置目标、截止日期，并由 AI 设计学习路径。</p>' +
+      '<div class="form-row"><label class="form-label" for="directionCreateTitle">方向名称</label>' +
+      '<input id="directionCreateTitle" class="form-input" type="text" placeholder="例如：考研数学 · 高数" maxlength="80" /></div>' +
+      '<div class="form-row"><label class="form-label" for="directionCreateSubject">学科</label>' +
+      '<input id="directionCreateSubject" class="form-input" type="text" placeholder="例如：高等数学" maxlength="40" /></div>' +
+      '<div class="form-row"><label class="form-label" for="directionCreateGoal">学习目标（可选）</label>' +
+      '<textarea id="directionCreateGoal" class="form-textarea" rows="3" placeholder="例如：期末高数冲 90 分"></textarea></div>' +
+      '<div class="plan-direction-create__actions">' +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="plan-view-directions">取消</button>' +
+      '<button type="button" class="btn btn--primary" data-action="submit-create-direction"' +
+      (isBusy ? " disabled" : "") +
+      ">创建并进入</button></div></section>"
+    );
+  }
+
+  async function submitCreateDirection() {
+    if (isBusy) return;
+
+    var titleInput = document.getElementById("directionCreateTitle");
+    var subjectInput = document.getElementById("directionCreateSubject");
+    var goalInput = document.getElementById("directionCreateGoal");
+    var title = titleInput ? titleInput.value.trim() : "";
+    var subject = subjectInput ? subjectInput.value.trim() : "";
+    var goal = goalInput ? goalInput.value.trim() : "";
+
+    if (!title) {
+      setBanner("error", "请填写方向名称。");
+      render();
+      return;
+    }
+
+    isBusy = true;
+    clearBanner();
+
+    try {
+      var created = await api.post("/api/plan", {
+        title: title,
+        subject: subject || title,
+        goal: goal || "",
+      });
+      var data = await api.get("/api/plan");
+      plans = data && Array.isArray(data.items) ? data.items : [];
+      if (created && created.id) {
+        await openDirection(created.id);
+        setBanner("success", "已创建学习方向：" + title);
+        render();
+      } else {
+        setViewMode("directions");
+        render();
+      }
+    } catch (err) {
+      setBanner("error", "创建失败：" + api.networkError(err));
+      render();
+    } finally {
+      isBusy = false;
+    }
+  }
+
   function renderSubnav() {
+    if (viewMode === "create-direction") {
+      return renderDirectionsSubnav();
+    }
+
     if (viewMode === "create" || viewMode === "edit" || viewMode === "tasks") {
       return (
         '<nav class="module-subnav" aria-label="计划视图">' +
@@ -269,26 +450,74 @@
       );
     }
 
+    if (viewMode === "timetable" || viewMode === "advanced" || viewMode === "browse") {
+      return (
+        '<nav class="module-subnav" aria-label="计划视图">' +
+        '<button type="button" class="module-subnav__item" data-action="plan-view-hub">← 返回今日学习</button>' +
+        '<span class="module-subnav__hint">' +
+        (viewMode === "timetable" ? "平日课表（高级）" : "手动课表（高级）") +
+        "</span></nav>"
+      );
+    }
+
+    var activePlan = getActivePlan();
+    var directionTitle = activePlan ? activePlan.title : "今日学习";
+
     return (
-      '<nav class="module-subnav" aria-label="计划视图">' +
-      '<button type="button" class="module-subnav__item' +
-      (viewMode === "hub" ? " module-subnav__item--active" : "") +
-      '" data-action="plan-view-hub">今日学习</button>' +
-      '<button type="button" class="module-subnav__item' +
-      (viewMode === "timetable" ? " module-subnav__item--active" : "") +
-      '" data-action="plan-view-timetable">平日课表</button>' +
-      '<button type="button" class="module-subnav__item' +
-      (viewMode === "advanced" ? " module-subnav__item--active" : "") +
-      '" data-action="plan-view-advanced">手动课表</button>' +
+      '<nav class="module-subnav module-subnav--compact" aria-label="计划视图">' +
+      '<button type="button" class="module-subnav__item module-subnav__item--ghost" data-action="plan-view-directions">← 全部方向</button>' +
+      '<span class="module-subnav__hint module-subnav__hint--current">' +
+      api.escapeHtml(directionTitle) +
+      "</span>" +
+      '<button type="button" class="module-subnav__item module-subnav__item--ghost" data-action="plan-view-advanced">高级 · 手动课表</button>' +
       "</nav>"
     );
   }
 
+  function renderSetupProgress() {
+    var settings = getProjectSettingsView();
+    var goalDone = !!(settings && (settings.goalConfirmedAt || (settings.goal && settings.goal.trim())));
+    var planDone = !!currentPlanVersion;
+    var tasksDone =
+      dailyRecord &&
+      dailyRecord.sheet &&
+      Array.isArray(dailyRecord.sheet.tasks) &&
+      dailyRecord.sheet.tasks.length > 0;
+
+    function step(label, done, active) {
+      var cls = "plan-setup-step" + (done ? " plan-setup-step--done" : "") + (active ? " plan-setup-step--active" : "");
+      var mark = done ? "✓" : active ? "●" : "○";
+      return '<li class="' + cls + '"><span class="plan-setup-step__mark">' + mark + "</span>" + api.escapeHtml(label) + "</li>";
+    }
+
+    var activeStep = !goalDone ? 1 : !planDone ? 2 : 3;
+
+    return (
+      '<ol class="plan-setup-progress" aria-label="学习准备进度">' +
+      step("定目标", goalDone, activeStep === 1) +
+      step("启计划", planDone, activeStep === 2) +
+      step("做今日", tasksDone || planDone, activeStep === 3) +
+      "</ol>"
+    );
+  }
+
   function getActivePlan() {
+    if (selectedId) {
+      var selected = plans.find(function (p) {
+        return p.id === selectedId;
+      });
+      if (selected) {
+        return selected;
+      }
+    }
+
     return (
       plans.find(function (p) {
         return p.status === "active";
-      }) || getSelectedPlan()
+      }) ||
+      getSelectedPlan() ||
+      plans[0] ||
+      null
     );
   }
 
@@ -387,9 +616,13 @@
       await loadMaterials();
       var data = await api.get("/api/plan");
       plans = data && Array.isArray(data.items) ? data.items : [];
-      if (!selectedId && plans.length) {
-        selectedId = plans[0].id;
+      restoreSelectedDirection();
+
+      if (viewMode === "directions" || viewMode === "create-direction") {
+        render();
+        return;
       }
+
       if (viewMode === "hub" || viewMode === "today" || viewMode === "phases") {
         viewMode = "hub";
         await loadPlanPhaseMeta();
@@ -535,6 +768,42 @@
     }
   }
 
+  async function loadProjectSetup() {
+    var projectId = getProjectId();
+    if (!projectId) {
+      projectSetup = null;
+      return;
+    }
+
+    try {
+      projectSetup = await api.get(
+        "/api/projects/" + encodeURIComponent(projectId)
+      );
+    } catch (_err) {
+      projectSetup = null;
+    }
+  }
+
+  function getProjectSettingsView() {
+    var plan = getActivePlan();
+    if (!plan) return null;
+    return {
+      goal: (projectSetup && projectSetup.goal) || plan.goal || "",
+      deadline:
+        (projectSetup && projectSetup.deadline) || plan.deadline || null,
+      dailyMinutes:
+        projectSetup && projectSetup.dailyMinutes != null
+          ? projectSetup.dailyMinutes
+          : plan.dailyMinutes != null
+            ? plan.dailyMinutes
+            : 60,
+      targetScore:
+        (projectSetup && projectSetup.targetScore) || plan.targetScore || "",
+      goalConfirmedAt:
+        (projectSetup && projectSetup.goalConfirmedAt) || plan.goalConfirmedAt || null,
+    };
+  }
+
   async function loadSheetHistory() {
     var projectId = getProjectId();
     if (!projectId) {
@@ -560,6 +829,7 @@
 
     try {
       await loadPlanPhaseMeta();
+      await loadProjectSetup();
       await loadSheetHistory();
       render();
       await syncDailyRecord();
@@ -907,36 +1177,44 @@
     var draftVersion = planVersions.find(function (v) {
       return v.status === "draft";
     });
+    var settings = getProjectSettingsView();
+    var goalReady = !!(settings && settings.goal && settings.goal.trim());
 
     if (draftVersion) {
       return (
         '<section class="plan-onboarding plan-onboarding--draft">' +
-        '<h3 class="plan-onboarding__title">阶段计划草案已生成</h3>' +
-        '<p class="plan-onboarding__desc">还差一步：确认后系统会按技能掌握度自动编排每日任务。</p>' +
+        '<h3 class="plan-onboarding__title">计划草案已就绪</h3>' +
+        '<p class="plan-onboarding__desc">点一次即可启用，并自动生成今日任务。</p>' +
         '<button type="button" class="btn btn--primary" data-action="phase-confirm" data-id="' +
         api.escapeAttr(draftVersion.id) +
         '"' +
         (isBusy ? " disabled" : "") +
-        ">确认并启用</button></section>"
+        ">启用并开始今日学习</button></section>"
+      );
+    }
+
+    if (!goalReady) {
+      return (
+        '<section class="plan-onboarding plan-onboarding--needs-goal">' +
+        '<h3 class="plan-onboarding__title">先填写学习目标</h3>' +
+        '<p class="plan-onboarding__desc">在下方「项目设置」填好目标、截止日期与每日时长，保存后 AI 将自动设计学习计划。</p>' +
+        '<button type="button" class="btn btn--primary" data-action="toggle-project-settings"' +
+        (isBusy ? " disabled" : "") +
+        ">填写目标</button></section>"
       );
     }
 
     return (
       '<section class="plan-onboarding">' +
-      '<h3 class="plan-onboarding__title">一键启用学习计划</h3>' +
-      '<p class="plan-onboarding__desc">系统会根据你的技能树自动生成阶段计划，并编排今天要学的任务。无需手动排课表。</p>' +
-      '<ol class="plan-onboarding__steps">' +
-      "<li>按技能树生成学习阶段</li>" +
-      "<li>确认计划</li>" +
-      "<li>开始今日学习</li>" +
-      "</ol>" +
+      '<h3 class="plan-onboarding__title">准备就绪</h3>' +
+      '<p class="plan-onboarding__desc">将根据你的目标、截止日期与每日时长，由 AI 自动拆解学习路径并编排今日任务（约 10–30 秒）。</p>' +
       '<div class="plan-onboarding__actions">' +
       '<button type="button" class="btn btn--primary" data-action="plan-quick-start"' +
       (isBusy ? " disabled" : "") +
-      ">一键启用</button>" +
-      '<button type="button" class="btn btn--ghost btn--compact" data-action="phase-apply-tree"' +
+      ">开始今日学习</button>" +
+      '<button type="button" class="btn btn--ghost btn--compact" data-action="phase-ai-generate"' +
       (isBusy ? " disabled" : "") +
-      ">仅生成草案</button></div></section>"
+      ">改用 AI 排计划</button></div></section>"
     );
   }
 
@@ -991,17 +1269,34 @@
   function renderProjectSettings(plan) {
     if (!plan) return "";
 
+    var settings = getProjectSettingsView() || {
+      goal: plan.goal || "",
+      deadline: plan.deadline || null,
+      dailyMinutes: plan.dailyMinutes != null ? plan.dailyMinutes : 60,
+      targetScore: plan.targetScore || "",
+      goalConfirmedAt: plan.goalConfirmedAt || null,
+    };
+
     var settingsBody = showProjectSettings
       ? '<div class="plan-settings__body">' +
         '<div class="form-row"><label class="form-label" for="projectSettingsGoal">学习目标</label>' +
         '<textarea id="projectSettingsGoal" class="form-textarea" rows="3" placeholder="例如：期末数学达到 90 分">' +
-        api.escapeHtml(plan.goal || "") +
+        api.escapeHtml(settings.goal || "") +
         "</textarea></div>" +
         '<div class="plan-settings__row">' +
         '<div class="form-row"><label class="form-label" for="projectSettingsDeadline">目标日期</label>' +
         '<input id="projectSettingsDeadline" class="form-input" type="date" value="' +
-        api.escapeAttr(formatDeadlineInputValue(plan.deadline)) +
+        api.escapeAttr(formatDeadlineInputValue(settings.deadline)) +
         '" /></div>' +
+        '<div class="form-row"><label class="form-label" for="projectSettingsTargetScore">目标分档</label>' +
+        '<select id="projectSettingsTargetScore" class="form-input">' +
+        '<option value="">未设置</option>' +
+        '<option value="及格"' +
+        (settings.targetScore === "及格" ? " selected" : "") +
+        ">及格</option>" +
+        '<option value="冲高分"' +
+        (settings.targetScore === "冲高分" ? " selected" : "") +
+        ">冲高分</option></select></div></div>" +
         '<div class="form-row"><label class="form-label" for="projectSettingsDailyMinutes">每日可用时长（分钟）</label>' +
         '<input id="projectSettingsDailyMinutes" class="form-input" type="number" min="' +
         MIN_DAILY_MINUTES +
@@ -1009,11 +1304,11 @@
         MAX_DAILY_MINUTES +
         '" step="5" value="' +
         api.escapeAttr(
-          plan.dailyMinutes != null && plan.dailyMinutes !== ""
-            ? String(plan.dailyMinutes)
+          settings.dailyMinutes != null && settings.dailyMinutes !== ""
+            ? String(settings.dailyMinutes)
             : "60"
         ) +
-        '" /></div></div>' +
+        '" /></div>' +
         '<p class="plan-settings__hint">每日时长会影响「今天要学什么」的任务编排上限（' +
         MIN_DAILY_MINUTES +
         "–" +
@@ -1022,15 +1317,17 @@
         '<div class="plan-settings__actions">' +
         '<button type="button" class="btn btn--primary btn--compact" data-action="submit-project-settings"' +
         (isBusy ? " disabled" : "") +
-        ">保存设置</button></div></div>"
+        ">保存并 AI 设计计划</button></div></div>"
       : '<p class="plan-settings__summary">' +
-        (plan.goal ? api.escapeHtml(plan.goal) : "尚未填写学习目标") +
+        (settings.goal ? api.escapeHtml(settings.goal) : "尚未填写学习目标") +
+        (settings.targetScore ? " · " + api.escapeHtml(settings.targetScore) : "") +
         " · 每日 " +
-        (plan.dailyMinutes != null ? plan.dailyMinutes : 60) +
+        (settings.dailyMinutes != null ? settings.dailyMinutes : 60) +
         " 分钟" +
-        (plan.deadline
-          ? " · 目标 " + api.escapeHtml(formatDeadlineInputValue(plan.deadline))
+        (settings.deadline
+          ? " · 目标 " + api.escapeHtml(formatDeadlineInputValue(settings.deadline))
           : "") +
+        (settings.goalConfirmedAt ? " · 目标已确认" : "") +
         "</p>";
 
     return (
@@ -1105,7 +1402,7 @@
       return (
         renderSubnav() +
         renderBanner() +
-        '<p class="module-empty">暂无学习项目。请先在「手动课表」中新建计划。</p>'
+        '<p class="module-empty">请先选择一个学习方向，或<button type="button" class="btn btn--link" data-action="plan-view-directions">返回方向列表</button>新建。</p>'
       );
     }
 
@@ -1128,6 +1425,7 @@
     return (
       renderSubnav() +
       renderBanner() +
+      renderSetupProgress() +
       '<section class="plan-hub">' +
       renderProjectSettings(activePlan) +
       (!currentPlanVersion ? renderOnboardingCard() : renderPhaseStrip()) +
@@ -1155,9 +1453,15 @@
       (summary && summary.aiDraft
         ? '<section class="plan-today-summary">' +
           '<h3 class="plan-day__title">今日总结</h3>' +
-          '<p class="plan-today-summary__text">' +
-          api.escapeHtml(summary.confirmedContent || summary.aiDraft) +
-          "</p></section>"
+          (summary.status === "awaiting_confirmation"
+            ? '<p class="plan-settings__hint">AI 已生成总结，可在提交建议前微调正文。</p>' +
+              '<textarea id="dailySummaryEdit" class="form-textarea" rows="6">' +
+              api.escapeHtml(summary.confirmedContent || summary.aiDraft) +
+              "</textarea>"
+            : '<p class="plan-today-summary__text">' +
+              api.escapeHtml(summary.confirmedContent || summary.aiDraft) +
+              "</p>") +
+          "</section>"
         : "") +
       renderSummaryDecisions(summary) +
       renderSheetHistory() +
@@ -1174,8 +1478,10 @@
     var goalInput = document.getElementById("projectSettingsGoal");
     var deadlineInput = document.getElementById("projectSettingsDeadline");
     var minutesInput = document.getElementById("projectSettingsDailyMinutes");
+    var targetScoreInput = document.getElementById("projectSettingsTargetScore");
     var goal = goalInput ? goalInput.value.trim() : "";
     var deadline = deadlineInput ? deadlineInput.value.trim() : "";
+    var targetScore = targetScoreInput ? targetScoreInput.value.trim() : "";
     var dailyMinutesRaw = minutesInput ? minutesInput.value.trim() : "";
     var dailyMinutes = dailyMinutesRaw ? parseInt(dailyMinutesRaw, 10) : null;
 
@@ -1193,22 +1499,57 @@
       return;
     }
 
+    if (!goal) {
+      setBanner("error", "请先填写学习目标。");
+      render();
+      return;
+    }
+
+    var projectId = getProjectId();
+    if (!projectId) return;
+
     isBusy = true;
     clearBanner();
+    rootEl.innerHTML =
+      renderSubnav() +
+      '<p class="module-empty module-empty--loading">AI 正在根据你的目标设计学习计划…</p>';
 
     try {
-      await api.patch("/api/plan/" + encodeURIComponent(plan.id), {
-        goal: goal,
-        deadline: deadline || null,
-        dailyMinutes: dailyMinutes,
-      });
+      projectSetup = await api.patch(
+        "/api/projects/" + encodeURIComponent(projectId),
+        {
+          goal: goal,
+          deadline: deadline || null,
+          dailyMinutes: dailyMinutes,
+          targetScore: targetScore || null,
+          goalConfirmed: true,
+        }
+      );
       var data = await api.get("/api/plan");
       plans = data && Array.isArray(data.items) ? data.items : [];
       showProjectSettings = false;
-      setBanner("success", "项目设置已保存。");
+
+      var designed = await api.post(
+        "/api/plan/" + encodeURIComponent(projectId) + "/design-from-settings",
+        { force: true }
+      );
+
+      var planData = await api.get("/api/plan");
+      plans = planData && Array.isArray(planData.items) ? planData.items : [];
+      await loadHubData(false);
+
+      var sourceLabel =
+        designed && designed.source === "ai"
+          ? "AI 已设计"
+          : designed && designed.source === "heuristic"
+            ? "规则兜底已设计"
+            : designed && designed.source === "existing"
+              ? "沿用已有计划"
+              : "计划已更新";
+      setBanner("success", "项目设置已保存，" + sourceLabel + "并启用今日任务。");
       render();
     } catch (err) {
-      setBanner("error", "保存失败：" + api.networkError(err));
+      setBanner("error", "保存或设计失败：" + api.networkError(err));
       render();
     } finally {
       isBusy = false;
@@ -1336,7 +1677,7 @@
         "success",
         needsConfirm
           ? "今日学习已结束，请确认下方 AI 建议后提交。"
-          : "今日学习已结束，总结已生成。"
+          : "今日学习已结束，AI 总结已生成。"
       );
       render();
     } catch (err) {
@@ -1460,6 +1801,12 @@
     isBusy = true;
     clearBanner();
     try {
+      var summaryEdit = document.getElementById("dailySummaryEdit");
+      var confirmedContent =
+        summaryEdit && summaryEdit.value.trim()
+          ? summaryEdit.value.trim()
+          : summary.confirmedContent || summary.aiDraft || undefined;
+
       var result = await api.post(
         "/api/daily/" +
           encodeURIComponent(projectId) +
@@ -1468,7 +1815,7 @@
           "/decisions",
         {
           decisions: decisions,
-          confirmedContent: summary.confirmedContent || summary.aiDraft || undefined,
+          confirmedContent: confirmedContent,
         }
       );
       suggestionDecisions = {};
@@ -1699,11 +2046,11 @@
     var projectId = getProjectId();
     if (!projectId || isBusy) return;
 
-    var unlockedSkills = skills.filter(function (s) {
-      return s.isUnlocked !== false && !s.archivedAt;
-    });
-    if (!unlockedSkills.length) {
-      setBanner("error", "技能树为空或全部未解锁。请先在「技能图谱」中解锁一些技能。");
+    var settings = getProjectSettingsView();
+    var goalReady = !!(settings && settings.goal && settings.goal.trim());
+    if (!goalReady) {
+      setBanner("error", "请先在「项目设置」填写学习目标与截止日期。");
+      showProjectSettings = true;
       render();
       return;
     }
@@ -1712,71 +2059,31 @@
     clearBanner();
     rootEl.innerHTML =
       renderSubnav() +
-      '<p class="module-empty module-empty--loading">正在启用学习计划…</p>';
+      '<p class="module-empty module-empty--loading">AI 正在设计学习计划并编排今日任务…</p>';
 
     try {
-      // 先尝试 proposals/apply（仅空项目可用）
-      var proposal = buildProposalFromSkills();
-      var result;
-      if (proposal) {
-        result = await api.post(
-          "/api/plan/" + encodeURIComponent(projectId) + "/proposals/apply",
-          proposal
-        );
-      }
+      var designed = await api.post(
+        "/api/plan/" + encodeURIComponent(projectId) + "/design-from-settings",
+        {}
+      );
 
-      var versionId =
-        result && result.planVersion && result.planVersion.id
-          ? result.planVersion.id
-          : null;
-
-      if (!versionId) {
-        // proposals/apply 不可用（项目已有技能），用已有技能创建计划版本
-        await loadMaterials();
-        var total = unlockedSkills.length;
-        var phaseCount = Math.min(3, Math.max(1, Math.ceil(total / 4)));
-        var chunkSize = Math.ceil(total / phaseCount);
-        var phases = [];
-
-        for (var i = 0; i < phaseCount; i++) {
-          var chunk = unlockedSkills.slice(i * chunkSize, (i + 1) * chunkSize);
-          if (!chunk.length) continue;
-          phases.push({
-            title: "第 " + (i + 1) + " 阶段",
-            goal: "掌握 " + chunk.map(function (s) { return s.title; }).slice(0, 3).join("、") +
-              (chunk.length > 3 ? " 等技能" : ""),
-            knowledgeNodeIds: chunk.map(function (s) { return s.id; })
-          });
-        }
-
-        var versionResult = await api.post(
-          "/api/plan/" + encodeURIComponent(projectId) + "/versions",
-          { inputSnapshot: {}, phases: phases }
-        );
-        versionId = versionResult && versionResult.id ? versionResult.id : null;
-      }
-
-      // 确认并启用
-      if (versionId) {
-        await api.post(
-          "/api/plan/" +
-            encodeURIComponent(projectId) +
-            "/versions/" +
-            encodeURIComponent(versionId) +
-            "/confirm",
-          {}
-        );
-      }
-
-      // 重新加载 plans（确认后项目状态变成 active，plans 需要同步）
       var planData = await api.get("/api/plan");
       plans = planData && Array.isArray(planData.items) ? planData.items : [];
 
       await loadHubData(false);
-      setBanner("success", "学习计划已启用，今日任务已更新。");
+
+      var sourceLabel =
+        designed && designed.source === "ai"
+          ? "AI 学习计划已启用"
+          : designed && designed.source === "heuristic"
+            ? "规则计划已启用（AI 暂不可用）"
+            : designed && designed.source === "existing"
+              ? "今日任务已更新"
+              : "学习计划已启用";
+      setBanner("success", sourceLabel + "。");
       render();
     } catch (err) {
-      setBanner("error", "启用失败：" + api.networkError(err));
+      setBanner("error", "启动失败：" + api.networkError(err));
       render();
     } finally {
       isBusy = false;
@@ -2289,6 +2596,16 @@
   }
 
   function render() {
+    if (viewMode === "create-direction") {
+      rootEl.innerHTML = renderCreateDirectionForm();
+      return;
+    }
+
+    if (viewMode === "directions") {
+      rootEl.innerHTML = renderDirectionsHub();
+      return;
+    }
+
     if (viewMode === "phase-edit") {
       rootEl.innerHTML = renderPhaseEdit();
       return;
@@ -2607,6 +2924,8 @@
 
   window.EduTowerPlan = {
     refresh: refresh,
+    startToday: quickStartPlan,
+    openDirection: openDirection,
     getProjectId: getProjectId,
     fetchDailyTodayRecord: fetchDailyTodayRecord,
     getDailyRecord: function () {

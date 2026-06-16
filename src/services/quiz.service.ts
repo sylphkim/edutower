@@ -224,7 +224,7 @@ export const quizService = {
       }))
     });
 
-    return toApiQuiz(quiz);
+    return { ...toApiQuiz(quiz), source: generated.source };
   },
 
   async submit(id: string, input: SubmitQuizInput): Promise<SubmitQuizResult> {

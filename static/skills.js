@@ -12,6 +12,7 @@
   var viewMode = "list";
   var treeData = [];
   var dependencyEdges = [];
+  var themeEdges = [];
   var flatSkills = [];
   var includeArchived = false;
   var formMode = null;
@@ -117,17 +118,32 @@
     rootEl.innerHTML = '<p class="module-empty module-empty--loading">正在加载技能图谱…</p>';
 
     try {
-      var query = model ? model.buildTreeQuery({ includeArchived: includeArchived }) : "";
+      var projectId =
+        window.EduTowerPlan && typeof window.EduTowerPlan.getProjectId === "function"
+          ? window.EduTowerPlan.getProjectId()
+          : "";
+      var query = model
+        ? model.buildTreeQuery({
+            projectId: projectId || undefined,
+            includeArchived: includeArchived,
+          })
+        : projectId
+          ? "?projectId=" + encodeURIComponent(projectId)
+          : includeArchived
+            ? "?includeArchived=true"
+            : "";
       var data = await api.get("/api/skills/tree" + query);
       if (model) {
         var normalized = model.normalizeTreeResponse(data);
         treeData = normalized.items;
         dependencyEdges = normalized.dependencyEdges;
+        themeEdges = normalized.themeEdges;
         flatSkills = normalized.flatSkills;
       } else {
         treeData = data && Array.isArray(data.items) ? data.items : [];
         dependencyEdges =
           data && Array.isArray(data.dependencyEdges) ? data.dependencyEdges : [];
+        themeEdges = data && Array.isArray(data.themeEdges) ? data.themeEdges : [];
         flatSkills = [];
         (function flatten(nodes) {
           (nodes || []).forEach(function (node) {
@@ -389,8 +405,9 @@
       treeData.length && typeof window.EduTowerGraphData.buildGraphFromSkillTree === "function"
         ? window.EduTowerGraphData.buildGraphFromSkillTree(treeData, {
             title: "技能知识图谱",
-            subtitle: "来自后端 dependencyEdges 的真实先修关系",
+            subtitle: "实线=先修关系，虚线=同主题关联",
             dependencyEdges: dependencyEdges,
+            themeEdges: themeEdges,
           })
         : window.EduTowerGraphData.buildDemoGraph();
 
@@ -407,8 +424,10 @@
       " · 共 " +
       graph.nodes.length +
       " 个考点，" +
-      (dependencyEdges.length || graph.links.length) +
-      " 条先修边</p></div>" +
+      dependencyEdges.length +
+      " 条先修 · " +
+      themeEdges.length +
+      " 条主题</p></div>" +
       '<button type="button" class="btn btn--ghost btn--compact" data-action="relayout-graph">重置布局</button></header>' +
       '<div class="knowledge-graph-panel__body" id="knowledgeGraphMount"></div></section>';
 

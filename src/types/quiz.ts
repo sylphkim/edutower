@@ -23,6 +23,8 @@ export interface QuizItem {
   difficulty: QuizDifficulty;
   questions: QuizQuestionPublic[];
   createdAt: string;
+  /** 仅 create 响应携带：题目来源 */
+  source?: "ai" | "mock";
 }
 
 // 当前先用请求参数生成 mock quiz，以后可替换成 LLM 调用。

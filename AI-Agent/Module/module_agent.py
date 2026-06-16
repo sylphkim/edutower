@@ -4,6 +4,7 @@ import re
 from collections import defaultdict
 
 from .module_llm import call_llm
+from .module_memory_extractor import append_memory_block, extract_memory_updates
 
 # ── ReAct prompt template ──────────────────────────────────────────
 
@@ -93,7 +94,7 @@ class ChatAgent:
                     final_text = parsed["action_input"].strip()
                     hist.append({"role": "assistant", "content": final_text})
                     self._emit(session_id, "Final", final_text)
-                    return final_text
+                    return self._finalize_reply(message, final_text, context)
 
                 tool_name = parsed["action"]
                 tool_input = parsed["action_input"]
@@ -115,11 +116,11 @@ class ChatAgent:
                 hist.append({"role": "system", "content": err_msg})
                 fallback = self._fallback_answer(hist)
                 hist.append({"role": "assistant", "content": fallback})
-                return fallback
+                return self._finalize_reply(message, fallback, context)
 
         final = self._fallback_answer(hist)
         hist.append({"role": "assistant", "content": final})
-        return final
+        return self._finalize_reply(message, final, context)
 
     # ── ReAct parsing ─────────────────────────────────────────────
 
@@ -154,6 +155,16 @@ class ChatAgent:
 
     def _get_history(self, session_id: str) -> list[dict]:
         return self._history[session_id]
+
+    @staticmethod
+    def _finalize_reply(
+        user_message: str,
+        reply: str,
+        context: dict | None,
+    ) -> str:
+        """Append hidden memory_updates block for Express to parse and persist."""
+        updates = extract_memory_updates(user_message, reply, context)
+        return append_memory_block(reply, updates)
 
     @staticmethod
     def _enrich_system_prompt(base: str, context: dict) -> str:

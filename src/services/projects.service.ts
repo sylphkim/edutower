@@ -129,10 +129,16 @@ export const projectsService = {
   async getCurrent(): Promise<ProjectDetail> {
     const userId = await getDemoUserId();
     const projectId = await getDemoProjectId();
-    const project = await projectsRepository.findSetupByIdForUser(projectId, userId);
+    return this.getById(projectId, userId);
+  },
+
+  /** 读取指定项目的设置详情。 */
+  async getById(projectId: string, userId?: string): Promise<ProjectDetail> {
+    const resolvedUserId = userId ?? (await getDemoUserId());
+    const project = await projectsRepository.findSetupByIdForUser(projectId, resolvedUserId);
 
     if (!project) {
-      throw new AppError("INVALID_REQUEST", "Current project not found.", 404);
+      throw new AppError("INVALID_REQUEST", "Project not found.", 404);
     }
 
     return toDetail(project);
@@ -140,9 +146,18 @@ export const projectsService = {
 
   /** 写入当前（demo）项目的设置：目标/目标分/DDL/每日时长/开始日 + 目标确认。 */
   async updateCurrentSetup(input: ProjectSetupInput): Promise<ProjectDetail> {
-    const record = buildSetupRecord(input);
     const userId = await getDemoUserId();
     const projectId = await getDemoProjectId();
+    return this.updateSetup(projectId, userId, input);
+  },
+
+  /** 写入指定项目的设置。 */
+  async updateSetup(
+    projectId: string,
+    userId: string,
+    input: ProjectSetupInput
+  ): Promise<ProjectDetail> {
+    const record = buildSetupRecord(input);
     const project = await projectsRepository.updateSetup(projectId, userId, record);
 
     return toDetail(project);

@@ -4,6 +4,7 @@ import type { KnowledgeNodeWithPrerequisites } from "../repositories/knowledgeNo
 import type {
   CreateSkillInput,
   SkillDependencyEdge,
+  SkillThemeEdge,
   SkillItem,
   SkillLearningState,
   SkillTreeResponse,
@@ -396,6 +397,55 @@ function buildDependencyEdges(
     });
 }
 
+/**
+ * Obsidian 式主题连线：项目内按学习顺序用弱边串联，保证图谱连通可读。
+ * 不写入 DB，不影响先修解锁逻辑。
+ */
+function buildThemeEdges(
+  items: KnowledgeNodeWithPrerequisites[],
+  prerequisiteEdges: SkillDependencyEdge[]
+): SkillThemeEdge[] {
+  const activeItems = items.filter((item) => !item.archivedAt);
+  if (activeItems.length <= 1) {
+    return [];
+  }
+
+  const prereqPairKeys = new Set<string>();
+
+  for (const edge of prerequisiteEdges) {
+    prereqPairKeys.add(`${edge.sourceId}\t${edge.targetId}`);
+    prereqPairKeys.add(`${edge.targetId}\t${edge.sourceId}`);
+  }
+
+  const sorted = [...activeItems].sort(
+    (left, right) =>
+      left.order - right.order ||
+      left.createdAt.getTime() - right.createdAt.getTime() ||
+      left.id.localeCompare(right.id)
+  );
+
+  const themeEdges: SkillThemeEdge[] = [];
+  const seenTheme = new Set<string>();
+
+  for (let index = 0; index < sorted.length - 1; index += 1) {
+    const sourceId = sorted[index].id;
+    const targetId = sorted[index + 1].id;
+    const pairKey = `${sourceId}\t${targetId}`;
+
+    if (prereqPairKeys.has(pairKey) || seenTheme.has(pairKey)) {
+      continue;
+    }
+
+    seenTheme.add(pairKey);
+    themeEdges.push({ sourceId, targetId });
+  }
+
+  return themeEdges.sort((left, right) => {
+    const sourceCompare = left.sourceId.localeCompare(right.sourceId);
+    return sourceCompare !== 0 ? sourceCompare : left.targetId.localeCompare(right.targetId);
+  });
+}
+
 async function resolveProjectId(projectId: string | undefined): Promise<string> {
   const normalizedProjectId = projectId?.trim();
 
@@ -434,10 +484,12 @@ export const skillsService = {
     assertAcyclicDependencyGraph(prerequisiteMap);
     const riskMap = buildPrerequisiteRiskMap(items, visibleItemMap, prerequisiteMap);
     const treeItems = items.map((item) => toTreeSkill(item, prerequisiteMap, riskMap));
+    const dependencyEdges = buildDependencyEdges(items, visibleItemMap);
 
     return {
       items: buildTree(treeItems),
-      dependencyEdges: buildDependencyEdges(items, visibleItemMap)
+      dependencyEdges,
+      themeEdges: buildThemeEdges(items, dependencyEdges)
     };
   },
 

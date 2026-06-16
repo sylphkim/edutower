@@ -33,5 +33,11 @@ export const env = {
   llmTimeoutMs: parseInteger(process.env.LLM_TIMEOUT_MS, 30000),
   llmMaxOutputTokens: parseInteger(process.env.LLM_MAX_OUTPUT_TOKENS, 1000),
 
-  databaseUrl: process.env.DATABASE_URL?.trim() || ""
+  databaseUrl: process.env.DATABASE_URL?.trim() || "",
+
+  /** Offline OCR (Tesseract.js) — scanned PDF / images */
+  ocrEnabled: process.env.OCR_ENABLED?.trim().toLowerCase() !== "false",
+  ocrLangPath: process.env.OCR_LANG_PATH?.trim() || "",
+  ocrPdfMaxPages: parseInteger(process.env.OCR_PDF_MAX_PAGES, 30),
+  ocrPdfScale: parseFloat(process.env.OCR_PDF_SCALE?.trim() || "") || 2
 };

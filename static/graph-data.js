@@ -179,6 +179,40 @@
     return "薄弱重点";
   }
 
+  function synthesizeThemeEdges(points, dependencyEdges) {
+    if (!Array.isArray(points) || points.length <= 1) return [];
+
+    var prereqKeys = {};
+    (dependencyEdges || []).forEach(function (edge) {
+      if (!edge || !edge.sourceId || !edge.targetId) return;
+      prereqKeys[edge.sourceId + "\t" + edge.targetId] = true;
+      prereqKeys[edge.targetId + "\t" + edge.sourceId] = true;
+    });
+    points.forEach(function (point) {
+      (point.prerequisiteIds || []).forEach(function (sourceId) {
+        prereqKeys[sourceId + "\t" + point.id] = true;
+        prereqKeys[point.id + "\t" + sourceId] = true;
+      });
+    });
+
+    var sorted = points.slice().sort(function (left, right) {
+      var leftOrder = typeof left.order === "number" ? left.order : 0;
+      var rightOrder = typeof right.order === "number" ? right.order : 0;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return String(left.id).localeCompare(String(right.id));
+    });
+
+    var edges = [];
+    for (var index = 0; index < sorted.length - 1; index += 1) {
+      var sourceId = sorted[index].id;
+      var targetId = sorted[index + 1].id;
+      var pairKey = sourceId + "\t" + targetId;
+      if (prereqKeys[pairKey]) continue;
+      edges.push({ sourceId: sourceId, targetId: targetId });
+    }
+    return edges;
+  }
+
   function buildKnowledgeGraph(points, meta) {
     meta = meta || {};
     var sourcePoints = Array.isArray(points) ? points : ALL_KNOWLEDGE_POINTS;
@@ -202,6 +236,22 @@
         degreeMap[prerequisiteId] += 1;
         degreeMap[point.id] += 1;
       });
+    });
+
+    var themeEdges = Array.isArray(meta.themeEdges) ? meta.themeEdges : [];
+    themeEdges.forEach(function (edge) {
+      if (!edge || !edge.sourceId || !edge.targetId) return;
+      if (!degreeMap.hasOwnProperty(edge.sourceId) || !degreeMap.hasOwnProperty(edge.targetId)) {
+        return;
+      }
+      links.push({
+        id: edge.sourceId + "__theme__" + edge.targetId,
+        source: edge.sourceId,
+        target: edge.targetId,
+        type: "theme",
+      });
+      degreeMap[edge.sourceId] += 1;
+      degreeMap[edge.targetId] += 1;
     });
 
     var nodes = sourcePoints.map(function (point) {
@@ -256,6 +306,7 @@
     var points = [];
     var pointMap = {};
     var dependencyEdges = Array.isArray(meta.dependencyEdges) ? meta.dependencyEdges : [];
+    var themeEdges = Array.isArray(meta.themeEdges) ? meta.themeEdges : [];
     var skillsModel = window.EduTowerSkillsModel;
 
     function walk(node, rootId, rootLabel) {
@@ -280,6 +331,7 @@
         title: node.title || node.id,
         description: node.description || "",
         mastery: normalizeMastery(node.mastery),
+        order: typeof node.order === "number" ? node.order : 0,
         prerequisiteIds: prerequisiteIds,
         learningState: node.learningState,
         isUnlocked: node.isUnlocked !== false,
@@ -318,20 +370,43 @@
       return buildKnowledgeGraph(ALL_KNOWLEDGE_POINTS, meta);
     }
 
-    var edgeCount = dependencyEdges.length || points.reduce(function (sum, point) {
-      return sum + (point.prerequisiteIds ? point.prerequisiteIds.length : 0);
-    }, 0);
+    if (!themeEdges.length) {
+      themeEdges = synthesizeThemeEdges(points, dependencyEdges);
+    }
+
+    var edgeCount = meta.edgeCount;
+    if (edgeCount == null) {
+      var computed =
+        (Array.isArray(meta.dependencyEdges) ? meta.dependencyEdges.length : 0) +
+        themeEdges.length;
+      edgeCount =
+        computed ||
+        points.reduce(function (sum, point) {
+          return sum + (point.prerequisiteIds ? point.prerequisiteIds.length : 0);
+        }, 0);
+    }
+
+    var prereqCount = Array.isArray(meta.dependencyEdges) ? meta.dependencyEdges.length : 0;
+    var themeCount = themeEdges.length;
 
     return buildKnowledgeGraph(points, {
       title: meta.title || "技能知识图谱",
       subtitle:
         meta.subtitle ||
-        "来自技能树 DAG 先修关系 · 共 " + points.length + " 个节点",
+        "先修 " +
+          prereqCount +
+          " 条 · 主题 " +
+          themeCount +
+          " 条 · 共 " +
+          points.length +
+          " 个节点",
       subjectLabels: subjectLabels,
       subjects: Object.keys(subjectLabels).map(function (id) {
         return { id: id, label: subjectLabels[id] };
       }),
       edgeCount: edgeCount,
+      dependencyEdges: meta.dependencyEdges,
+      themeEdges: themeEdges,
     });
   }
 

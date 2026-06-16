@@ -323,7 +323,7 @@
           <header class="module-header">
             <div class="module-header__titles">
               <h1 class="module-header__title">学习计划</h1>
-              <p class="module-header__subtitle">默认展示今天要学的任务；平日课表与手动课表在顶部切换</p>
+              <p class="module-header__subtitle">先选学习方向，再定目标、启计划、做今日</p>
             </div>
           </header>
           <div class="module-body" id="planRoot"></div>
@@ -399,7 +399,7 @@
                 <h2>AI 智能复习</h2>
                 <ul>
                   <li>在对话区输入问题，Enter 发送，Shift+Enter 换行。</li>
-                  <li>右侧 Agent 面板展示复习进度与今日清单；可从学习计划导入清单项。</li>
+                  <li>右侧 Agent 面板展示执行状态、学习锦囊与今日任务清单。</li>
                   <li>历史对话保存在浏览器本地；配置 LLM 密钥后可获得完整 AI 回复。</li>
                 </ul>
               </section>
@@ -440,7 +440,7 @@
                   <li>可编排的学习计划与日任务</li>
                   <li>技能树与知识图谱可视化</li>
                   <li>练习生成、自动判分与错题收录</li>
-                  <li>AI 助教对话与复习进度面板</li>
+                  <li>AI 助教对话与侧栏状态面板</li>
                   <li>学习记忆与偏好记录</li>
                 </ul>
               </section>
@@ -777,9 +777,21 @@
             <div id="agentStatusDisplay"></div>
           </div>
 
-          <div class="panel-card panel-card--progress">
-            <h2 class="panel-title">今日复习进度</h2>
-            <div id="agentProgressDisplay"></div>
+          <div class="panel-card panel-card--tips">
+            <div class="panel-card__header panel-card__header--split">
+              <div>
+                <h2 class="panel-title">学习锦囊</h2>
+                <p class="panel-card__hint">优先巩固这些知识点</p>
+              </div>
+              <button
+                type="button"
+                class="btn btn--ghost btn--compact"
+                data-action="agent-refresh-tips"
+              >
+                换一条
+              </button>
+            </div>
+            <div id="agentTipsDisplay"></div>
           </div>
 
           <div class="panel-card panel-card--checklist">

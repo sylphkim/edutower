@@ -706,7 +706,14 @@
     banner = { type: "", message: "" };
     renderList();
     try {
-      await api.post("/api/quiz", payload);
+      var created = await api.post("/api/quiz", payload);
+      banner = {
+        type: "success",
+        message:
+          created && created.source === "mock"
+            ? "练习已生成（AI 不可用，使用内置题库）。"
+            : "练习已生成（AI 出题）。",
+      };
       await refresh();
     } catch (err) {
       banner = { type: "error", message: "生成失败：" + api.networkError(err) };

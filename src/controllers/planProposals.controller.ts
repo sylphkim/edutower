@@ -26,3 +26,20 @@ export async function applyPlanProposal(
     next(error);
   }
 }
+
+export async function designPlanFromSettings(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const force = Boolean((body as { force?: unknown }).force);
+    sendSuccess(
+      res,
+      await planProposalsService.designApplyAndConfirm(req.params.projectId, { force })
+    );
+  } catch (error) {
+    next(error);
+  }
+}

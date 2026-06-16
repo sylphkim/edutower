@@ -38,6 +38,19 @@ export interface AiEnginePlanProposalParams {
   dependencyEdges: Array<{ sourceId: string; targetId: string }>;
 }
 
+export interface AiEngineDesignPlanParams {
+  goal: string;
+  subject?: string;
+  deadline?: string | null;
+  dailyMinutes?: number | null;
+  targetScore?: string | null;
+  existingSkills?: Array<{
+    id: string;
+    title: string;
+    description?: string | null;
+  }>;
+}
+
 type RecordLike = Record<string, unknown>;
 
 export class AiEngineService {
@@ -240,6 +253,66 @@ export class AiEngineService {
   }
 
   /**
+   * 根据目标、截止日期、每日时长设计完整学习计划（技能树 + 阶段）。
+   */
+  async designLearningPlan(params: AiEngineDesignPlanParams): Promise<unknown | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), env.aiEngineTimeoutMs);
+
+    try {
+      const response = await fetch(this.designLearningPlanUrl(), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          goal: params.goal,
+          subject: params.subject ?? "",
+          deadline: params.deadline ?? null,
+          daily_minutes: params.dailyMinutes ?? null,
+          target_score: params.targetScore ?? null,
+          existing_skills: (params.existingSkills ?? []).map((skill) => ({
+            id: skill.id,
+            title: skill.title,
+            description: skill.description ?? null
+          }))
+        }),
+        signal: controller.signal
+      });
+
+      const data = await this.readJson(response);
+
+      if (
+        response.ok &&
+        isRecordLike(data) &&
+        isRecordLike((data as { proposal?: unknown }).proposal)
+      ) {
+        return (data as { proposal: unknown }).proposal;
+      }
+
+      logger.warn("AI engine design-learning-plan returned non-ok response.", {
+        status: response.status,
+        baseURL: env.aiEngineBaseUrl
+      });
+    } catch (error) {
+      const reason =
+        error instanceof Error && error.name === "AbortError"
+          ? "timeout"
+          : error instanceof Error
+            ? error.message
+            : String(error);
+
+      logger.warn(`AI engine design-learning-plan unreachable (${reason}).`, {
+        baseURL: env.aiEngineBaseUrl
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    return null;
+  }
+
+  /**
    * 生成整体计划提案：转发给 FastAPI /generate-plan-proposal。
    */
   async generatePlanProposal(params: AiEnginePlanProposalParams): Promise<unknown | null> {
@@ -324,6 +397,10 @@ export class AiEngineService {
 
   private generatePlanProposalUrl(): string {
     return new URL("/generate-plan-proposal", env.aiEngineBaseUrl).toString();
+  }
+
+  private designLearningPlanUrl(): string {
+    return new URL("/design-learning-plan", env.aiEngineBaseUrl).toString();
   }
 
   private async readJson(response: Response): Promise<unknown> {
