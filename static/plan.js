@@ -27,6 +27,7 @@
   var DAILY_CONV_STORAGE_KEY = "edutower_daily_conversation_map";
   var sheetHistory = [];
   var showProjectSettings = false;
+  var projectSetup = null;
   var editingDraftVersionId = null;
   var draftPhaseForms = [];
   var MIN_DAILY_MINUTES = 15;
@@ -535,6 +536,34 @@
     }
   }
 
+  async function loadProjectSetup() {
+    try {
+      projectSetup = await api.get("/api/projects/current");
+    } catch (_err) {
+      projectSetup = null;
+    }
+  }
+
+  function getProjectSettingsView() {
+    var plan = getActivePlan();
+    if (!plan) return null;
+    return {
+      goal: (projectSetup && projectSetup.goal) || plan.goal || "",
+      deadline:
+        (projectSetup && projectSetup.deadline) || plan.deadline || null,
+      dailyMinutes:
+        projectSetup && projectSetup.dailyMinutes != null
+          ? projectSetup.dailyMinutes
+          : plan.dailyMinutes != null
+            ? plan.dailyMinutes
+            : 60,
+      targetScore:
+        (projectSetup && projectSetup.targetScore) || plan.targetScore || "",
+      goalConfirmedAt:
+        (projectSetup && projectSetup.goalConfirmedAt) || plan.goalConfirmedAt || null,
+    };
+  }
+
   async function loadSheetHistory() {
     var projectId = getProjectId();
     if (!projectId) {
@@ -560,6 +589,7 @@
 
     try {
       await loadPlanPhaseMeta();
+      await loadProjectSetup();
       await loadSheetHistory();
       render();
       await syncDailyRecord();
@@ -991,17 +1021,34 @@
   function renderProjectSettings(plan) {
     if (!plan) return "";
 
+    var settings = getProjectSettingsView() || {
+      goal: plan.goal || "",
+      deadline: plan.deadline || null,
+      dailyMinutes: plan.dailyMinutes != null ? plan.dailyMinutes : 60,
+      targetScore: plan.targetScore || "",
+      goalConfirmedAt: plan.goalConfirmedAt || null,
+    };
+
     var settingsBody = showProjectSettings
       ? '<div class="plan-settings__body">' +
         '<div class="form-row"><label class="form-label" for="projectSettingsGoal">学习目标</label>' +
         '<textarea id="projectSettingsGoal" class="form-textarea" rows="3" placeholder="例如：期末数学达到 90 分">' +
-        api.escapeHtml(plan.goal || "") +
+        api.escapeHtml(settings.goal || "") +
         "</textarea></div>" +
         '<div class="plan-settings__row">' +
         '<div class="form-row"><label class="form-label" for="projectSettingsDeadline">目标日期</label>' +
         '<input id="projectSettingsDeadline" class="form-input" type="date" value="' +
-        api.escapeAttr(formatDeadlineInputValue(plan.deadline)) +
+        api.escapeAttr(formatDeadlineInputValue(settings.deadline)) +
         '" /></div>' +
+        '<div class="form-row"><label class="form-label" for="projectSettingsTargetScore">目标分档</label>' +
+        '<select id="projectSettingsTargetScore" class="form-input">' +
+        '<option value="">未设置</option>' +
+        '<option value="及格"' +
+        (settings.targetScore === "及格" ? " selected" : "") +
+        ">及格</option>" +
+        '<option value="冲高分"' +
+        (settings.targetScore === "冲高分" ? " selected" : "") +
+        ">冲高分</option></select></div></div>' +
         '<div class="form-row"><label class="form-label" for="projectSettingsDailyMinutes">每日可用时长（分钟）</label>' +
         '<input id="projectSettingsDailyMinutes" class="form-input" type="number" min="' +
         MIN_DAILY_MINUTES +
@@ -1009,11 +1056,11 @@
         MAX_DAILY_MINUTES +
         '" step="5" value="' +
         api.escapeAttr(
-          plan.dailyMinutes != null && plan.dailyMinutes !== ""
-            ? String(plan.dailyMinutes)
+          settings.dailyMinutes != null && settings.dailyMinutes !== ""
+            ? String(settings.dailyMinutes)
             : "60"
         ) +
-        '" /></div></div>' +
+        '" /></div>' +
         '<p class="plan-settings__hint">每日时长会影响「今天要学什么」的任务编排上限（' +
         MIN_DAILY_MINUTES +
         "–" +
@@ -1022,15 +1069,17 @@
         '<div class="plan-settings__actions">' +
         '<button type="button" class="btn btn--primary btn--compact" data-action="submit-project-settings"' +
         (isBusy ? " disabled" : "") +
-        ">保存设置</button></div></div>"
+        ">保存并确认目标</button></div></div>"
       : '<p class="plan-settings__summary">' +
-        (plan.goal ? api.escapeHtml(plan.goal) : "尚未填写学习目标") +
+        (settings.goal ? api.escapeHtml(settings.goal) : "尚未填写学习目标") +
+        (settings.targetScore ? " · " + api.escapeHtml(settings.targetScore) : "") +
         " · 每日 " +
-        (plan.dailyMinutes != null ? plan.dailyMinutes : 60) +
+        (settings.dailyMinutes != null ? settings.dailyMinutes : 60) +
         " 分钟" +
-        (plan.deadline
-          ? " · 目标 " + api.escapeHtml(formatDeadlineInputValue(plan.deadline))
+        (settings.deadline
+          ? " · 目标 " + api.escapeHtml(formatDeadlineInputValue(settings.deadline))
           : "") +
+        (settings.goalConfirmedAt ? " · 目标已确认" : "") +
         "</p>";
 
     return (
@@ -1155,9 +1204,15 @@
       (summary && summary.aiDraft
         ? '<section class="plan-today-summary">' +
           '<h3 class="plan-day__title">今日总结</h3>' +
-          '<p class="plan-today-summary__text">' +
-          api.escapeHtml(summary.confirmedContent || summary.aiDraft) +
-          "</p></section>"
+          (summary.status === "awaiting_confirmation"
+            ? '<p class="plan-settings__hint">AI 已生成总结，可在提交建议前微调正文。</p>' +
+              '<textarea id="dailySummaryEdit" class="form-textarea" rows="6">' +
+              api.escapeHtml(summary.confirmedContent || summary.aiDraft) +
+              "</textarea>"
+            : '<p class="plan-today-summary__text">' +
+              api.escapeHtml(summary.confirmedContent || summary.aiDraft) +
+              "</p>") +
+          "</section>"
         : "") +
       renderSummaryDecisions(summary) +
       renderSheetHistory() +
@@ -1174,8 +1229,10 @@
     var goalInput = document.getElementById("projectSettingsGoal");
     var deadlineInput = document.getElementById("projectSettingsDeadline");
     var minutesInput = document.getElementById("projectSettingsDailyMinutes");
+    var targetScoreInput = document.getElementById("projectSettingsTargetScore");
     var goal = goalInput ? goalInput.value.trim() : "";
     var deadline = deadlineInput ? deadlineInput.value.trim() : "";
+    var targetScore = targetScoreInput ? targetScoreInput.value.trim() : "";
     var dailyMinutesRaw = minutesInput ? minutesInput.value.trim() : "";
     var dailyMinutes = dailyMinutesRaw ? parseInt(dailyMinutesRaw, 10) : null;
 
@@ -1197,10 +1254,12 @@
     clearBanner();
 
     try {
-      await api.patch("/api/plan/" + encodeURIComponent(plan.id), {
+      projectSetup = await api.patch("/api/projects/current", {
         goal: goal,
         deadline: deadline || null,
         dailyMinutes: dailyMinutes,
+        targetScore: targetScore || null,
+        goalConfirmed: true,
       });
       var data = await api.get("/api/plan");
       plans = data && Array.isArray(data.items) ? data.items : [];
@@ -1336,7 +1395,7 @@
         "success",
         needsConfirm
           ? "今日学习已结束，请确认下方 AI 建议后提交。"
-          : "今日学习已结束，总结已生成。"
+          : "今日学习已结束，AI 总结已生成。"
       );
       render();
     } catch (err) {
@@ -1460,6 +1519,12 @@
     isBusy = true;
     clearBanner();
     try {
+      var summaryEdit = document.getElementById("dailySummaryEdit");
+      var confirmedContent =
+        summaryEdit && summaryEdit.value.trim()
+          ? summaryEdit.value.trim()
+          : summary.confirmedContent || summary.aiDraft || undefined;
+
       var result = await api.post(
         "/api/daily/" +
           encodeURIComponent(projectId) +
@@ -1468,7 +1533,7 @@
           "/decisions",
         {
           decisions: decisions,
-          confirmedContent: summary.confirmedContent || summary.aiDraft || undefined,
+          confirmedContent: confirmedContent,
         }
       );
       suggestionDecisions = {};

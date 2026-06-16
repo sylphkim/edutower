@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from Module.module_agent import ChatAgent
 from Module.module_quiz_generator import generate_quiz
 from Module.module_plan_generator import generate_plan_proposal
+from Module.module_summary_generator import generate_summary
 
 
 app = FastAPI()
@@ -51,6 +52,17 @@ class GeneratePlanProposalRequest(BaseModel):
     goal: str | None = None
     skills: list[dict]
     dependency_edges: list[dict] | None = None
+
+class GenerateSummaryProject(BaseModel):
+    title: str
+    subject: str
+    goal: str
+
+class GenerateSummaryRequest(BaseModel):
+    project: GenerateSummaryProject
+    date: str
+    study_data: str
+    conversation_excerpts: str | None = None
 
 # --- 4. 路由逻辑：处理真正的聊天请求 ---
 # 定义一个 POST 类型的接口，路径是 /chat
@@ -96,6 +108,32 @@ def generate_plan_proposal_endpoint(request: GeneratePlanProposalRequest):
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return {"proposal": proposal}
+
+@app.post("/generate-summary")
+def generate_summary_endpoint(request: GenerateSummaryRequest):
+    study_data = (request.study_data or "").strip()
+    excerpts = (request.conversation_excerpts or "").strip()
+    if not study_data and not excerpts:
+        raise HTTPException(
+            status_code=400,
+            detail="study_data or conversation_excerpts is required",
+        )
+
+    try:
+        summary = generate_summary(
+            project={
+                "title": request.project.title,
+                "subject": request.project.subject,
+                "goal": request.project.goal,
+            },
+            date=request.date,
+            study_data=study_data,
+            conversation_excerpts=excerpts or None,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return {"summary": summary}
 
 # 将本地的 "static" 目录映射到链接的 "/static" 路径下
 app.mount("/static", StaticFiles(directory="../static"), name="static") 

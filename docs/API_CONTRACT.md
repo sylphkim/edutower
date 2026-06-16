@@ -40,13 +40,13 @@
 
 ## FastAPI 契约(`AI-Agent/`)
 
-Express 请求走 snake_case。FastAPI 不可用时 Express 各有兜底(出题退 mock、总结退模板、排计划退启发式)。`/generate-summary` 尚未实现。
+Express 请求走 snake_case。FastAPI 不可用时 Express 各有兜底(出题退 mock、总结退模板、排计划退启发式)。
 
 | 端点 | 状态 | 请求 | 响应 |
 |---|---|---|---|
-| `POST /chat` | ✅ 已实现 | `{ session_id, message, context? }` | `{ reply }` |
+| `POST /chat` | ✅ 已实现 | `{ session_id, message, context? }` | `{ reply }`（reply 末尾可含隐藏块 `---memory_updates\n[...]\n---`，Express 解析入库后剥离） |
 | `POST /generate-quiz` | ✅ 已实现 | `{ knowledge_title, knowledge_description, difficulty, count }` | `{ questions: [{ prompt, options[], answer, explanation }] }` |
 | `POST /generate-plan-proposal` | ✅ 已实现 | `{ goal, skills:[{id,title,description,parentId}], dependency_edges:[{sourceId,targetId}] }` | `{ proposal }`(proposal 须过 normalize:nodes/prerequisiteEdges/phases) |
-| `POST /generate-summary` | ❌ 待补 | `{ project:{title,subject,goal}, date, study_data, conversation_excerpts }` | `{ summary }` |
+| `POST /generate-summary` | ✅ 已实现 | `{ project:{title,subject,goal}, date, study_data, conversation_excerpts }` | `{ summary }` |
 
 `/chat` 的 `context`(Express 组装)形状:`{ subject:{name,learningGoal}, materials:[{title,summary}], knowledgePoints:[{title,mastery}], weakPoints:[{title,reason,suggestedAction}], sessionHistory, memories }`。
