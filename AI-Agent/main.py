@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from Module.module_agent import ChatAgent
 from Module.module_quiz_generator import generate_quiz
 from Module.module_plan_generator import generate_plan_proposal
+from Module.module_plan_designer import design_learning_plan
 from Module.module_summary_generator import generate_summary
 
 
@@ -52,6 +53,14 @@ class GeneratePlanProposalRequest(BaseModel):
     goal: str | None = None
     skills: list[dict]
     dependency_edges: list[dict] | None = None
+
+class DesignLearningPlanRequest(BaseModel):
+    goal: str
+    subject: str | None = None
+    deadline: str | None = None
+    daily_minutes: int | None = None
+    target_score: str | None = None
+    existing_skills: list[dict] | None = None
 
 class GenerateSummaryProject(BaseModel):
     title: str
@@ -103,6 +112,26 @@ def generate_plan_proposal_endpoint(request: GeneratePlanProposalRequest):
             goal=(request.goal or "").strip(),
             skills=request.skills,
             dependency_edges=request.dependency_edges or [],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return {"proposal": proposal}
+
+@app.post("/design-learning-plan")
+def design_learning_plan_endpoint(request: DesignLearningPlanRequest):
+    goal = (request.goal or "").strip()
+    if not goal:
+        raise HTTPException(status_code=400, detail="goal is required")
+
+    try:
+        proposal = design_learning_plan(
+            goal=goal,
+            subject=(request.subject or "").strip(),
+            deadline=request.deadline,
+            daily_minutes=request.daily_minutes,
+            target_score=request.target_score,
+            existing_skills=request.existing_skills or [],
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

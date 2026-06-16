@@ -78,9 +78,11 @@
     var items = data && Array.isArray(data.items) ? data.items : [];
     var dependencyEdges =
       data && Array.isArray(data.dependencyEdges) ? data.dependencyEdges : [];
+    var themeEdges = data && Array.isArray(data.themeEdges) ? data.themeEdges : [];
     return {
       items: items,
       dependencyEdges: dependencyEdges,
+      themeEdges: themeEdges,
       flatSkills: flattenTree(items, []),
     };
   }

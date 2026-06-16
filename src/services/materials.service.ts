@@ -434,7 +434,8 @@ export const materialsService = {
             materialId: item.id,
             originalFileName: input.originalFileName,
             charCount: extraction.charCount,
-            truncated: extraction.truncated
+            truncated: extraction.truncated,
+            method: extraction.method
           });
         }
       } catch (extractionError) {
@@ -569,7 +570,9 @@ export const materialsService = {
 
   /** Re-extract text from the original uploaded file. Useful when a previous
    *  extraction failed or the file was replaced. */
-  async reparseExtractedText(id: string): Promise<MaterialItem> {
+  async reparseExtractedText(
+    id: string
+  ): Promise<MaterialItem & { extractionMethod?: string }> {
     const userId = await getDemoUserId();
     const item = ensureMaterialExists(
       await materialsRepository.findByIdForUser(id, userId)
@@ -593,6 +596,15 @@ export const materialsService = {
       extractedText: extraction.text || null
     });
 
-    return toApiMaterial(updated);
+    logger.info("Material text re-parsed.", {
+      materialId: id,
+      charCount: extraction.charCount,
+      method: extraction.method
+    });
+
+    return {
+      ...toApiMaterial(updated),
+      extractionMethod: extraction.method
+    };
   }
 };

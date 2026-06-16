@@ -15,12 +15,13 @@ import {
   revisePlanVersion,
   updatePlanVersion
 } from "../controllers/planVersions.controller";
-import { applyPlanProposal, generatePlanProposal } from "../controllers/planProposals.controller";
+import { applyPlanProposal, designPlanFromSettings, generatePlanProposal } from "../controllers/planProposals.controller";
 
 const router = Router();
 
 router.post("/:projectId/proposals/generate", generatePlanProposal);
 router.post("/:projectId/proposals/apply", applyPlanProposal);
+router.post("/:projectId/design-from-settings", designPlanFromSettings);
 
 router.get("/:projectId/versions", listPlanVersions);
 router.get("/:projectId/versions/current", getCurrentPlanVersion);

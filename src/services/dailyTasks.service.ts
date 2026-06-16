@@ -4,6 +4,7 @@ import {
   type DailyTaskSheetWithRelations,
   type OwnedProjectSummary
 } from "../repositories/dailyTaskSheets.repository";
+import { planVersionsRepository } from "../repositories/planVersions.repository";
 import type {
   DailySheetHistoryEntry,
   DailyStudyRecord,
@@ -293,6 +294,23 @@ export const dailyTasksService = {
 
     if (ownsGeneration) {
       sheet = await runInitialGeneration(project, sheet);
+    }
+
+    const currentPlan = await planVersionsRepository.findCurrentForProject(project.id);
+    if (
+      sheet &&
+      sheet.status === "active" &&
+      currentPlan &&
+      sheet.planVersionId !== currentPlan.id
+    ) {
+      try {
+        sheet = await generateInto(project, sheet, "regenerate");
+      } catch (error) {
+        logger.warn(
+          `Failed to refresh daily tasks after plan version change for project ${project.id}.`,
+          error
+        );
+      }
     }
 
     return {

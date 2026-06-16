@@ -279,6 +279,28 @@ export const knowledgeNodesRepository = {
     });
   },
 
+  /** Soft-archive active nodes not included in the latest designed plan. */
+  async archiveExcept(projectId: string, keepIds: string[]): Promise<number> {
+    if (keepIds.length === 0) {
+      return 0;
+    }
+
+    const result = await prisma.knowledgeNode.updateMany({
+      where: {
+        projectId,
+        archivedAt: null,
+        id: {
+          notIn: keepIds
+        }
+      },
+      data: {
+        archivedAt: new Date()
+      }
+    });
+
+    return result.count;
+  },
+
   async create(input: CreateKnowledgeNodeRecordInput): Promise<KnowledgeNodeWithPrerequisites> {
     const item = await prisma.$transaction(async (tx) => {
       const createdItem = await tx.knowledgeNode.create({
