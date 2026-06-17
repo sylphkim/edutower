@@ -38,4 +38,6 @@ export interface PlanVersionItem {
   supersededAt?: string;
   createdAt: string;
   updatedAt: string;
+  /** Present on revise responses when an existing draft was reopened. */
+  reusedExistingDraft?: boolean;
 }

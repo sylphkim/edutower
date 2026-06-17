@@ -60,8 +60,12 @@ export type ConfirmPlanVersionResult =
   | { status: "not_found" | "superseded" | "incomplete" | "invalid_knowledge_nodes" };
 
 export type RevisePlanVersionResult =
-  | { status: "success"; item: PlanVersionWithPhases }
-  | { status: "not_found" | "not_current" | "draft_exists" | "invalid_knowledge_nodes" };
+  | {
+      status: "success";
+      item: PlanVersionWithPhases;
+      reusedExistingDraft?: boolean;
+    }
+  | { status: "not_found" | "not_current" | "invalid_knowledge_nodes" };
 
 function toPhaseCreateData(phases: PlanPhaseInput[]) {
   return phases.map((phase, phaseIndex) => ({
@@ -416,7 +420,11 @@ export const planVersionsRepository = {
       });
 
       if (existingDraft) {
-        return { status: "draft_exists" as const };
+        return {
+          status: "success" as const,
+          id: existingDraft.id,
+          reusedExistingDraft: true as const
+        };
       }
 
       const latestVersion = await tx.studyPlanVersion.aggregate({
@@ -465,7 +473,8 @@ export const planVersionsRepository = {
 
     return {
       status: "success",
-      item: await this.findByIdForProject(result.id, projectId) as PlanVersionWithPhases
+      item: await this.findByIdForProject(result.id, projectId) as PlanVersionWithPhases,
+      reusedExistingDraft: "reusedExistingDraft" in result ? result.reusedExistingDraft : false
     };
   }
 };

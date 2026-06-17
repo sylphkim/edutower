@@ -363,7 +363,10 @@ export const planVersionsService = {
 
       switch (result.status) {
         case "success":
-          return toPlanVersionItem(result.item);
+          return {
+            ...toPlanVersionItem(result.item),
+            reusedExistingDraft: result.reusedExistingDraft
+          };
         case "not_found":
           throw new AppError("INVALID_REQUEST", "Plan version not found.", 404);
         case "not_current":
@@ -372,8 +375,6 @@ export const planVersionsService = {
             "Only the current confirmed plan version can be revised.",
             409
           );
-        case "draft_exists":
-          throw new AppError("INVALID_REQUEST", "A draft plan version already exists.", 409);
         case "invalid_knowledge_nodes":
           throw new AppError(
             "INVALID_REQUEST",
