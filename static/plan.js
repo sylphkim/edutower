@@ -828,6 +828,7 @@
     }
 
     try {
+      await loadMaterials();
       await loadPlanPhaseMeta();
       await loadProjectSetup();
       await loadSheetHistory();
@@ -1835,8 +1836,18 @@
   }
 
   function skillTitleById(id) {
+    if (!id) return "";
     var model = window.EduTowerSkillsModel;
-    return model ? model.findSkillTitle(skills, id) : id;
+    var title = model ? model.findSkillTitle(skills, id) : "";
+    if (title && title !== id) {
+      return title;
+    }
+    for (var i = 0; i < skills.length; i += 1) {
+      if (skills[i].id === id && skills[i].title) {
+        return skills[i].title;
+      }
+    }
+    return "未命名技能";
   }
 
   function renderPhases() {
@@ -2415,11 +2426,19 @@
           "/revise",
         {}
       );
+      await loadHubData(false);
       if (revised && revised.id) {
         selectedVersionId = revised.id;
+        beginEditDraftVersion(revised.id);
+        setBanner(
+          "success",
+          revised.reusedExistingDraft
+            ? "已打开现有阶段草案，修改后请保存并确认。"
+            : "已创建阶段修订草案，修改后请保存并确认。"
+        );
+        return;
       }
       viewMode = "hub";
-      await loadHubData(false);
       setBanner("success", "已创建修订草案，请确认后生效。");
       render();
     } catch (err) {
